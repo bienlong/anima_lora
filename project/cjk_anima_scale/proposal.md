@@ -174,6 +174,15 @@ scene vs flat (09-16), `b0709` stays, and the gain is all in the mode.
 with adjacent piece rows (って ください) gets it too. Nothing has read that.
 - **Read first (training-free):** the piece ruler and the sent ruler with
   0.5 · `v_line` on the seed rows, against the floor.
+- **First look, in ComfyUI (2026-09-26, the user's renders, not scored).**
+  The pack `anima_cjk_vocab_pack_300fsp_line05` (300f_sp rows +
+  0.5 · `v_line` as a line block) on a scene prompt ending
+  `She is saying "へんたい"`: the prompt tokenizes as へ ん (seed singles)
+  + たい (a 300f piece), all three on the line block. It rendered
+  **へんてだ♥**: the singles are right, and the piece comes out as two
+  wrong glyphs plus a trailing ♥. Two further tries (prompts not recorded
+  here) rendered へい and んぃいい: dropped glyphs and in-word doubling
+  (§ 2.1).
 - **If pieces lose:** gate by kind (single-kind rows only) until a piece
   mode exists. `u_P` (Stage A) is the post-hoc candidate for one, and a
   `v_line` trained on pieces is the learned one.
