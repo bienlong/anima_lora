@@ -255,6 +255,14 @@ the cold-kanji row × 1.5 until C3 sets it. The kanji run can split by
 frequency (the seed's 783 first, then the ≈ 560) and merge. The top-1 000
 cut (161 new, 99.06 %) is the smaller option.
 
+**`retrain_kana` launched 2026-09-28** (`configs/runs/retrain_kana.toml`,
+data job `20260928-075359-9f6158`, train job `20260928-075839-76c2d9`):
+174 singles (the seed's 80 hira + 82 kata + 8 punctuation, + ヴヶゔヵ),
+cold, 135 / row = 23 490 steps, 17 400 items (5 800 per group). Windows
+178 846, 163 glyphs (ヂ ヵ have none: lone only), per glyph median 1 612.
+`read` (held out of the windows): C2's eight words, なにしてる, テレビ
+カメラ パソコン アイドル.
+
 **Order and context.** A spelled window mixes kana and kanji. A glyph
 outside the training run rides frozen at the seed, which is the
 context-immune value this plan replaces. So kana trains first, and the
@@ -269,19 +277,22 @@ override (§ 6).
    and from the line's eval path (the `native` stage encodes through the
    pipeline). Default off until the new seed is baked. **Done 2026-09-28**
    (C0 read above; `tests/test_ext_vocab_glyph_route.py`).
-1. `recipes.py`: `scene_spelled` + `scene_single_small` promoted from
-   `experiments/stage_b` (byte-faithful), and the windowed word pool
-   (glyph-first draw, no repeats, trigram hold-out of the read words,
-   spelling check).
-2. `builder.TABLE`: the single kind's three groups (§ 3).
-3. `budget.py`: the × 1.5 for the in-word mix, as a row with provenance
-   (P1b).
-4. `train.py`: `cold` becomes the rule for this run (it exists as an
-   experiment flag today), and the seed/context file becomes a per-run
-   override so `retrain_kanji` can sit on `retrain_kana`'s rows. The
-   override exists (`train(…, context=)`, 2026-09-28, used by C3); `cold`
-   and `budget.run_factor` still do not know each other (C3 patches the
-   factor: seed and new kanji both train cold, one budget).
+1. `recipes.py`: `scene_window` (C3's routed windows, not the spaced
+   `scene_spelled`) + `scene_single_small` (Stage B, byte-faithful), and the
+   windowed word pool (`window_pool`: letters only, 2–6 glyphs, no repeats,
+   trigram hold-out of the run's `read`; `routed_windows`: the encoding
+   check). **Done 2026-09-28.**
+2. `builder.TABLE`: the single kind's three groups (§ 3): lone `b0709` at
+   0.5, `b0507` windows 0.7 + count 0.3, `b0305` windows. A build with
+   windows stamps `glyph_route` in `build.json` and writes `windows.json`.
+   **Done 2026-09-28.**
+3. `budget.py`: singles start cold (`COLD_KINDS`); the cold single row
+   splits by script (kana 90 from P1b, kanji 150); `mix_factor` = Σ of
+   the kind's shares (× 1.5). **Done 2026-09-28.**
+4. `train.py`: `cold=None` = the rule; a `glyph_route` data dir trains
+   routed (env set in-process); the steps take `mix_factor`. The context
+   override is `train(…, context=)` (C3); `scale.py` does not expose it
+   yet (`retrain_kanji` needs it). **Done 2026-09-28** except that last.
 5. New seed = `retrain_kana` + `retrain_kanji` (`scale.py <out> merge`),
    → `rows_retrain_merged`. The old seed's piece rows ride along unused.
    Then `paths.SEED_ROWS` moves, and the floor is re-rendered once on the

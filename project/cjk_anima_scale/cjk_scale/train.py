@@ -128,9 +128,11 @@ def plan(rc: RunConfig, data: Path, recs: list, vocabs: list, touched: set):
     ``train_record.json`` carries. CPU only — the Qwen tokenizer and the
     pack's mapping; ``touched`` = the ext rows the training captions carry
     (``ext_ids_of`` over the TE cache)."""
+    from data.inventory import pieces as qpieces
     from data.inventory import qwen_pieces
 
-    from .budget import run_factor
+    from .budget import mix_factor, run_factor, starts_cold
+    from .windows import vocab_kind
 
     tokq = qwen_pieces()
     idx = vocab_idx(vocabs, tokq)
@@ -139,7 +141,16 @@ def plan(rc: RunConfig, data: Path, recs: list, vocabs: list, touched: set):
     frozen = touched - idx
     touched = touched & idx
     budget = run_factor(vocabs, tokq)  # budget.py: × the base by kind / glyphs / warm
-    steps_per_row = int(round(STEPS_PER_VOCAB * budget))
+    ps = {v: qpieces(*tokq, v) for v in vocabs}
+    kinds = {
+        vocab_kind(v, len(ps[v]))
+        for v in vocabs
+        if any(e is not None for _p, e in ps[v])
+    }
+    mix = mix_factor(kinds)  # the steps keep pace with the kind's items
+    cold = {starts_cold(k) for k in kinds}
+    assert len(cold) <= 1, f"kinds {kinds}: some start cold, some warm — split the run"
+    steps_per_row = int(round(STEPS_PER_VOCAB * budget * mix))
     steps = steps_per_row * len(idx)
     warmup = int(round(WARMUP_RATIO * steps))
     bands = sorted({tuple(r["band"]) for r in recs})
@@ -152,6 +163,7 @@ def plan(rc: RunConfig, data: Path, recs: list, vocabs: list, touched: set):
         "train_steps": steps,
         "steps_per_row": steps_per_row,
         "budget_factor": budget,
+        "mix_factor": mix,
         "lr_warmup": warmup,
         "lr_warmup_ratio": WARMUP_RATIO,
         "lr_rows": LR,
@@ -171,6 +183,7 @@ def plan(rc: RunConfig, data: Path, recs: list, vocabs: list, touched: set):
         "arm": "rows",
     }
     return SimpleNamespace(
+        cold=cold == {True},
         idx=idx,
         touched=touched,
         frozen=frozen,
@@ -190,7 +203,7 @@ def train(
     max_steps: int | None = None,
     line_mode: bool | str = False,
     rows_frozen: bool = False,
-    cold: bool = False,
+    cold: bool | None = None,
     row_cap: float | str | None = None,
     steps_per_row: int | None = None,
     context: Path | None = None,
@@ -202,13 +215,17 @@ def train(
     ``experiments/f1_line``), ``"all"`` an ungated one, and ``rows_frozen``
     holds the rows at the seed so ``v_line`` alone trains
     (``experiments/f2a_line``); ``cold`` starts the vocabs' rows at the pack
-    rows (Δ 0) instead of the seed, and ``row_cap`` clamps every trained
+    rows (Δ 0) instead of the seed — ``None`` = the rule (``budget.COLD_KINDS``:
+    singles start cold) — and ``row_cap`` clamps every trained
     row's effective norm after each step — ``"t5"`` = the T5 table's mean
     row norm (``experiments/p1_cap``, hypothesis.md § 4 P1);
     ``steps_per_row`` replaces the budget's (a mix that adds items keeps
     the old items' exposure); ``context`` replaces the seed rows as the
     warm-from / frozen-context / merge file (plan_retrain § 5: the kanji run
-    sits on the kana run's merged rows). ``scale.py`` passes none of them."""
+    sits on the kana run's merged rows). ``scale.py`` passes none of them.
+    A data dir built with windows (``build.json`` ``glyph_route``) is
+    trained routed: ``ANIMA_VOCAB_GLYPH_ROUTE=1`` is set in-process before
+    the TE cache (whose key carries it)."""
     from common.models import checkpoints, dit_forward, gen_args
     from library.anima.vocab_pack import attached_pack_rows, strategy_pack
     from library.inference.generation import get_generation_settings
@@ -223,6 +240,12 @@ def train(
     out = out or run_dir(rc.name)
     out.mkdir(parents=True, exist_ok=True)
     recs, ev, vocabs = load_items(data)
+    bj = data / "build.json"
+    route = bj.exists() and json.loads(bj.read_text(encoding="utf-8")).get(
+        "glyph_route", False
+    )
+    if route:
+        os.environ["ANIMA_VOCAB_GLYPH_ROUTE"] = "1"
     args = gen_args(512, GEN_STEPS, GEN_CFG, out)
     device = get_generation_settings(args).device
 
@@ -232,6 +255,9 @@ def train(
     p = plan(rc, data, recs, vocabs, touched)
     ctx = Path(context) if context else SEED_ROWS
     p.record["context"] = str(ctx)
+    if route:
+        p.record["glyph_route"] = True
+    cold = p.cold if cold is None else cold
     if steps_per_row:
         p.steps_per_row = int(steps_per_row)
         p.steps = p.steps_per_row * len(p.idx)

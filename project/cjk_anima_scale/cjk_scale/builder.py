@@ -69,12 +69,14 @@ class Group:
 
 TABLE = (
     # single vocabs: stage0709 — glyph identity at ≥ 48 px, the bubble fit and
-    # the 1×1–3×3 grids (band_b1 B.1, step1_0921; band law § 3)
+    # the 1×1–3×3 grids (band_b1 B.1, step1_0921; band law § 3). The lone
+    # tier at share 0.5 beside the two in-word groups below: P1b's 1 : 2
+    # (plan_retrain § 3; C1: lone alone composes nothing)
     Group(
         "b0709",
         "single",
         (0.7, 0.9),
-        1.0,
+        0.5,
         (
             Tier("scene_single", 0.5, {"fill": 0.7, "min_glyph": 28, "px_target": 50}),
             Tier(
@@ -88,6 +90,47 @@ TABLE = (
                     ],  # × cell short side: 3×3 → 51–136 px, 1×1 → 150–400
                     "bubble_frac": 0.5,
                     "mark_horizontal": True,
+                },
+            ),
+        ),
+    ),
+    # single vocabs in words (plan_retrain § 3, P1b / C2 / C3): windows of
+    # dialogue lines at the piece tiers' px and bands (Stage B's
+    # ``scene_spelled`` took the piece ``scene_piece`` params), routed
+    # captions; b0507 carries the count tier at 0.3 (Stage B)
+    Group(
+        "b0507",
+        "single",
+        (0.5, 0.7),
+        0.5,
+        (
+            Tier(
+                "scene_window",
+                0.7,
+                {"fill": [0.7, 1.0], "min_glyph": 28, "px_target": 40},
+            ),
+            Tier(
+                "scene_single_small",
+                0.3,
+                {"glyph_px": [28, 40], "fill": [0.2, 0.4], "min_glyph": 12},
+            ),
+        ),
+    ),
+    Group(
+        "b0305",
+        "single",
+        (0.3, 0.5),
+        0.5,
+        (
+            Tier(
+                "scene_window",
+                1.0,
+                {
+                    "glyph_px": [12, 24],
+                    "min_glyph": 12,
+                    "fill": 0.9,
+                    "fill_min": 0.5,
+                    "px_target": 18,
                 },
             ),
         ),
@@ -237,6 +280,12 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
     )
     groups = plan_groups(kinds, table, budget)
     assert groups, f"{rc.path}: no single or piece vocab — nothing to draw"
+    names = [g.name for g, _n in groups]
+    assert len(set(names)) == len(names), (
+        f"{rc.path}: two kinds bring a group of one name ({names}) — split the run"
+    )
+    route = any(t.recipe == "scene_window" for g, _n in groups for t in g.tiers)
+    win = _windows(rc, pools, out) if route else {}
     if kinds["multi"]:
         print(
             f"build: {len(kinds['multi'])} multi vocabs ({' '.join(kinds['multi'][:10])}"
@@ -307,6 +356,8 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
         "seed_rows": str(SEED_ROWS),
         "items_per_vocab": ITEMS_PER_VOCAB,
         "budget_factor": budget,
+        "glyph_route": route,  # train.py routes the run's captions per glyph
+        "windows": win,
         "min_overlap": MIN_OVERLAP,
         "groups": {
             g.name: {
@@ -340,6 +391,47 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
         flush=True,
     )
     return out
+
+
+def _windows(rc: RunConfig, pools: Pools, out: Path) -> dict:
+    """The windowed word pool on ``pools.windows`` (glyph → windows): the
+    run's letter singles over the dialogue lines, the read strings held out
+    by trigram, every window routed to its glyphs' single rows or dropped.
+    Writes ``windows.json``; returns the stats for ``build.json``."""
+    from .recipes import WINDOW_LEN, routed_windows, window_glyphs, window_pool
+
+    glyphs = window_glyphs(pools.singles)
+    lines = [
+        ln.split("\t")[0]
+        for ln in Path(phrase_file()).read_text(encoding="utf-8").splitlines()
+    ]
+    ws = window_pool(glyphs, lines, rc.read, WINDOW_LEN)
+    ok, _ids = routed_windows(ws, glyphs)
+    pools.windows = {g: [w for w in ok if g in w] for g in sorted(glyphs)}
+    pools.windows = {g: v for g, v in pools.windows.items() if v}
+    n = sorted(len(v) for v in pools.windows.values())
+    stats = {
+        "length": list(WINDOW_LEN),
+        "held": list(rc.read),
+        "n": len(ok),
+        "dropped_by_encoding": len(ws) - len(ok),
+        "glyphs": len(pools.windows),
+        "glyphs_without": sorted(glyphs - set(pools.windows)),
+        "per_glyph_min": n[0] if n else 0,
+        "per_glyph_median": n[len(n) // 2] if n else 0,
+        "by_length": dict(sorted(Counter(map(len, ok)).items())),
+    }
+    (out / "windows.json").write_text(
+        json.dumps(ok, ensure_ascii=False, indent=0), encoding="utf-8"
+    )
+    print(
+        f"windows: {len(ok)} ({stats['dropped_by_encoding']} dropped by the "
+        f"encoding check), {len(pools.windows)} glyphs, per glyph min {stats['per_glyph_min']} "
+        f"median {stats['per_glyph_median']}; none for "
+        f"{''.join(stats['glyphs_without']) or '-'} (lone only)",
+        flush=True,
+    )
+    return stats
 
 
 def _restart(pools: Pools, rng, snap) -> None:

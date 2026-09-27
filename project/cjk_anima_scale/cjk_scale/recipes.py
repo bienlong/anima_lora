@@ -17,6 +17,11 @@ stamps the item with its band.
     scene_short     a 2–5-piece corpus line (multi), one column
     scene_sentence  a Manga109-s dialogue line, ``min_glyph`` drawn per item
     grid_string     pieces / short lines in 2×2 … 3×2 word cells at a target px
+    scene_window    a window of a dialogue line in a bubble (the singles' in-word
+                    tier, plan_retrain § 3): unspaced on the image and in the
+                    caption, routed per glyph at encode; drawn glyph-first
+    scene_single_small  one glyph at line px in a bubble it fills 0.2–0.4 of
+                    (the count tier beside the windows, Stage B)
 
 Records follow the probe's ``train.jsonl`` schema (``file`` / ``text`` /
 ``caption`` / ``src`` / ``kind`` / ``shape`` / ``box`` or ``boxes`` /
@@ -82,6 +87,7 @@ class Pools:
     vertical: bool
     stroke: float
     horizontal_frac: float  # share of multi-glyph items / grid cells drawn as lines
+    windows: dict = field(default_factory=dict)  # glyph → its windows (scene_window)
     used: Counter = field(default_factory=Counter)  # scene index → items drawn
     decks: dict = field(default_factory=dict)
     balanced: dict = field(default_factory=dict)
@@ -626,6 +632,146 @@ def scene_sentence(pools: Pools, rng: random.Random, p: dict):
     )
 
 
+def scene_window(pools: Pools, rng: random.Random, p: dict):
+    """A window in one bubble, unspaced on the image and in the caption
+    (routed per glyph at encode: every glyph trains its single row). A draw
+    picks a glyph uniformly, then one of its windows, so exposure is per row
+    (Stage B's ``scene_spelled``, C3's ``scene_window``)."""
+    word = rng.choice(pools.windows[rng.choice(list(pools.windows))])
+    f = p.get("fill", [0.7, 1.0])
+    lo, hi = f if isinstance(f, list) else (f, f)
+    fill = rng.uniform(float(lo), float(hi))
+    item = _draw_scene(
+        pools,
+        rng,
+        word,
+        min_glyph=int(p.get("min_glyph", 28)),
+        fill=fill,
+        max_lines=1,
+        target_px=_target(rng, p),
+        fill_max=fill,
+        fill_min=float(p.get("fill_min", 0)),
+    )
+    if item is None:
+        return None
+    assert item.caption.count(f'"{word}"') == 1, item.caption
+    return item
+
+
+def scene_single_small(pools: Pools, rng: random.Random, p: dict):
+    """The count tier: one glyph at line px, in a bubble whose one-glyph fit
+    it fills ``fill`` (0.2–0.4) of, captioned alone (Stage B, byte-faithful)."""
+    import dataclasses
+
+    glyph = rng.choice(pools.singles)
+    target = _target(rng, p)
+    lo, hi = (float(x) for x in p["fill"])
+    ok = {
+        j
+        for j in pools.single_idx
+        if lo <= target / max(_fit_px(pools.scenes[j]["region"], 1, True), 1e-6) <= hi
+    }
+    if not ok:
+        return None
+    return _draw_scene(
+        dataclasses.replace(pools, single_idx=ok),
+        rng,
+        glyph,
+        min_glyph=int(p.get("min_glyph", 12)),
+        fill=hi,
+        max_lines=1,
+        singles_only=True,
+        target_px=target,
+        fill_max=hi,
+        fill_min=lo,
+    )
+
+
+# ----------------------------------------------------------------------------
+# the windowed word pool (plan_retrain § 3)
+
+# window length: P1b's in-word words were whole lines of 2–6 glyphs (Stage B);
+# C3's kanji windows were 2–4
+WINDOW_LEN = (2, 6)
+
+
+def window_glyphs(singles) -> set:
+    """The singles a window may hold: letters (kana, kanji, ー), not
+    punctuation — the other singles train lone only."""
+    import unicodedata
+
+    return {g for g in set(singles) if unicodedata.category(g) in ("Lo", "Lm")}
+
+
+def window_pool(glyphs: set, lines, held=(), length: tuple = WINDOW_LEN) -> list:
+    """Every substring of ``lines`` of ``length`` glyphs, all in ``glyphs``,
+    none repeated (training must not teach doubling), holding no trigram of
+    a ``held`` string (a held string under 3 glyphs: the string itself).
+    A window may cross a word boundary (C3: windows compose)."""
+    grams = set()
+    for h in held:
+        n = min(3, len(h))
+        grams |= {h[i : i + n] for i in range(len(h) - n + 1)}
+    lo, hi = length
+    out = set()
+    for ln in lines:
+        run = ""
+        for c in ln + "\n":
+            if c in glyphs:
+                run += c
+                continue
+            for i in range(len(run)):
+                for n in range(lo, hi + 1):
+                    w = run[i : i + n]
+                    if len(w) < n:
+                        break
+                    if len(set(w)) == n and not any(g in w for g in grams):
+                        out.add(w)
+            run = ""
+    return sorted(out)
+
+
+def routed_windows(windows: list, glyphs: set) -> tuple[list, dict]:
+    """The windows whose routed encoding is their glyphs' single rows and
+    nothing else (``stage_b.check_spelling``'s rule for the routed form), and
+    each glyph's single row (routing on = off for a lone glyph, asserted)."""
+    from transformers import AutoTokenizer
+
+    from common.models import checkpoints
+    from library.anima import ext_vocab
+    from library.anima.ext_vocab import T5_TABLE_SIZE, HybridT5Encoder
+    from library.anima.vocab_pack import resolve_pack_prefix
+    from library.env import resolve_under_home
+
+    t5 = AutoTokenizer.from_pretrained(
+        resolve_under_home("library/anima/configs/t5_old")
+    )
+    qw = AutoTokenizer.from_pretrained(
+        resolve_under_home("library/anima/configs/qwen3_06b")
+    )
+    _, mapping = ext_vocab.load_ext_assets(
+        resolve_pack_prefix(checkpoints().vocab_pack)
+    )
+    encs = {
+        r: HybridT5Encoder.from_mapping(t5, qw, mapping, glyph_route=r)
+        for r in (False, True)
+    }
+
+    def ext(route: bool, text: str) -> list:
+        ids, mask = encs[route].encode(f'Japanese text reads as "{text}".', 512)
+        return [
+            i - T5_TABLE_SIZE for i, m in zip(ids, mask) if m and i >= T5_TABLE_SIZE
+        ]
+
+    ids = {}
+    for c in sorted(glyphs):
+        a, b = ext(False, c), ext(True, c)
+        assert len(a) == 1 and a == b, (c, a, b)
+        ids[c] = a[0]
+    ok = [w for w in windows if ext(True, w) == [ids[c] for c in w]]
+    return ok, ids
+
+
 # ----------------------------------------------------------------------------
 # grid recipes (1×1 = the flat single)
 
@@ -820,6 +966,8 @@ def missing_source(name: str, p: dict, pools: Pools) -> str | None:
         pools.singles + (pools.digraphs if p.get("digraphs") else [])
     ):
         return "no singles"
+    if name == "scene_window" and not pools.windows:
+        return "no windows"
     if name == "scene_short" and not pools.phrase.get("short"):
         return "no short lines"
     if name == "scene_sentence" and not pools.phrase.get("sentence"):
@@ -849,4 +997,6 @@ RECIPES = {
     "scene_short": scene_short,
     "scene_sentence": scene_sentence,
     "grid_string": grid_string,
+    "scene_window": scene_window,
+    "scene_single_small": scene_single_small,
 }
