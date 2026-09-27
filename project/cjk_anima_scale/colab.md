@@ -73,6 +73,10 @@ ssh "${SSHO[@]}" root@colab 'mkdir -p /home/sorryhyun/anima && cd /home/sorryhyu
 
 ## Install (main, no branch — what the smoke used)
 
+Superseded by the `colab-cu128` branch: `./colab_push.sh <session>` there
+does the checkout, install, assets and weights (`colab_plan.md` § 1–2).
+The procedure below is the record of the smoke.
+
 Reuse the VM's torch through a venv that sees system site-packages, and
 install the rest with `--no-sources` plus overrides:
 

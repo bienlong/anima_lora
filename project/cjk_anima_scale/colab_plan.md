@@ -3,7 +3,28 @@
 After the T4 smoke (`colab.md`), the next Colab attempt is a paid L4 smoke,
 then the run. This is the local work that comes before it.
 
-## 1. A Colab branch (`colab-cu128`)
+## 1. A Colab branch (`colab-cu128`) — done 2026-09-27
+
+One commit on top of main, rebased before each launch (not pushed yet). Beyond the list
+below, the lock needed three more changes: anime-tools 0.7.5 declares
+`torch>=2.12`, so torch / torchvision are also pinned in
+`override-dependencies`; main's bare `triton` override let triton 3.7.0 in,
+so it pins `triton==3.6.0`; and the `anime-tools-dev` path source
+(`../anime_tools`) exists on neither the VM nor a worktree, so both groups
+take the git tag. `environments` is linux x86_64 only. The old `colab`
+branch on origin (2026-05, Python 3.12) is unrelated and stale.
+
+Checked here, not on a VM: `uv sync` on the branch lock, then
+`scale.py data` + `train` (`chars:精俺感`, 270 steps, compile on) on the
+5070 Ti. The cu128 flash-attn wheel runs on sm120 too. `train` finished in
+2.2 min, and the cumulative it/s (compile included) was past 2.0 at step
+250, so the line uses no 2.12-only API.
+
+On a rebase that conflicts in `pyproject.toml` / `uv.lock`, keep the
+branch's hunks (each is marked `colab-cu128 branch`) and run `uv lock`
+again.
+
+The original list:
 
 The branch changes only the install surface and never merges into main.
 The goal is a plain `uv sync` on the VM, replacing `colab.md`'s
@@ -26,7 +47,14 @@ override-and-uninstall procedure.
 - Rebase the branch onto main before each Colab launch; the VM clones it
   from origin.
 
-## 2. Asset push script (on the branch)
+## 2. Asset push script (on the branch) — done 2026-09-27
+
+`./colab_push.sh <session> [--pieces]` on the branch: it refuses unless
+origin's `colab-cu128` matches the local branch, then does checkout (clone,
+or reset to origin), assets (≈ 1 GB tar over ssh), symlinks, `env.sh`,
+`uv sync`, `tasks.py download-model anima`, and a torch.cuda + flash_attn
+check. `--pieces` also sends `dialogue_2_10.tsv` to `/content/manga109s/`
+and writes the VM's `.env`. It has not run against a VM yet.
 
 `colab.md` § What goes over is eight steps done by hand. Put them in one
 script on the branch that takes the session name, so a fresh VM is one
@@ -40,7 +68,7 @@ command:
 It stays on the branch, not on main or in the line (plan_2900 § 3a: "no
 Colab-side code in the line").
 
-## 3. Fix plan_2900 § 3a
+## 3. Fix plan_2900 § 3a — done 2026-09-27 (`40fe5e18`)
 
 It is wrong in four places, and should point to `colab.md` instead of
 repeating it:
