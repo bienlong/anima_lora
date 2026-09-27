@@ -32,6 +32,12 @@ mode split by the data's gate on / off exposure. Saved as ``delta['line']``.
 on every pack row, alone or in a run. ``rows_frozen`` holds every row at its
 warm (seed) value — ``raw`` takes no gradient and ``v_line`` is the only
 trainable, so ``v_line`` is fit onto the rows it will be summed onto.
+
+``row_cap`` (experiments only; hypothesis.md § 4 P1): after every optimizer
+step each trained row's effective row (pack + ``raw`` × ``row_scale``) is
+projected back onto the ball of radius ``row_cap`` — a hard clamp, no
+penalty weight. ``project`` does it; the trainer calls it after
+``opt.step()``.
 """
 
 from __future__ import annotations
@@ -79,6 +85,7 @@ class Rows:
         context=None,
         line_mode=None,
         rows_frozen=False,
+        row_cap=None,
     ):
         from common.hooks import ExtDelta
 
@@ -99,6 +106,8 @@ class Rows:
         self.init_anchor = float(init_anchor)
         self.free_residual = float(free_residual)
         self.delta = ExtDelta(anima, idx | frozen, dim, device, self.row_scale)
+        self.pack_rows = pack.table[self.delta.ext_ids].float().to(device)
+        self.row_cap = None if row_cap is None else float(row_cap)
         self.rows_frozen = bool(rows_frozen)
         self.params = [] if rows_frozen else [{"params": [self.delta.raw], "lr": lr}]
         if line_mode:
@@ -140,6 +149,13 @@ class Rows:
         elif frozen:
             live = (~self.frozen_mask).float()[:, None]
             self.delta.raw.register_hook(lambda g: g * live)
+        if self.row_cap is not None:
+            n0 = self.project()
+            print(
+                f"rows: effective row norm capped at {self.row_cap:.3f} after every "
+                f"step ({n0} rows over it at init, clipped)",
+                flush=True,
+            )
 
     @property
     def n_rows(self) -> int:
@@ -226,6 +242,25 @@ class Rows:
             flush=True,
         )
 
+    def effective(self) -> torch.Tensor:
+        """Every row's effective row: pack + ``raw`` × ``row_scale``."""
+        return self.pack_rows + self.delta.raw.detach() * self.row_scale
+
+    def project(self) -> int:
+        """Clip the trained rows' effective norm to ``row_cap``; returns how
+        many rows it clipped (0 without a cap)."""
+        if self.row_cap is None:
+            return 0
+        with torch.no_grad():
+            eff = self.effective()
+            n = eff.norm(dim=1)
+            over = ~self.frozen_mask & (n > self.row_cap)
+            if not bool(over.any()):
+                return 0
+            clipped = eff[over] * (self.row_cap / n[over])[:, None]
+            self.delta.raw[over] = (clipped - self.pack_rows[over]) / self.row_scale
+            return int(over.sum())
+
     # -- loss ----------------------------------------------------------------
 
     def regularized(self, loss_fm):
@@ -251,6 +286,7 @@ class Rows:
     def log_record(self, step, loss_fm, loss, t0, extra=None) -> dict:
         live = ~self.frozen_mask
         dn = (self.delta.raw.detach()[live] * self.row_scale).norm(dim=1)
+        en = self.effective()[live].norm(dim=1)
         rec = {
             "step": step,
             "loss": float(loss_fm),
@@ -258,6 +294,8 @@ class Rows:
             "delta_norm_mean": float(dn.mean()),
             "delta_norm_max": float(dn.max()),
             "rel": float(dn.mean() / self.row_scale),
+            "eff_norm_mean": float(en.mean()),
+            "eff_norm_max": float(en.max()),
             "it_s": step / max(time.time() - t0, 1e-6),
             **(extra or {}),
         }
@@ -294,6 +332,8 @@ class Rows:
         if self.context:
             sd["seed_merged"] = self.context
             sd["seed_rows"] = n_seed
+        if self.row_cap is not None:
+            sd["row_cap"] = self.row_cap
         if step is not None:
             sd["step"] = step
         return sd

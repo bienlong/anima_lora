@@ -192,6 +192,9 @@ def train(
     max_steps: int | None = None,
     line_mode: bool | str = False,
     rows_frozen: bool = False,
+    cold: bool = False,
+    row_cap: float | str | None = None,
+    steps_per_row: int | None = None,
 ) -> Path:
     """Train the run. ``data`` / ``out`` default to the run's dirs;
     ``max_steps`` stops the loop early with the full-length schedule
@@ -199,7 +202,12 @@ def train(
     trains a gated ``v_line`` beside the rows (``rows.Rows``,
     ``experiments/f1_line``), ``"all"`` an ungated one, and ``rows_frozen``
     holds the rows at the seed so ``v_line`` alone trains
-    (``experiments/f2a_line``) — ``scale.py`` passes none of them."""
+    (``experiments/f2a_line``); ``cold`` starts the vocabs' rows at the pack
+    rows (Δ 0) instead of the seed, and ``row_cap`` clamps every trained
+    row's effective norm after each step — ``"t5"`` = the T5 table's mean
+    row norm (``experiments/p1_cap``, hypothesis.md § 4 P1);
+    ``steps_per_row`` replaces the budget's (a mix that adds items keeps
+    the old items' exposure). ``scale.py`` passes none of them."""
     from common.models import checkpoints, dit_forward, gen_args
     from library.anima.vocab_pack import attached_pack_rows, strategy_pack
     from library.inference.generation import get_generation_settings
@@ -221,6 +229,16 @@ def train(
         recs, ev, device, out, te_cache=data / "te_cache"
     )
     p = plan(rc, data, recs, vocabs, touched)
+    if steps_per_row:
+        p.steps_per_row = int(steps_per_row)
+        p.steps = p.steps_per_row * len(p.idx)
+        p.warmup = int(round(WARMUP_RATIO * p.steps))
+        p.record.update(
+            train_steps=p.steps,
+            steps_per_row=p.steps_per_row,
+            lr_warmup=p.warmup,
+            steps_override=True,
+        )
     if line_mode:
         p.record["line_mode"] = "run" if line_mode is True else line_mode
     if rows_frozen:
@@ -238,12 +256,18 @@ def train(
     anima.requires_grad_(False)
     assert attached_pack_rows(anima), "no vocab pack attached to the DiT"
     tok, _ = ensure_text_strategies(checkpoints().text_encoder, vocab_pack=None)
+    if row_cap == "t5":
+        row_cap = float(anima.llm_adapter.embed.weight.float().norm(dim=1).mean())
+    if cold:
+        p.record["cold"] = True
+    if row_cap is not None:
+        p.record["row_cap"] = float(row_cap)
     rows = Rows(
         anima,
         device,
         p.idx,
         strategy_pack(tok),
-        warm=SEED_ROWS,
+        warm=None if cold else SEED_ROWS,
         init_anchor=INIT_ANCHOR,
         free_residual=FREE_RESIDUAL,
         lr=LR,
@@ -252,6 +276,7 @@ def train(
         context=SEED_ROWS,
         line_mode=line_mode,
         rows_frozen=rows_frozen,
+        row_cap=row_cap,
     )
     assert rows.n_rows == len(p.idx), (rows.n_rows, len(p.idx))
     steps, warmup, record = p.steps, p.warmup, p.record
@@ -260,7 +285,9 @@ def train(
         f"({p.steps_per_row}/row) × batch {BATCH}, lr {LR:g} {LR_DECAY} warmup {warmup} "
         f"({WARMUP_RATIO:g}), μ {INIT_ANCHOR:g}, box_share {BOX_SHARE} → cap "
         f"{BOX_SHARE_CAP} at {BOX_SHARE_GLYPHS} glyphs (log), grid_box {int(GRID_BOX)}, "
-        f"warm {SEED_ROWS}" + (f"; stopping at step {max_steps}" if max_steps else ""),
+        + ("cold (pack rows)" if cold else f"warm {SEED_ROWS}")
+        + (f", row cap {row_cap:.3f}" if row_cap is not None else "")
+        + (f"; stopping at step {max_steps}" if max_steps else ""),
         flush=True,
     )
     opt = torch.optim.AdamW(rows.params, weight_decay=0.0, betas=(0.9, 0.99))
@@ -309,6 +336,7 @@ def train(
         opt.zero_grad(set_to_none=True)
         loss.backward()
         opt.step()
+        rows.project()
         sched.step()
         if step % 25 == 0 or step == 1:
             rec = rows.log_record(step, loss_fm, loss, t0, split.pop())

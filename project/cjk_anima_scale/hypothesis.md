@@ -246,6 +246,75 @@ piece rows are whole strings); EN sits at 2.4.
   No word items or `v_line` beside the cap in the lone column (one variable).
   Stage B's `data/` keeps `img/` + `train.jsonl`; its caches were cleared
   2026-09-27 and rebuild at train.
+
+  **Run as the in-word column only, both cold** (after P0 / P0b the lone
+  column and the warm arm were predicted; Stage B's uncapped cell was warm
+  from the seed, so it confounds warm start with in-word training).
+  `experiments/p1_cap/` (job `20260927-224013-a9207f`, `results/20260927-2240-t1/`):
+  Stage B's items unchanged, 90 steps / row, the donors' rows from the pack
+  rows (Δ 0); `p1_cap` clamps the effective norm to the T5 table mean (212)
+  after every step. Adapter read `ctx_trigger --probe c4`
+  (`results/20260927-2349-c4/`): `ja_spaced` on こんにちは + 7 donor words.
+
+  | donor keys (en) | floor | Stage B (warm) | `p1_cold` | `p1_cap` |
+  |---|---|---|---|---|
+  | end row norm (donors) | ≈ 320 | 311 | 229 | 211 |
+  | adapter out cos (c4) | 0.977 | 0.927 | **0.816** | **0.804** |
+  | こんにちは ≤ 1 edit / 16 | 0 | 6 | **12** | 9 |
+  | こんにちは ≤ 2 edits | 0 | 13 | 14 | 10 |
+  | こんにちは official | 0 | 0 | **3** | 3 |
+  | こんにちは `dup` | 0 | 13 | 7 | 8 |
+  | singles official / 144 | 91 | 43 | 29 | 41 |
+  | singles repeat | 29 | 50 | 43 | 35 |
+
+  (`raw`, the pack rows: norm 182, c4 cos 0.63.)
+  - **The warm start was the confound, not the missing cap.** Cold rows
+    grow only to ≈ 230 uncapped (Stage B's Δ 273 vs cold's 161), read
+    context at 0.82 (Stage B 0.93), and compose more: ≤ 1 edit 12 vs 6
+    (paired vs Stage B 8 / 2, p 0.11), the first exact hits on
+    こんにちは, half the in-word doubling (7 vs 13, p 0.07).
+  - **The cap is nearly redundant.** It moves the rows 229 → 211 and the
+    cos 0.816 → 0.804. On renders it trades composition for singles
+    (≤ 1 edit 12 → 9, singles official 29 → 41, repeat 43 → 35), all
+    within one word × 16 renders of noise except repeat vs Stage B (35 vs
+    50, p 0.049).
+  - Cold rows still sit ≈ 0.2 above EN's curve at matched norm (c3: EN at
+    ≈ 230 reads ≈ 0.6), so in-word training still buys some context
+    immunity, far less than the seed's lone training did.
+  - Singles fall in every in-word arm (91 → 29–43). In-word training costs
+    singles identity, warm or cold; the seed's lone data is what holds it.
+  - Power: the composition read is one word (こんにちは, 16 renders), the
+    only donor word the floor holds.
+
+  **P1b, `p1_mix`: cold, uncapped, Stage B's items + the seed's lone
+  singles group** (production `b0709`: scene_single + grid_single, σ
+  0.7–0.9, 1 200 items beside Stage B's 2 400 — the in-word items checked
+  identical; 135 steps / row so they keep `p1_cold`'s exposure). Job
+  `20260927-235408-2a6f6e`, `experiments/p1_cap/results/20260927-2354-mix1/`;
+  c4 `ctx_trigger/results/20260928-0043-c4b/`.
+
+  | donor keys (en) | floor | Stage B | `p1_cold` | **`p1_mix`** |
+  |---|---|---|---|---|
+  | end row norm | ≈ 320 | 311 | 229 | 240 (max 259) |
+  | adapter out cos (c4) | 0.977 | 0.927 | 0.816 | **0.817** |
+  | こんにちは ≤ 1 edit / 16 | 0 | 6 | 12 | **11** |
+  | こんにちは official | 0 | 0 | 3 | **5** |
+  | こんにちは `dup` | 0 | 13 | 7 | **4** |
+  | singles official / 144 | 91 | 43 | 29 | **82** |
+  | singles repeat | 29 | 50 | 43 | **30** |
+
+  - **Singles come back to the floor with composition kept.** Paired vs the
+    floor: singles official 26 / 30 (p 0.69), repeat 19 / 18, words ≤ 1
+    edit 11 / 0 (p 1e-3). Vs Stage B: singles official 54 / 10 (p 2e-8),
+    repeat 10 / 30 (p 0.002), in-word `dup` 0 / 9 (p 0.004).
+  - **The lone data does not make the rows context-free when they start
+    cold**: c4 0.817 = `p1_cold`'s, norm 240 (the seed's lone-only rows sit
+    at ≈ 320 / 0.977). So what the seed's training bought as context
+    immunity was not identity itself; lone + in-word from the pack rows
+    gets identity at ≈ 240 in a direction the adapter still reads in
+    context.
+  - This is the first arm on record that holds the floor's singles and
+    composes. Still one word × 16 renders on the composition side.
 - **P2, per-glyph routing** (§ 3): an encoder flag, read on `native_sent`
   and the held-out words, on the rows from P1. Only if P1 composes.
 - **Not proposed:** retraining the adapter (outside the frozen-DiT
@@ -264,6 +333,6 @@ piece rows are whole strings); EN sits at 2.4.
 - A per-glyph-routed caption of a trained word renders worse than the piece
   row (P2): granularity is not the constraint.
 
-Scripts: `experiments/ctx_trigger/run_exp.py` (`--probe c1 | c2`),
-`experiments/norm_p0/run_exp.py` (P0). F2a /
+Scripts: `experiments/ctx_trigger/run_exp.py` (`--probe c1 | c2 | c3 | c4`),
+`experiments/norm_p0/run_exp.py` (P0), `experiments/p1_cap/run_exp.py` (P1). F2a /
 F2a′: `experiments/f2a_line/` (`20260927-1644-a1`, `20260927-1950-a2`).

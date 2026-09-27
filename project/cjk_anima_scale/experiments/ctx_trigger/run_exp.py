@@ -64,6 +64,19 @@ untouched:
 is a generic lever (H1); EN barely moving → the context read is learned by
 token (H2), and a cap alone will not reach it.
 
+``--probe c4`` (hypothesis.md § 4 P1, after training): ``ja_spaced`` on the
+Stage B donor's own words (``HELD_IN`` + ``N_C4_WORDS`` donor words) under
+trained rows files — every arm's effective rows on the hook, whole:
+
+    seed      the seed rows
+    raw       the pack rows (no identity training)
+    stage_b   the Stage B donor (warm from the seed, uncapped, in-word)
+    <name>    ``OUT/experiments/<name>/trained.pt`` (``--arms``; P1's
+              ``p1_cold`` / ``p1_cap``)
+
+A trained arm near ``raw`` (≈ 0.66, c2) reads its rows in context; near
+``seed`` / ``stage_b`` (≈ 0.97) it does not.
+
 ``--dry_run`` prints the pieces per condition (tokenizers only).
 """
 
@@ -101,6 +114,10 @@ C2_CONDS = ("en_word", "ja_spaced", "ja_word")
 C3_CONDS = ("en_word", "ja_spaced")
 ALPHAS = (0.65, 0.8, 1.0, 1.2, 1.5)  # c3: one scale for both sides
 ARMS = ("seed", "raw", "seed_n200", "seed_at_pack", "raw_at_seed")
+C4_CONDS = ("ja_spaced",)
+C4_ARMS = ("seed", "raw", "stage_b", "p1_cold", "p1_cap")
+N_C4_WORDS = 7  # donor words beside HELD_IN, 3–5 glyphs, drawn with seed 0
+_JA_WORDS: list = []  # set in main for c4
 N_EN_BIG = 60  # c2: Qwen word tokens sampled for the share read
 _EN_BIG: list = []  # set in main for c2
 
@@ -108,7 +125,8 @@ _EN_BIG: list = []  # set in main for c2
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--label", required=True)
-    p.add_argument("--probe", choices=("c1", "c2", "c3"), default="c1")
+    p.add_argument("--probe", choices=("c1", "c2", "c3", "c4"), default="c1")
+    p.add_argument("--arms", nargs="+", default=list(C4_ARMS), help="c4: rows arms")
     p.add_argument("--device", default="cuda")
     p.add_argument("--dry_run", action="store_true")
     return p.parse_args()
@@ -130,7 +148,28 @@ def forms(cond: str, w: str) -> tuple[str, str]:
 def words(cond: str):
     if cond.startswith("en"):
         return _EN_BIG or EN_WORDS
-    return JA_WORDS
+    return _JA_WORDS or JA_WORDS
+
+
+def c4_words() -> list[str]:
+    """``HELD_IN`` + ``N_C4_WORDS`` of the Stage B donor words (3–5 glyphs)."""
+    import json
+    import random
+
+    ws = json.loads(
+        (OUT / SB.NAME / "donor_words.json").read_text(encoding="utf-8")
+    )
+    ws = [w for w in ws if 3 <= len(w) <= 5]
+    random.Random(0).shuffle(ws)
+    return [SB.HELD_IN, *sorted(ws[:N_C4_WORDS])]
+
+
+def c4_path(arm: str) -> Path:
+    if arm == "seed":
+        return SEED_ROWS
+    if arm == "stage_b":
+        return OUT / SB.NAME / "trained.pt"
+    return OUT / "experiments" / arm / "trained.pt"
 
 
 def en_big(tok) -> tuple[list[str], dict]:
@@ -266,7 +305,15 @@ def main():
         big, share = en_big(tok)
         _EN_BIG[:] = big
         print(f"en_word: {len(big)} Qwen word tokens: {' '.join(big)}", flush=True)
-    pl = plan(tok, ps, {"c2": C2_CONDS, "c3": C3_CONDS}.get(args.probe, CONDS))
+    if args.probe == "c4":
+        _JA_WORDS[:] = c4_words()
+        miss = [a for a in args.arms if a != "raw" and not c4_path(a).exists()]
+        assert not miss, f"no trained.pt for {miss}"
+    pl = plan(
+        tok,
+        ps,
+        {"c2": C2_CONDS, "c3": C3_CONDS, "c4": C4_CONDS}.get(args.probe, CONDS),
+    )
     for cond, rows in pl.items():
         by_w: dict = {}
         for w, *_r, name, alone in rows:
@@ -319,6 +366,7 @@ def main():
     import os
 
     from library.anima import ext_vocab
+    from library.anima.ext_vocab import T5_TABLE_SIZE
     from library.anima.vocab_pack import resolve_pack_prefix
 
     table, _ = ext_vocab.load_ext_assets(
@@ -353,10 +401,47 @@ def main():
         rows = en0 * a_en if cond.startswith("en") else eff0 * a_ja
         return {"alpha": a, "row_norm": round(float(rows.norm(dim=1).mean()), 1)}
 
+    table_t = torch.as_tensor(table).float()
+    words_ids = sorted(
+        {
+            i - T5_TABLE_SIZE
+            for rows_ in pl.values()
+            for _w, t5_text, *_r in rows_
+            for i in tok.span(ps[0], "swap", t5_text)[0]
+            if i >= T5_TABLE_SIZE
+        }
+    )
+
+    def set_file(arm: str) -> dict:
+        """c4: ``arm``'s rows file on the hook — its effective rows (pack +
+        raw × its row_scale) on every id it carries, the seed's elsewhere."""
+        if arm == "raw":
+            v = pack
+        else:
+            d = torch.load(c4_path(arm), map_location="cpu", weights_only=False)
+            d = d["delta"]
+            ids = [int(e) for e in d["ext_ids"]]
+            eff = table_t[ids] + d["raw"].float() * float(d["row_scale"])
+            at = {e: i for i, e in enumerate(ids)}
+            v = eff0.clone()
+            for k, e in enumerate(delta.ext_ids):
+                if int(e) in at:
+                    v[k] = eff[at[int(e)]].to(dev)
+        with torch.no_grad():
+            delta.raw.copy_((v - pack) / rs)
+        delta.scale = 1.0
+        loc = [delta.index[e] for e in words_ids if e in delta.index]
+        return {
+            "path": "pack" if arm == "raw" else str(c4_path(arm)),
+            "row_norm": round(float(v[loc].norm(dim=1).mean()), 1),
+        }
+
     def set_arm(arm: str, cond: str = "") -> dict:
         """Put ``arm``'s effective rows on the hook; returns their mean norm."""
         if args.probe == "c3":
             return set_scale(arm, cond)
+        if args.probe == "c4":
+            return set_file(arm)
         pn, en = pack.norm(dim=1, keepdim=True), eff0.norm(dim=1, keepdim=True)
         v = {
             "seed": eff0,
@@ -391,6 +476,8 @@ def main():
     results: dict = {}
     if args.probe == "c3":
         jobs = [(cond, f"x{a:g}") for cond in pl for a in ALPHAS]
+    elif args.probe == "c4":
+        jobs = [(cond, arm) for cond in pl for arm in args.arms]
     else:
         jobs = [
             (cond, arm)
