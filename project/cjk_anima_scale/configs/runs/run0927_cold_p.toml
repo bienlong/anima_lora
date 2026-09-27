@@ -1,0 +1,5 @@
+# run0927_cold_p — plan_2900 § 3 (Run C-p, 2026-09-27): 612 cold pieces, ranks
+# 1984–3013. Read: the piece ruler + run0925_300f's sent strings (cached floor).
+
+vocabs = "ja_cold_1901_2900_p.txt"
+read = ["はい", "おしい", "やったネ", "ちょっと来い", "こんにちは"]

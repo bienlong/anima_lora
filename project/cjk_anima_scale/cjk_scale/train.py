@@ -50,7 +50,7 @@ LR_DECAY = "cosine"
 WARMUP_RATIO = 0.1  # of the run's steps (micro_warm_0923: 100 / 640, 200 / 1280)
 STEPS_PER_VOCAB = (
     90  # run0925_300f's joint budget (joint0507_0305 = 90; conflict_joint report)
-)
+)  # the base: budget.py's factor scales it by kind × glyph count × warm / cold
 GRID_BOX = True  # grid cells' union as the loss box (reports/grid_box_2026_09_25.md)
 BOX_SHARE = 0.25  # a single glyph's in-box share, log up to …
 BOX_SHARE_CAP = 0.5  # … the cap, at …
@@ -132,12 +132,17 @@ def plan(rc: RunConfig, data: Path, recs: list, vocabs: list, touched: set):
     (``ext_ids_of`` over the TE cache)."""
     from data.inventory import qwen_pieces
 
-    idx = vocab_idx(vocabs, qwen_pieces())
+    from .budget import run_factor
+
+    tokq = qwen_pieces()
+    idx = vocab_idx(vocabs, tokq)
     # captions carry rows outside the vocabs (corpus lines): they ride frozen
     # at the seed; what trains (and what the steps count) is the vocabs' rows
     frozen = touched - idx
     touched = touched & idx
-    steps = STEPS_PER_VOCAB * len(idx)
+    budget = run_factor(vocabs, tokq)  # budget.py: × the base by kind / glyphs / warm
+    steps_per_row = int(round(STEPS_PER_VOCAB * budget))
+    steps = steps_per_row * len(idx)
     warmup = int(round(WARMUP_RATIO * steps))
     bands = sorted({tuple(r["band"]) for r in recs})
     record = {
@@ -147,7 +152,8 @@ def plan(rc: RunConfig, data: Path, recs: list, vocabs: list, touched: set):
         "data": str(data),
         "bands": [list(b) for b in bands],
         "train_steps": steps,
-        "steps_per_row": STEPS_PER_VOCAB,
+        "steps_per_row": steps_per_row,
+        "budget_factor": budget,
         "lr_warmup": warmup,
         "lr_warmup_ratio": WARMUP_RATIO,
         "lr_rows": LR,
@@ -171,6 +177,7 @@ def plan(rc: RunConfig, data: Path, recs: list, vocabs: list, touched: set):
         touched=touched,
         frozen=frozen,
         steps=steps,
+        steps_per_row=steps_per_row,
         warmup=warmup,
         bands=bands,
         record=record,
@@ -244,7 +251,7 @@ def train(
     steps, warmup, record = p.steps, p.warmup, p.record
     print(
         f"train {rc.name}: σ per item in {p.bands}, {rows.n_rows} rows, {steps} steps "
-        f"({STEPS_PER_VOCAB}/row) × batch {BATCH}, lr {LR:g} {LR_DECAY} warmup {warmup} "
+        f"({p.steps_per_row}/row) × batch {BATCH}, lr {LR:g} {LR_DECAY} warmup {warmup} "
         f"({WARMUP_RATIO:g}), μ {INIT_ANCHOR:g}, box_share {BOX_SHARE} → cap "
         f"{BOX_SHARE_CAP} at {BOX_SHARE_GLYPHS} glyphs (log), grid_box {int(GRID_BOX)}, "
         f"warm {SEED_ROWS}" + (f"; stopping at step {max_steps}" if max_steps else ""),

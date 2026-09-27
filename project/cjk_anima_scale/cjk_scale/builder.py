@@ -202,10 +202,12 @@ def vocab_kinds(pools: Pools) -> dict:
     }
 
 
-def plan_groups(kinds: dict, table: tuple = TABLE) -> list:
-    """``[(group, n_items)]`` for the kinds present (the volume rule)."""
+def plan_groups(kinds: dict, table: tuple = TABLE, budget: float = 1.0) -> list:
+    """``[(group, n_items)]`` for the kinds present (the volume rule);
+    ``budget`` = the run's factor (``budget.run_factor``), items keep pace
+    with the steps."""
     return [
-        (g, int(round(ITEMS_PER_VOCAB * len(kinds[g.kind]) * g.share)))
+        (g, int(round(ITEMS_PER_VOCAB * budget * len(kinds[g.kind]) * g.share)))
         for g in table
         if kinds.get(g.kind)
     ]
@@ -216,7 +218,10 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
     ``experiments/`` pass another one to validate a mix before it becomes
     the rule — ``scale.py`` never does."""
     from common.prompts import TPL_BUBBLE, TPL_EN
+    from data.inventory import qwen_pieces
     from data.stage import _ink_stats
+
+    from .budget import run_factor
 
     t0 = time.time()
     out = data_dir(rc.name)
@@ -227,7 +232,10 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
     pools = build_pools(rc.vocab_specs(), SEED_ROWS, phrase_file, rng)
     snap = (rng.getstate(), pools.shapes.rng.getstate())
     kinds = vocab_kinds(pools)
-    groups = plan_groups(kinds, table)
+    budget = run_factor(
+        [v for k in ("single", "piece", "multi") for v in kinds[k]], qwen_pieces()
+    )
+    groups = plan_groups(kinds, table, budget)
     assert groups, f"{rc.path}: no single or piece vocab — nothing to draw"
     if kinds["multi"]:
         print(
@@ -241,6 +249,7 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
         + ", ".join(
             f"{g.name} σ {g.band[0]:.1f}–{g.band[1]:.1f} {n}" for g, n in groups
         )
+        + (f"; budget × {budget:g}" if budget != 1.0 else "")
         + f"; {workers} workers",
         flush=True,
     )
@@ -297,6 +306,7 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
         "seed": SEED,
         "seed_rows": str(SEED_ROWS),
         "items_per_vocab": ITEMS_PER_VOCAB,
+        "budget_factor": budget,
         "min_overlap": MIN_OVERLAP,
         "groups": {
             g.name: {

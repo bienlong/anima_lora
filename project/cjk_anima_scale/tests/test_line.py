@@ -38,6 +38,8 @@ MODULES = [
     "conflict",
     "ledger",
     "legacy",
+    "budget",
+    "merge",
 ]
 
 
@@ -214,6 +216,10 @@ def test_front_door_parser():
     ):
         with pytest.raises(SystemExit):
             p.parse_args(gone)
+    a = p.parse_args(["rows_2900_merged", "merge", "run_a", "run_b"])
+    assert a.verb == "merge" and a.run == "rows_2900_merged" and a.runs == ["run_a", "run_b"]
+    with pytest.raises(AssertionError, match="takes no run list"):
+        scale.main(["run0925_300f", "train", "run_b"])
 
 
 # ---------------------------------------------------------------------------
@@ -521,9 +527,11 @@ def test_piece_ruler(tmp_path, monkeypatch):
     d = paths.data_dir("t1")
     d.mkdir(parents=True)
     (d / "vocabs.json").write_text(json.dumps(["あ"]), encoding="utf-8")
-    assert ev.rulers(rc) == ["eval", "native", "sent", "target"]
-    (d / "vocabs.json").write_text(json.dumps(["あ", "すごい"]), encoding="utf-8")
+    assert ev.rulers(rc) == ["eval", "native", "single", "sent", "target"]
+    (d / "vocabs.json").write_text(json.dumps(["すごい"]), encoding="utf-8")
     assert ev.rulers(rc) == ["eval", "native", "piece", "sent", "target"]
+    (d / "vocabs.json").write_text(json.dumps(["あ", "すごい"]), encoding="utf-8")
+    assert ev.rulers(rc) == ["eval", "native", "piece", "single", "sent", "target"]
     monkeypatch.setattr(ev, "piece_vocabs", lambda rc: ("すごい", "った"))
     a = ev.ruler_args(rc, ev.TRAINED_ARM, "piece")
     assert a.eval_tag == "piece" and a.native_chars == "すごい,った"
@@ -761,3 +769,124 @@ def test_ext_delta_line_gate():
     assert "line" not in d3.state_dict()
     assert torch.allclose(no_line[0], rows)
     assert torch.allclose(emb(ids)[0], rows)
+
+
+# ---------------------------------------------------------------------------
+# plan_2900 § 5: the budget rule, the single ruler, the merge verb
+
+
+class _Tok:
+    """One Qwen token per vocab here, except the two-token digraph あっ."""
+
+    ids = {"精": [1], "山": [2], "すごい": [3], "って": [4], "あっ": [5, 6]}
+
+    def encode(self, text, add_special_tokens=False):
+        return self.ids[text]
+
+    def decode(self, ids):
+        return {1: "精", 2: "山", 3: "すごい", 4: "って", 5: "あ", 6: "っ"}[ids[0]]
+
+
+_QMAP = {1: 101, 2: 102, 3: 103, 4: 104, 5: 105, 6: 106}
+
+
+def test_budget_rule():
+    """Cold singles take the cold-kanji row (stage_i § 5), everything else
+    the base; a run mixing budgets is refused, a uniform one gets its factor."""
+    from cjk_scale import budget
+
+    assert budget.factor("single", 1, False) == 150 / budget.BASE_STEPS
+    assert budget.factor("single", 1, True) == 1.0
+    assert budget.factor("piece", 4, False) == 1.0
+    tokq, seeds = (_Tok(), _QMAP), frozenset({101, 103, 105, 106})
+    f = budget.vocab_factors(["精", "山", "すごい", "って", "あっ"], tokq, seeds)
+    assert f == {"精": 1.0, "山": 150 / 90, "すごい": 1.0, "って": 1.0, "あっ": 1.0}
+    assert budget.run_factor(["精", "すごい", "あっ"], tokq, seeds) == 1.0
+    assert budget.run_factor(["山"], tokq, seeds) == 150 / 90
+    with pytest.raises(AssertionError, match="different budgets"):
+        budget.run_factor(["精", "山"], tokq, seeds)
+
+
+def test_plan_groups_take_the_budget():
+    from cjk_scale.builder import ITEMS_PER_VOCAB, plan_groups
+
+    got = plan_groups({"single": ["s"] * 3, "piece": [], "multi": []}, budget=150 / 90)
+    assert [(g.name, n) for g, n in got] == [("b0709", round(3 * ITEMS_PER_VOCAB * 150 / 90))]
+
+
+def test_ruler_sample():
+    """All up to RULER_N; past it, equal per glyph-count stratum (a short
+    stratum's share to the rest), seeded."""
+    from cjk_scale.eval import RULER_N, ruler_sample
+
+    small = [f"あ{i}" for i in range(5)]
+    assert ruler_sample(small) == small
+    by = {2: [f"{c}い" for c in "かきくけこさしすせそたちつてと"],  # 15
+          3: [f"{c}いう" for c in "かきくけこさしすせそたちつてと"],  # 15
+          4: ["かいうえ", "きいうえ"]}  # 2
+    pool = [v for g in (2, 3, 4) for v in by[g]]
+    got = ruler_sample(pool)
+    assert len(got) == RULER_N == 24 and len(set(got)) == 24
+    n = {g: sum(v in by[g] for v in got) for g in by}
+    assert n == {2: 11, 3: 11, 4: 2}
+    assert ruler_sample(pool) == got  # seeded
+
+
+def test_single_ruler(tmp_path, monkeypatch):
+    from cjk_scale import eval as ev
+    from cjk_scale import paths
+
+    monkeypatch.setattr(paths, "OUT", tmp_path)
+    rc = _rc()
+    monkeypatch.setattr(ev, "single_vocabs", lambda rc: ("精", "輩"))
+    a = ev.ruler_args(rc, ev.TRAINED_ARM, "single")
+    assert a.eval_tag == "single" and a.native_chars == "精,輩"
+    assert a.native_clauses == "en"
+    assert ev.floor_keys(rc, "single") == {"精|en", "輩|en"}
+    assert ev.READ_FILES["single"] == "native_single/native_reads.json"
+
+
+def _rows_file(path, ids, raw, scale, **extra):
+    import torch
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "delta": {"ext_ids": ids, "raw": torch.tensor(raw), "row_scale": scale, **extra},
+            "arm": "rows",
+            "seed_merged": "seed.pt",
+        },
+        path,
+    )
+
+
+def test_merge_rows(tmp_path, monkeypatch):
+    """The base whole; each other run's own idx over it, × (its row_scale /
+    the base's), appended (ids sorted) where the base lacks one; overlap and
+    a line mode refused."""
+    import torch
+
+    from cjk_scale import merge as mg
+
+    monkeypatch.setattr(mg, "run_dir", lambda r: tmp_path / r)
+    monkeypatch.setattr(mg, "trained_path", lambda r: tmp_path / r / "trained.pt")
+    monkeypatch.setattr("data.inventory.qwen_pieces", lambda: None)
+    idx = {"a": {10}, "b": {11, 13}, "c": {10}, "l": {12}}
+    monkeypatch.setattr(mg, "run_idx", lambda r, tokq: idx[r])
+    _rows_file(tmp_path / "a" / "trained.pt", [10, 11, 12], [[1.0], [2.0], [3.0]], 1.0)
+    _rows_file(tmp_path / "b" / "trained.pt", [10, 11, 12, 13], [[0.0], [5.0], [0.0], [7.0]], 2.0)
+    out = mg.merge("m", ["a", "b"])
+    sd = torch.load(out / "trained.pt", weights_only=False)
+    assert sd["delta"]["ext_ids"] == [10, 11, 12, 13]
+    assert torch.equal(sd["delta"]["raw"], torch.tensor([[1.0], [10.0], [3.0], [14.0]]))
+    assert sd["delta"]["row_scale"] == 1.0 and sd["seed_merged"] == "seed.pt"
+    rec = json.loads((out / "merge.json").read_text())
+    assert rec["sources"][0]["rescale"] == 2.0 and rec["sources"][0]["added"] == 1
+    with pytest.raises(AssertionError, match="already holds rows"):
+        mg.merge("m", ["a", "b"])
+    _rows_file(tmp_path / "c" / "trained.pt", [10], [[9.0]], 1.0)
+    with pytest.raises(AssertionError, match="both trained"):
+        mg.merge("m2", ["a", "c"])
+    _rows_file(tmp_path / "l" / "trained.pt", [12], [[9.0]], 1.0, line=torch.zeros(1))
+    with pytest.raises(AssertionError, match="line mode"):
+        mg.merge("m3", ["a", "l"])

@@ -1,0 +1,6 @@
+# run0927_cold_k — plan_2900 § 3 (Run C-k, 2026-09-27): 388 cold kanji, ranks
+# 1984–3013. budget.py's cold-single row sets its steps and items. The single
+# ruler is the read.
+
+vocabs = "ja_cold_1901_2900_k.txt"
+read = []

@@ -5,6 +5,7 @@
     scale.py <run> train       # GPU: the vocabs' rows, everything else frozen at the seed
     scale.py <run> eval        # GPU: floor + trained on the rulers → <run>/sheet.png + reads.json
     scale.py <run> conflict    # GPU: do the run's band groups pull a row the same way (no training)
+    scale.py <out> merge <run> <run> …   # CPU: disjoint runs from the seed → <out>/trained.pt
     scale.py <run> <verb> --submit [--queue]   # enqueue on the daemon (GPU verbs must)
     scale.py <run> data --workers N            # render processes (default cpu − 2)
     scale.py windows | runs | ledger           # the band law, the run files, the job ledger
@@ -29,7 +30,7 @@ from cjk_scale.paths import REPO, bootstrap  # noqa: E402
 
 bootstrap()
 
-VERBS = ("data", "train", "eval", "conflict")
+VERBS = ("data", "train", "eval", "conflict", "merge")
 COMMANDS = ("windows", "runs", "ledger")
 
 
@@ -41,6 +42,9 @@ def build_parser() -> argparse.ArgumentParser:
         "run", help=f"configs/runs/<run>.toml, or one of {', '.join(COMMANDS)}"
     )
     p.add_argument("verb", nargs="?", choices=VERBS)
+    p.add_argument(
+        "runs", nargs="*", help="merge: the runs, base first (<run> is the out dir)"
+    )
     p.add_argument(
         "--workers", type=int, help="data: render processes (default cpu − 2)"
     )
@@ -61,6 +65,13 @@ def main(argv=None):
         assert a.verb is None, f"`{a.run}` takes no verb"
         return command(a.run)
     assert a.verb, f"scale.py {a.run} <{'|'.join(VERBS)}>"
+    if a.verb == "merge":
+        assert not a.submit, "merge is CPU: run it in place"
+        from cjk_scale.merge import merge
+
+        merge(a.run, a.runs)
+        return
+    assert not a.runs, f"`{a.verb}` takes no run list"
     from cjk_scale.config import load_run
 
     rc = load_run(a.run)

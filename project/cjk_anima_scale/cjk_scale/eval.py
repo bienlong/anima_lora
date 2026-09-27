@@ -8,11 +8,15 @@ ruler the reads of record used.
   native    ``native``: あ / い on the scene prompts, ``en`` / ``swap`` — the
             frozen-row control
   piece     ``native --eval_tag piece``: a trained piece alone in a native
-            scene, ``en`` / ``swap`` — up to ``PIECE_N`` of the run's piece
-            vocabs: the ones the ``read`` strings tokenize into, then the
-            ``word`` group's (``piece_vocabs``). The one ruler that sees piece
+            scene, ``en`` / ``swap`` — up to ``RULER_N`` of the run's piece
+            vocabs: the ones the ``read`` strings tokenize into, then
+            ``ruler_sample``'s (``piece_vocabs``). The one ruler that sees piece
             identity: ``word`` exact / ``sent`` / ``target`` read a run that
             bought piece natives as dead (reports/piece_2026_09_25.md)
+  single    ``native --eval_tag single``: a trained single alone in a native
+            scene, ``en`` — up to ``RULER_N`` of the run's single vocabs
+            (``single_vocabs``); per glyph official / contained is its
+            ``strings`` table (stage_i's criterion 1, plan_2900 § 5-2)
   sent      ``native --eval_tag sent``: the run's ``read`` strings × ``en``
   target    ``target``: the user's verbatim captions (``assets/target_prompts.txt``:
             はい / こんにちは)
@@ -61,12 +65,16 @@ from .paths import data_dir, floor_dir, run_dir, trained_path
 FLOOR_ARM = "floor"
 TRAINED_ARM = "trained"
 ARMS = (FLOOR_ARM, TRAINED_ARM)
-RULERS = ("eval", "native", "piece", "sent", "target")
+RULERS = ("eval", "native", "piece", "single", "sent", "target")
 EVAL_GROUPS = ("single", "single_kanji", "word", "en")  # the ones a run's eval.json has
 NATIVE_CHARS = "あ,い"  # the frozen-row control (plan.md § 2)
 NATIVE_CLAUSES = "en,swap"
-PIECE_N = 8  # the piece ruler's vocabs (reports/piece_2026_09_25.md read 8)
+# the piece / single rulers' vocabs: all of the kind up to RULER_N, then a
+# seeded sample stratified by glyph count (plan_2900 § 5-2; the piece ruler
+# read 8 before, reports/piece_2026_09_25.md)
+RULER_N = 24
 PIECE_CLAUSES = "en,swap"
+SINGLE_CLAUSES = "en"
 SENT_CLAUSES = "en"
 SEEDS = 2
 GEN_STEPS, GEN_CFG, SEED = 28, 4.0, 0
@@ -75,6 +83,7 @@ READ_FILES = {
     "eval": "eval_reads.json",
     "native": "native/native_reads.json",
     "piece": "native_piece/native_reads.json",
+    "single": "native_single/native_reads.json",
     "sent": "native_sent/native_reads.json",
     "target": "target/native_reads.json",
 }
@@ -125,28 +134,75 @@ def probe_args(rc: RunConfig, arm: str, stage_names: list, extra: list | None = 
     return build_parser(STAGES).parse_args(argv)
 
 
-@cache
-def piece_vocabs(rc: RunConfig) -> tuple[str, ...]:
-    """The piece ruler's vocabs, up to ``PIECE_N``: the run's piece vocabs
-    the ``read`` strings tokenize into (one Qwen token, ≥ 2 glyphs), then the
-    ``word`` group's texts in ``eval.json`` order (the build's sample of the
-    piece vocabs). Empty for a run with no piece vocabs."""
-    from data.inventory import pieces as qpieces
-    from data.inventory import qwen_pieces
+def ruler_sample(vocabs, n: int = RULER_N, seed: int = SEED) -> list[str]:
+    """All of ``vocabs`` when there are ≤ ``n``; else ``n`` of them, stratified
+    by glyph count: each stratum shuffled by ``Random(seed)``, then drawn
+    round-robin (equal per stratum; a short stratum's share goes to the
+    rest), in glyph-count order."""
+    import random
 
     from .windows import glyph_count
 
-    data = data_dir(rc.name)
-    vocabs = set(json.loads((data / "vocabs.json").read_text(encoding="utf-8")))
-    tok, q = qwen_pieces()
+    vocabs = list(dict.fromkeys(vocabs))
+    if len(vocabs) <= n:
+        return vocabs
+    rng = random.Random(seed)
+    strata: dict = {}
+    for v in vocabs:
+        strata.setdefault(glyph_count(v), []).append(v)
+    for g in sorted(strata):
+        rng.shuffle(strata[g])
     out: list[str] = []
-    for s in rc.read:
-        for p, e in qpieces(tok, q, s):
-            if e is not None and p in vocabs and glyph_count(p) >= 2:
-                out.append(p)
-    ev = json.loads((data / "eval.json").read_text(encoding="utf-8"))
-    out += [e["text"] for e in ev if e["group"] == "word"]
-    return tuple(dict.fromkeys(out))[:PIECE_N]
+    while len(out) < n:
+        for g in sorted(strata):
+            if strata[g] and len(out) < n:
+                out.append(strata[g].pop(0))
+    return out
+
+
+def _kind_vocabs(rc: RunConfig, kind: str) -> list[str]:
+    """The run's vocabs of ``kind`` (``single`` / ``piece``: one Qwen token
+    with a pack row), in ``vocabs.json`` order."""
+    from data.inventory import pieces as qpieces
+    from data.inventory import qwen_pieces
+
+    from .windows import vocab_kind
+
+    data = data_dir(rc.name)
+    vocabs = json.loads((data / "vocabs.json").read_text(encoding="utf-8"))
+    tok, q = qwen_pieces()
+    out = []
+    for v in vocabs:
+        ps = qpieces(tok, q, v)
+        if len(ps) == 1 and ps[0][1] is not None and vocab_kind(v, 1) == kind:
+            out.append(v)
+    return out
+
+
+@cache
+def piece_vocabs(rc: RunConfig) -> tuple[str, ...]:
+    """The piece ruler's vocabs, up to ``RULER_N``: the run's piece vocabs
+    the ``read`` strings tokenize into (one Qwen token, ≥ 2 glyphs), then
+    ``ruler_sample`` of the rest. Empty for a run with no piece vocabs."""
+    from data.inventory import pieces as qpieces
+    from data.inventory import qwen_pieces
+
+    have = _kind_vocabs(rc, "piece")
+    tok, q = qwen_pieces()
+    first = list(
+        dict.fromkeys(
+            p for s in rc.read for p, e in qpieces(tok, q, s) if e is not None and p in have
+        )
+    )[:RULER_N]
+    rest = [v for v in have if v not in first]
+    return tuple(first + ruler_sample(rest, RULER_N - len(first)))
+
+
+@cache
+def single_vocabs(rc: RunConfig) -> tuple[str, ...]:
+    """The single ruler's vocabs: ``ruler_sample`` of the run's single
+    vocabs. Empty for a run with none."""
+    return tuple(ruler_sample(_kind_vocabs(rc, "single")))
 
 
 def ruler_args(rc: RunConfig, arm: str, ruler: str):
@@ -166,6 +222,20 @@ def ruler_args(rc: RunConfig, arm: str, ruler: str):
                 ",".join(piece_vocabs(rc)),
                 "--native_clauses",
                 PIECE_CLAUSES,
+            ],
+        )
+    if ruler == "single":
+        return probe_args(
+            rc,
+            arm,
+            ["native"],
+            [
+                "--eval_tag",
+                "single",
+                "--native_chars",
+                ",".join(single_vocabs(rc)),
+                "--native_clauses",
+                SINGLE_CLAUSES,
             ],
         )
     if ruler == "sent":
@@ -196,11 +266,24 @@ def has_pieces(rc: RunConfig) -> bool:
     )
 
 
+def has_singles(rc: RunConfig) -> bool:
+    """The run's ``vocabs.json`` holds a one-glyph vocab (no tokenizer;
+    ``single_vocabs`` does the real split)."""
+    from .windows import glyph_count
+
+    f = data_dir(rc.name) / "vocabs.json"
+    return f.exists() and any(
+        glyph_count(v) == 1 for v in json.loads(f.read_text(encoding="utf-8"))
+    )
+
+
 def rulers(rc: RunConfig) -> list[str]:
     return [
         r
         for r in RULERS
-        if (r != "sent" or rc.read) and (r != "piece" or has_pieces(rc))
+        if (r != "sent" or rc.read)
+        and (r != "piece" or has_pieces(rc))
+        and (r != "single" or has_singles(rc))
     ]
 
 
@@ -225,6 +308,9 @@ def run(rc: RunConfig) -> Path:
             if ruler == "piece" and not piece_vocabs(rc):
                 print(f"===== {rc.name} {arm}: piece — no piece vocab, skipped")
                 continue
+            if ruler == "single" and not single_vocabs(rc):
+                print(f"===== {rc.name} {arm}: single — no single vocab, skipped")
+                continue
             if arm == FLOOR_ARM:
                 n = ensure_floor(rc, ruler)
                 print(
@@ -235,7 +321,7 @@ def run(rc: RunConfig) -> Path:
                 continue
             print(f"===== {rc.name} {arm}: {ruler}", flush=True)
             a = ruler_args(rc, arm, ruler)
-            run_stage("native" if ruler in ("piece", "sent") else ruler, a)
+            run_stage("native" if ruler in ("piece", "single", "sent") else ruler, a)
     return compose(rc)
 
 
@@ -245,6 +331,7 @@ def run(rc: RunConfig) -> Path:
 NATIVE_RULERS = {  # ruler → (its chars, its clauses) as ruler_args renders them
     "native": lambda rc: (NATIVE_CHARS.split(","), NATIVE_CLAUSES),
     "piece": lambda rc: (list(piece_vocabs(rc)), PIECE_CLAUSES),
+    "single": lambda rc: (list(single_vocabs(rc)), SINGLE_CLAUSES),
     "sent": lambda rc: (list(rc.read), SENT_CLAUSES),
 }
 

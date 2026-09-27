@@ -11,7 +11,9 @@ nothing here imports, paths into or configures from `../cjk_renderable_anima/`
 
 - `scale.py` front door: `scale.py <run> data | train | eval | conflict
   [--submit [--queue]] [--workers N]` (`--workers`: render processes for
-  `data`, default cpu − 2); `scale.py windows | runs | ledger`. No other flag.
+  `data`, default cpu − 2); `scale.py <out> merge <run> <run>…` (CPU: disjoint
+  runs from the seed → one merged rows file); `scale.py windows | runs |
+  ledger`. No other flag.
 - `configs/runs/<run>.toml` — **the run, the whole live surface**: `vocabs` (a
   vocabs file under `assets/vocabs/`, one vocab per line — or a list of
   `data.vocabs` specs) and `read` (the `native_sent` strings). Everything else
@@ -28,7 +30,8 @@ nothing here imports, paths into or configures from `../cjk_renderable_anima/`
   read only by `cjk_scale/legacy.py` for `experiments/`.
 - `cjk_scale/` the line's code (`windows` = the law, `config` = the run file +
   data pools, `recipes` + `builder` = data, `rows` + `train`, `eval`,
-  `conflict`, `ledger`; `legacy` reads the split pre-collapse configs for
+  `conflict`, `ledger`, `budget` = steps / items per vocab by kind × glyphs ×
+  warm, `merge`; `legacy` reads the split pre-collapse configs for
   `experiments/`). Baking a run's rows into a pack is one command, not a
   module:
   `.venv/bin/python scripts/toolkits/bake_vocab_pack.py output/cjk_anima_scale/<run> --out models/vocab_packs/anima_cjk_vocab_pack_<run>`.
