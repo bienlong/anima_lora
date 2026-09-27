@@ -30,6 +30,9 @@ cjk_anima_scale line's gated ``v_line``) adds a line block: the vector ×
 (the baked rows + the vector) is regenerated at load
 (``ext_vocab.materialize_line``); the encoder routes ext ids with an ext
 neighbour to it. The safetensors stays the stored rows only.
+``--line_fold`` drops the gate instead: the same vector × dose is added to
+every trained row (the line block's source span) of the stored table, so
+the pack loads as a plain pack — the ungated arm (``proposal.md`` § 2.0).
 
 The json gains a ``render`` block (source arm, ext ids, row → piece text,
 scale, base pack digest, git rev) and the safetensors header carries the
@@ -159,6 +162,46 @@ def bake(
     return out, m, summary
 
 
+def line_vec(table: torch.Tensor, d: dict, src: Path, dose: float) -> torch.Tensor:
+    """``src``'s ``line`` in effective units × ``dose``."""
+    if d.get("line") is None:
+        raise ValueError(f"{src}: its delta carries no line vector")
+    vec = d["line"].float() * float(d["row_scale"]) * float(dose)
+    if vec.shape != (table.shape[1],):
+        raise ValueError(f"line vector {tuple(vec.shape)} vs pack dim {table.shape[1]}")
+    return vec
+
+
+def line_src_end(table: torch.Tensor, mapping: dict) -> int:
+    """The rows a line applies to: ``[0, iso.start)``, else every stored row."""
+    iso = IsoSpec.from_mapping(mapping)
+    return iso.start if iso else int(table.shape[0])
+
+
+def fold_line(
+    table: torch.Tensor, mapping: dict, src: Path, dose: float
+) -> tuple[torch.Tensor, dict]:
+    """The ungated line: ``src``'s vector × ``dose`` added to every row of
+    :func:`line_src_end` in the stored table (either gate of the source —
+    the fold is the gate dropped). Returns ``(table, summary)``."""
+    if mapping.get("line"):
+        raise ValueError("the base pack carries a line block — fold onto a plain pack")
+    d = torch.load(src, map_location="cpu", weights_only=False)["delta"]
+    vec = line_vec(table, d, src, dose)
+    src_end = line_src_end(table, mapping)
+    out = table.clone()
+    out[:src_end] = (table[:src_end].float() + vec).to(table.dtype)
+    return out, {
+        "source": str(src),
+        "dose": float(dose),
+        "row_scale": float(d["row_scale"]),
+        "norm": float(vec.norm()),
+        "gate": "none (folded)",
+        "trained_gate": d.get("line_gate", "run"),
+        "rows": [0, src_end],
+    }
+
+
 def add_line(table: torch.Tensor, mapping: dict, src: Path, dose: float) -> dict:
     """Write ``mapping["line"]`` for the (baked, stored) ``table``: the
     ``line`` vector of ``src``'s delta in effective units × ``dose``. The
@@ -169,18 +212,13 @@ def add_line(table: torch.Tensor, mapping: dict, src: Path, dose: float) -> dict
         raise ValueError("the base pack already carries a line block")
     sd = torch.load(src, map_location="cpu", weights_only=False)
     d = sd["delta"]
-    if d.get("line") is None:
-        raise ValueError(f"{src}: its delta carries no line vector")
     if d.get("line_gate", "run") != "run":
         raise ValueError(
             f"{src}: an ungated line (line_gate {d['line_gate']!r}) — the line "
-            "block is the run gate; fold it into the rows instead"
+            "block is the run gate; fold it into the rows (--line_fold)"
         )
-    vec =d["line"].float() * float(d["row_scale"]) * float(dose)
-    if vec.shape != (table.shape[1],):
-        raise ValueError(f"line vector {tuple(vec.shape)} vs pack dim {table.shape[1]}")
-    iso = IsoSpec.from_mapping(mapping)
-    src_end = iso.start if iso else int(table.shape[0])
+    vec = line_vec(table, d, src, dose)
+    src_end = line_src_end(table, mapping)
     start = int(materialize_iso(table, mapping).shape[0])
     spec = LineSpec(src_end=src_end, start=start, vec=tuple(vec.tolist()))
     summary = {
@@ -322,6 +360,12 @@ def main() -> None:
         default=1.0,
         help="scale on the line vector (the read of record: 0.5)",
     )
+    p.add_argument(
+        "--line_fold",
+        action="store_true",
+        help="with --line_from: add the vector to every trained row (ungated) "
+        "instead of writing a gated line block",
+    )
     p.add_argument("--overwrite", action="store_true")
     a = p.parse_args()
 
@@ -349,7 +393,14 @@ def main() -> None:
         ext_ids=delta["ext_ids"],
         row_text={str(k): v for k, v in row_text.items()},
     )
-    if a.line_from:
+    if a.line_fold and not a.line_from:
+        raise SystemExit("--line_fold needs --line_from")
+    if a.line_fold:
+        baked, summary["line"] = fold_line(
+            baked, m, resolve_under_home(a.line_from), a.line_dose
+        )
+        m["render"]["line"] = summary["line"]
+    elif a.line_from:
         summary["line"] = add_line(
             baked, m, resolve_under_home(a.line_from), a.line_dose
         )
@@ -374,8 +425,9 @@ def main() -> None:
     )
     if "line" in summary:
         ln = summary["line"]
+        what = "line folded, rows" if a.line_fold else "line block rows"
         print(
-            f"  line block rows {ln['rows']} (dose {ln['dose']:g}, |v| {ln['norm']:.2f}) "
+            f"  {what} {ln['rows']} (dose {ln['dose']:g}, |v| {ln['norm']:.2f}) "
             f"from {ln['source']}",
             flush=True,
         )

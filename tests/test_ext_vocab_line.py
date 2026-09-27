@@ -11,6 +11,8 @@ Invariants:
   changes the digest.
 * ``bake_vocab_pack.add_line`` writes the vector × row_scale × dose and
   places the block after the stored rows.
+* ``bake_vocab_pack.fold_line`` adds the same vector to every stored row
+  instead (ungated), leaving the row count and mapping alone.
 """
 
 from __future__ import annotations
@@ -97,3 +99,18 @@ def test_bake_add_line(tmp_path):
     assert torch.allclose(full[6:], table + line * 2.0 * 0.5)
     with pytest.raises(ValueError):
         bvp.add_line(table, mapping, src, dose=0.5)  # already has one
+
+
+def test_bake_fold_line(tmp_path):
+    table = torch.randn(6, 4, generator=torch.Generator().manual_seed(0))
+    mapping = {"rows": 6, "qwen": {}}
+    src = tmp_path / "trained.pt"
+    line = torch.tensor([1.0, -2.0, 0.0, 0.5])
+    torch.save({"delta": {"line": line, "row_scale": 2.0}}, src)
+    out, summary = bvp.fold_line(table, mapping, src, dose=0.5)
+    assert torch.allclose(out, table + line * 2.0 * 0.5)
+    assert summary["rows"] == [0, 6] and summary["trained_gate"] == "run"
+    assert "line" not in mapping and ev.materialize(out, mapping).shape == (6, 4)
+    bvp.add_line(table, mapping, src, dose=0.5)
+    with pytest.raises(ValueError, match="plain pack"):
+        bvp.fold_line(table, mapping, src, dose=0.5)
