@@ -27,6 +27,8 @@ so a closed section keeps a one-line stub. Numbers cited from before the
 | § 2.3 kanji_mode: warm seed kanji under 0.5 · `v_line` | barely compose: ≤ 1 edit 2 → 10 / 96 (p 0.04), ≥ 2 in order 3 → 14, against kana 5 → 40 / 80 and 72 / 80. Kanji vs kana, not row maturity | `experiments/kanji_mode/results/20260927-1138-k1-score/` (no report) |
 | § 2.0 F1's `v_line` ungated at 0.5 (held-out 10, the arm built into the rows) | the gate buys the singles: official 124 vs gated 152 / 320, repeat 43 vs 26, alone as a line 91 vs 74. Words as gated (≤ 1 edit 78 vs 80 / 160) | `experiments/f1_line/results/20260927-1609-l1/` (no report) |
 | § 2.0 F2a: `v_line` trained ungated, rows frozen, words + b0709 lone | dose 1 fails both axes: words ≤ 1 edit 40, ≤ 2 edits 64 (floor 93), `dup` 88; singles official 69, repeat 48, line 128. `v_line` did not shrink (norm 205 = F1's 204, cos 0.85 to it). At dose 0.5 it is no better than F1's ungated 0.5 on either axis: words ≤ 1 edit 64 vs 78 (p 0.08), `dup` 66 vs 50 (p 0.04); singles official 117 vs 124, repeat 49 vs 43, line 103 vs 91 (p 0.05). The b0709 lone items bought nothing alone | `experiments/f2a_line/results/20260927-1644-a1/` (no report) |
+| § 2.0 F2a′: lone at every word band, in-domain (small-bubble pool `s1s`) | dose 1 no better than F2a on singles (official 71, repeat 59, line 131) and worse on words (≤ 1 edit 26, `dup` 107); `v_line` cos 0.92 to F2a's. Donors alone break too (official 91 → 59, line 47 → 97 / 144): the lone items did not hold the glyphs they trained on. d0.5 not run | `experiments/f2a_line/results/20260927-1950-a2/` (no report); the follow-up is `hypothesis.md` |
+| `hypothesis.md`: where EN's in-word context comes from (adapter only) | EN pieces are read in context (cos 0.51), seed JA rows are not (0.965); Qwen is not the trigger. The raw pack rows take context (0.66); the seed rows' norm (1.3–1.9× the T5 table's) is most of the immunity | `experiments/ctx_trigger/results/` `c1`, `c2` |
 | § 2.4: the gate on runs with pieces | a piece in a run renders 0 before and after. はい contained 4 → 14 / 16, target はい 0 → 6 / 8. The single beside a piece doubles (やったネ `wdup` 2 → 9). A line-block pack in ComfyUI rendered へんたい as へんてだ♥ | `reports/line_pieces_2026_09_26.md` |
 
 The best configuration on record for a vocab without line training is
@@ -120,20 +122,21 @@ reads it first.
   the words only at 0.3–0.7, so the loss could keep `v_line` harmless at
   high σ and let it compose at mid / low σ, where no lone item asked
   anything of it. A lone glyph passes every σ at inference.
-- **F2a′, lone at the words' bands:** the same trainer (ungated, rows
-  frozen), and every word band gets a lone counterpart at its own px, so
-  word and lone differ only in the neighbours:
-  - b0507: the count tier (`scene_single_small`, 28–40 px, fill 0.2–0.4),
-    at 0.5 of the group, not Stage B's 0.3.
-  - b0305: lone glyphs at the words' ≈ 18 px (`scene_single_small`,
-    glyph_px 12–24). It needs a window row for a single under 24 px,
-    ceiling-only like the 24–40 px row: A.1's single letter, flat, reads
-    live 0.2–0.6 at 12–16 px and 0.25–0.6 at 20 px, peak 0.4–0.5
-    (`band_experiment_results.md` § 2), so the row is 0.3–0.5.
-    `test_unread_cells_have_no_window`'s "never renders that small in a
-    bubble" was a limit of the fit-sized builder, and
-    `scene_single_small` shrinks below the fit.
-  - b0709 lone kept at a smaller share.
+- **F2a′, lone at the words' bands** (`--mix a2`, job
+  `20260927-195013-2c8ca4`): the same trainer (ungated, rows frozen), and
+  every word band gets a lone counterpart at its own px, in a bubble it
+  fills naturally, so word and lone differ only in the neighbours. Stage
+  B's count tier (fill 0.2–0.4 of a ≥ 53 px bubble) is out of domain and
+  is not used.
+  - b0507: 900 words + 900 lone at 28–40 px, fill 0.6–0.9. The existing
+    pools' smaller bubbles take these (px median 33 vs the words' 34).
+  - b0305: 1 350 words + 450 lone at 12–24 px, fill 0.5–0.9 (px median 19
+    vs 18). Only the small-bubble pool `s1s` has bubbles that small
+    (`--scene_min_box 20`, README § Scene pools: 390 kept, 100 of them
+    small enough), so the lone items reuse 64 scenes (max 51 each). The
+    `windows.py` row for a single at 12–24 px is 0.3–0.5, ceiling-only
+    (A.1: live 0.2–0.6 at 12–16 px, 0.25–0.6 at 20 px).
+  - b0709: 300 lone (150 scene + 150 grid).
 
   Read as F2a: the held-out 10 at dose 1 and 0.5, plus the donor singles
   (こんにちは's glyphs + あ う が と, en, floor cached). If the donors hold
@@ -250,8 +253,8 @@ one of those failures.
 
 ## 3. Order
 
-1. **§ 2.0 F2a′**: F2a with lone items at every word band (the 12–24 px
-   single window row first). F2a ran: dose 1 fails (§ 0).
+1. **§ 2.0 F2a′**: F2a with lone items at every word band (running). F2a
+   ran and fails (§ 0).
 2. **§ 2.0 F2b**: + kanji words (§ 2.3) + piece runs (§ 2.4).
 3. The gated fallback: **§ 2.1** the dose sweep, **§ 2.5** the sent test,
    then the post-train comparison.

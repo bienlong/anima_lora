@@ -38,6 +38,29 @@ ungated's trade-off: a point better on both axes means the lone items found
 a direction; one that only shrinks ``v_line`` (singles back, words gone)
 is the dose axis again.
 
+**F2a′ (``--mix a2``, 2026-09-27).** ``a1`` (the mix above) failed: dose
+0.5 is no better than F1's ungated 0.5 on either axis. Its lone items sat
+only at σ 0.7–0.9 and its words only at 0.3–0.7, so nothing asked
+``v_line`` to leave a lone glyph alone at mid / low σ. ``a2`` gives every
+word band a lone counterpart at its own px, in a bubble it fills naturally
+(Stage B's count tier, fill 0.2–0.4 of a ≥ 53 px bubble, is out of domain):
+
+- b0507: words + lone 28–40 px at fill 0.6–0.9 (``scene_single_small``),
+  0.5 / 0.5; the existing pools' smaller bubbles already take these.
+- b0305: words + lone 12–24 px at fill 0.5–0.9 (the ceiling-only 12–24 px
+  single row of ``windows.py``), 0.75 / 0.25 — only the small-bubble pool
+  ``s1s`` (``--scene_min_box 20``, README § Scene pools) has bubbles that
+  small: 100 of its 390.
+- b0709 lone at share ``A2_B0709_SHARE``.
+
+``s1s`` joins ``scenes`` / ``single_scenes`` for this build only
+(``A2_POOLS``; ``config.DATA`` is untouched on disk).
+
+Output ``run0927_f2a2_line`` (``tf2_<label>_d<d>`` arms as before). The
+read adds the donor singles (``SB.donor_keys()``, en, floor cached) at
+every dose: donors holding alone while the held-out 10 break means the
+constraint trained but did not transfer.
+
 ``--dry_run`` prints the table and the encodings.
 """
 
@@ -65,8 +88,15 @@ _spec.loader.exec_module(F1)
 SB = F1.SB
 
 EXP = OUT / "experiments"
-NAME = "run0927_f2a_line"
-B0709_SHARE = 0.5  # of the kind's items: 1 200 lone items beside 2 400 words
+NAMES = {"a": "run0927_f2a_line", "a2": "run0927_f2a2_line"}
+NAME = NAMES["a"]  # set from --mix in main
+B0709_SHARE = 0.5  # a: of the kind's items, 1 200 lone items beside 2 400 words
+A2_SHARE = 0.75  # a2: b0507 / b0305 each 1 800 items, half of them lone
+A2_B0709_SHARE = 0.125  # a2: 300 b0709 lone items (150 scene + 150 grid)
+LONE_B0507 = {"glyph_px": [28, 40], "fill": [0.6, 0.9], "min_glyph": 12}
+LONE_B0305 = {"glyph_px": [12, 24], "fill": [0.5, 0.9], "min_glyph": 12}
+A2_B0305_LONE = 0.25  # of b0305: only s1s's 100 small bubbles take these
+A2_POOLS = "s1s"  # added to DATA scenes / single_scenes for a2
 REFS = {"gated0.5": EXP / "tf_l1_line0.5", "f1_ug0.5": EXP / "tf_l1_ug0.5"}
 
 
@@ -76,6 +106,7 @@ def parse_args():
     p.add_argument(
         "--legs", nargs="+", default=["data"], choices=["data", "train", "read"]
     )
+    p.add_argument("--mix", choices=sorted(NAMES), default="a")
     p.add_argument("--doses", type=float, nargs="+", default=[1.0])
     p.add_argument("--workers", type=int, help="data: render processes")
     p.add_argument("--dry_run", action="store_true")
@@ -90,17 +121,40 @@ def rc():
     )
 
 
-def table() -> tuple:
-    """Stage B's word tiers without the count tier, plus the b0709 singles."""
+def table(mix: str) -> tuple:
+    """``a``: Stage B's word tiers without the count tier, plus the b0709
+    singles. ``a2``: every word band half words, half lone at its px."""
     from cjk_scale.builder import TABLE, Tier
 
     b0507, b0305 = SB.table()
     spelled = next(t for t in b0507.tiers if t.recipe == "scene_spelled")
     b0709 = next(g for g in TABLE if g.name == "b0709")
+    if mix == "a":
+        return (
+            dataclasses.replace(b0709, share=B0709_SHARE),
+            dataclasses.replace(
+                b0507, tiers=(Tier("scene_spelled", 1.0, spelled.params),)
+            ),
+            b0305,
+        )
     return (
-        dataclasses.replace(b0709, share=B0709_SHARE),
-        dataclasses.replace(b0507, tiers=(Tier("scene_spelled", 1.0, spelled.params),)),
-        b0305,
+        dataclasses.replace(b0709, share=A2_B0709_SHARE),
+        dataclasses.replace(
+            b0507,
+            share=A2_SHARE,
+            tiers=(
+                Tier("scene_spelled", 0.5, spelled.params),
+                Tier("scene_single_small", 0.5, LONE_B0507),
+            ),
+        ),
+        dataclasses.replace(
+            b0305,
+            share=A2_SHARE,
+            tiers=(
+                Tier("scene_spelled", 1 - A2_B0305_LONE, b0305.tiers[0].params),
+                Tier("scene_single_small", A2_B0305_LONE, LONE_B0305),
+            ),
+        ),
     )
 
 
@@ -122,7 +176,46 @@ def dose_arm(label: str, dose: float) -> Path:
     return dst
 
 
-def read(metrics: dict, label: str, doses) -> list:
+DONOR_TAG = (
+    "spell_donor"  # the arm's donor reads; native_spell/ holds the held-out ones
+)
+
+
+def native_read(arm_path: Path, chars, clauses: str, tag: str) -> Path:
+    """``SB.native_read`` under its own eval tag: the native stage rewrites
+    ``native_<tag>/native_reads.json`` whole, so the donor keys cannot share
+    the held-out keys' dir."""
+    from cjk_scale.config import RunConfig
+    from cjk_scale.eval import TRAINED_ARM, probe_args
+    from stages import run as run_stage
+
+    reads = arm_path / f"native_{tag}" / "native_reads.json"
+    cl = clauses.split(",")
+    if reads.exists():
+        held = {(m["text"], m["clause"]) for m in json.loads(reads.read_text("utf-8"))}
+        if all((k, c) in held for k in chars for c in cl):
+            print(f"  (read from disk: {reads})", flush=True)
+            return reads
+    rc_ = RunConfig(name=NAME, path=Path(__file__), vocabs=(), read=())
+    a = probe_args(
+        rc_,
+        TRAINED_ARM,
+        ["native"],
+        [
+            "--eval_tag",
+            tag,
+            "--native_chars",
+            ",".join(chars),
+            "--native_clauses",
+            clauses,
+        ],
+    )
+    a.arm_path, a.data_path = str(arm_path), str(arm_path / "data")
+    run_stage("native", a)
+    return reads
+
+
+def read(metrics: dict, label: str, doses, donors: bool) -> list:
     chars = SB.held_keys()
     cl = "en,swap"
     floor = SB.check_floor(chars, cl)
@@ -156,18 +249,47 @@ def read(metrics: dict, label: str, doses) -> list:
                 "line": F1.paired_line(ln, ref_l[k]),
             }
             print(f"  vs {k} {metrics[key][f'paired_vs_{k}']}", flush=True)
+        if donors:
+            dk = SB.donor_keys()
+            dfloor = SB.check_floor(dk, "en")
+            dfh, dfl = SB.hits(dfloor, dk, "en"), F1.alone_line(dfloor, dk, "en")
+            if "donor_floor" not in metrics:
+                print("floor, donor keys:", flush=True)
+                metrics["donor_floor"] = SB.tally(dfh)
+                metrics["donor_floor"]["singles_line"] = sum(dfl.values())
+            print(f"{path.name} (dose {dose:g}), donor keys:", flush=True)
+            dr = native_read(path, dk, "en", DONOR_TAG)
+            dh, dl = SB.hits(dr, dk, "en"), F1.alone_line(dr, dk, "en")
+            dkey = f"donor_d{dose:g}"
+            metrics[dkey] = SB.tally(dh)
+            metrics[dkey]["singles_line"] = sum(dl.values())
+            metrics[dkey]["paired_vs_floor"] = {
+                **SB.paired(dh, dfh),
+                "line": F1.paired_line(dl, dfl),
+            }
+            print(
+                f"  SINGLES alone as a line {sum(dl.values())} / {len(dl)} "
+                f"(floor {sum(dfl.values())}); vs floor {metrics[dkey]['paired_vs_floor']}",
+                flush=True,
+            )
     return arms
 
 
 def main():
+    global NAME
     args = parse_args()
+    NAME = NAMES[args.mix]
     from cjk_scale import recipes
 
     recipes.RECIPES["scene_spelled"] = SB.scene_spelled
+    recipes.RECIPES["scene_single_small"] = SB.scene_single_small
+    if args.mix == "a2":
+        for k in ("scenes", "single_scenes"):
+            recipes.DATA[k] = f"{recipes.DATA[k]},{A2_POOLS}"
     words = json.loads((OUT / SB.NAME / "donor_words.json").read_text("utf-8"))
     cov = SB.set_words(words)
     ids = SB.check_spelling(SB.encoder(), words)
-    tb = table()
+    tb = table(args.mix)
     for g in tb:
         print(
             f"{g.name} σ {g.band} share {g.share}: "
@@ -179,7 +301,21 @@ def main():
         f"held ids {json.dumps({c: ids[c] for c in SB.HELD}, ensure_ascii=False)}",
         flush=True,
     )
-    metrics: dict = {"name": NAME, "b0709_share": B0709_SHARE, "doses": args.doses}
+    metrics: dict = {
+        "name": NAME,
+        "mix": args.mix,
+        "pools": {k: recipes.DATA[k] for k in ("scenes", "single_scenes")},
+        "table": [
+            {
+                "group": g.name,
+                "band": g.band,
+                "share": g.share,
+                "tiers": [(t.recipe, t.weight, t.params) for t in g.tiers],
+            }
+            for g in tb
+        ],
+        "doses": args.doses,
+    }
     if args.dry_run:
         return
     run_dir = make_run_dir(
@@ -195,7 +331,7 @@ def main():
 
         train(rc(), line_mode="all", rows_frozen=True)
     if "read" in args.legs:
-        arms = read(metrics, args.label, args.doses)
+        arms = read(metrics, args.label, args.doses, donors=args.mix != "a")
     write_result(
         run_dir,
         script=__file__,

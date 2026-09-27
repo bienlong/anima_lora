@@ -32,6 +32,8 @@ def n_tokens(u: str) -> int:
         ("single", 200, "flat", (0.7, 0.9)),  # the flat half
         ("single", 28, "scene", (0.5, 0.7)),  # design stage0507
         ("single", 39, "flat", (0.5, 0.7)),
+        ("single", 16, "scene", (0.3, 0.5)),  # A.1 ceiling (s1s small bubbles)
+        ("single", 20, "flat", (0.3, 0.5)),
         ("piece", 35, "scene", (0.5, 0.7)),  # micro_cf_0922
         ("piece", 48, "scene", (0.5, 0.7)),
         ("multi", 32, "scene", (0.5, 0.7)),  # short lines, design stage0507
@@ -47,9 +49,7 @@ def test_rows_reproduce_the_reads(kind, px, layout, band):
 
 
 def test_unread_cells_have_no_window():
-    assert (
-        window("single", 16, "scene") is None
-    )  # a glyph never renders that small in a bubble
+    assert window("single", 8, "scene") is None  # below every ceiling read
     assert window("multi", 80, "grid") is None  # strings above 64 px are not a cell
     assert window("piece", 8, "flat") is None
 

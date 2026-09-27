@@ -93,6 +93,18 @@ ROWS = (
         "ends and the 0.7–0.9 row begins (32–40 px) is unread",
     ),
     Row(
+        ("single",),
+        LAYOUTS,
+        12,
+        24,
+        0.3,
+        0.5,
+        "ceiling only (cf_band_a1 A.1: single letter, flat, live 0.2–0.6 at "
+        "12–16 px, 0.25–0.6 at 20 px, peak 0.4–0.5); no training read. A "
+        "single lands here only in the small-bubble pool s1s (--scene_min_box "
+        "20): proposal.md § 2.0 F2a′'s lone counterpart of the b0305 words",
+    ),
+    Row(
         ("piece", "multi"),
         LAYOUTS,
         24,

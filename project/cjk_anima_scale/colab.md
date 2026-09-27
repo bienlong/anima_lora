@@ -59,6 +59,22 @@ marked `colab-cu128 branch`) and run `uv lock` again.
   the VM's disk, so pull what comes back first.
 - `colab status` shows the kernel only. It reads `IDLE` while an ssh job
   trains.
+- **The backend reclaims a runtime whose kernel is idle, even while a GPU
+  job runs on it** (Run B, 2026-09-27: three G4s lost, 31.7 CU).
+  `colab skill` says it: "Sessions stay alive as long as the kernel is
+  active." A job started with ssh `nohup`, or with a `Popen` that returns
+  from a `colab exec`, leaves the kernel `IDLE`. Such a VM lived as long as
+  something contacted it at least every 10–14 min (ssh checks count). It
+  died in the first gap of 22–25 min: `longb` (ssh only, last contact 19:13
+  KST, gone by 19:38) and `longb2` / `longb45` (one `Popen` exec, then ssh
+  checks; fine at 20:50, both gone by 21:12). Run A lived through its 66 min
+  because its session ran a `colab exec` every ≈ 60 s the whole time
+  (`~/.config/colab-cli/history/g4runA.jsonl`). The disk goes with the VM,
+  and so does every partial not yet pulled. `session_terminated: pruned`
+  in the history is when a local `colab` call noticed, not when the VM died.
+  **Launch a run so the kernel stays busy** (§ Running: a blocking
+  `colab exec` cell). Keeping it alive by contacting it is the other way,
+  but that needs a client that never leaves a gap.
 
 ## Shell and transfer
 
@@ -85,8 +101,9 @@ marked `colab-cu128 branch`) and run `uv lock` again.
   without it torch finds no driver. Start every ssh command with
   `. /content/env.sh` (it also sets `ANIMA_VOCAB_PACK` and cds into the
   checkout).
-- Run long jobs detached:
-  `nohup bash -c ". /content/env.sh; .venv/bin/python …" > /content/<log> 2>&1 &`.
+- `nohup bash -c ". /content/env.sh; .venv/bin/python …" > /content/<log> 2>&1 &`
+  suits short jobs only (`data`, smokes). A job that outlives the kernel's
+  idle window loses its VM (§ Session and billing).
 - `pkill -f "<pattern>"` in an ssh command also matches that ssh's own shell
   (its command line contains the pattern) and kills it. Bracket one letter:
   `pkill -f "[n]vidia-smi"`.
@@ -123,7 +140,7 @@ the scene records store absolute paths.
 | `output/cjk_anima_scale/scenes_{s1,s1w,sl1w,ja_comic}/` | 630 MB | all four for every run: `config.py`'s pool list loads them regardless of kind |
 | `output/wake_probe/scenes_<p>` → `../cjk_anima_scale/scenes_<p>` | symlinks | the scene records' `file` paths go through `wake_probe/` |
 | `post_image_dataset/render/ja/{resized,heldout}/boxes.jsonl` | 1.9 MB | the only corpus files `data` reads |
-| `$MANGA109S/derived/dialogue_2_10.tsv` + `.env` | — | `--pieces` only; not yet run on a VM |
+| `$MANGA109S/derived/dialogue_2_10.tsv` + `.env` | 1.9 MB | `--pieces` only |
 
 ## Running
 
@@ -143,6 +160,21 @@ the scene records store absolute paths.
   The local GPU runs ≈ 2.2 it/s. Cost per step is the same on all three, so
   the GPU choice sets wall time only. At batch 4, VRAM stays under 19 GB, and
   the G4's 96 GB goes unused.
+- Piece smoke (`--pieces`, L4, 2026-09-27; VM-only run `psmoke_p3`: すごい
+  わかる なんだ, 3 glyphs, 90 steps/row): `data` 35 s (180 items, both piece
+  tiers, the phrase file read through the VM's `.env`), `train` 270 steps in
+  337 s, steady ≈ 1.15 it/s, 14 GB VRAM. The returned rows loaded and
+  rendered here.
+- **Two runs on one G4 are slower than one** (Run B, 2026-09-27:
+  `run0927_long_p3` + `run0927_long_p45` launched together, 32 GB VRAM):
+  3.20 + 3.21 = 6.41 it/s steady, against 7.18 for one run. Two processes
+  time-slice the GPU (no MPS), and one run at batch 4 already keeps it busy
+  (caches built, compiled). Run one at a time. Two runs together only save
+  the idle gap if nobody is there to launch the second one.
+- Data build at scale (G4, 46 workers): `run0927_long_p3` 23 534 items in
+  2.1 min, `run0927_long_p45` 33 600 in 2.9 min. `data/` holds ≈ 1 MB of
+  TE cache per item (30 GB / 39 GB for the two runs); the 236 GB disk has
+  room.
 - Wall time and cost:
 
   | run | steps | L4 | A100 | G4 |
@@ -151,10 +183,22 @@ the scene records store absolute paths.
   | C-k (150 steps/row) | 58.2 k | 12.5 h / 19 CU | 3.9 h / 21 CU | 2.3 h / 20 CU |
   | C-k (270 steps/row) | ≈ 105 k | 22.6 h / 35 CU | 7.1 h / 38 CU | 4.1 h / 36 CU |
   | C-p | 73.1 k | 15.7 h / 24 CU | 4.9 h / 26 CU | 2.8 h / 25 CU |
-- The VM has no `/usr/bin/time`. To start a job that outlives the call
-  without an ssh connection, run `subprocess.Popen(['bash', '-c', cmd],
-  stdout=open(log, 'w'), stderr=subprocess.STDOUT, start_new_session=True)`
-  through `colab exec`. The kernel's env already has the driver path.
+- The VM has no `/usr/bin/time`.
+- **Launch `train` as a blocking kernel cell**, so the kernel reads `BUSY`
+  for the whole run (§ Session and billing). Send this through
+  `colab exec`, and let the local client exit (or `timeout` it). Jupyter
+  keeps running the cell after the websocket closes. The kernel's env
+  already has the driver path.
+
+  ```python
+  import subprocess
+  subprocess.run(['bash', '-c', cmd], stdout=open(log, 'w'), stderr=subprocess.STDOUT)
+  ```
+
+  Untested as of 2026-09-27. Check it on the first long run: early on, leave
+  the session untouched for more than 30 min and confirm it survives. A
+  `Popen(..., start_new_session=True)` returns at once, and the kernel goes
+  `IDLE`, so it is not a launch for a long job.
 
 ## What comes back
 
@@ -180,11 +224,12 @@ are enough.
 - **No resume; partials instead** (user, 2026-09-27). `train` writes
   `trained_partial.pt` every 5 000 steps (`SAVE_EVERY`), in the same merged
   format as `trained.pt`, so eval reads it as is. It lives on the VM's disk,
-  which a dropped session loses, so pull it during a long run. The session
-  limit is unmeasured. The C runs take 2.3–4.1 h on a G4 (12–23 h on an
-  L4).
-- **Which runs go.** plan_2900 puts C on Colab and A local.
+  which a dropped session loses, so pull it during a long run. The drops so
+  far are idle-kernel reclaims (§ Session and billing), not a session cap.
+  The C runs take 2.3–4.1 h on a G4 (12–23 h on an L4).
+- **Which runs go.** A ran on a G4. B lost its VMs (2026-09-27). What came
+  back is `run0927_long_p3/trained_partial.pt` at 20 k of 31 770 steps and
+  `run0927_long_p45/trained_partial.pt` at 15 k of 45 360: cosine schedule
+  cut mid-run, no resume, so neither is the recipe's result. C goes on
+  Colab as well.
 - **C-k budget** (150 or 270 steps/row) is open in plan_2900.
-- **Data build at scale** is unmeasured on the VM. The alternative is to
-  build here and upload (≈ 4 GB at 5.7 MB/s ≈ 12 min).
-- **Piece runs** (`--pieces`, MANGA109S on the VM) have not run on a VM.
