@@ -8,8 +8,10 @@ dependencies = [
     # Windows torch lives in the backend dependency-groups below (cuda-windows
     # is default-on); keeping the two groups mutually exclusive prevents a
     # later uv resolution from crossing CUDA and ROCm package indexes.
-    "torch>=2.12.0,<2.13 ; sys_platform != 'win32'",
-    "torchvision>=0.27.0,<0.28 ; sys_platform != 'win32'",
+    # colab-cu128 branch: the Colab VM's preinstalled build (CUDA 12.8, driver 580);
+    # also pinned in override-dependencies.
+    "torch==2.11.0 ; sys_platform != 'win32'",
+    "torchvision==0.26.0 ; sys_platform != 'win32'",
     "accelerate>=1.13.0",
     "transformers>=5.10.1",
     # Pinned to a git commit in [tool.uv.sources]: the QwenImage21 classes
@@ -45,13 +47,10 @@ dependencies = [
     # for project/finished/sr. segmentation-models-pytorch is gone from both sides
     # with the MIT text masker (anime_tools 0.5).
     "pyyaml",
-    "sam3 @ git+https://github.com/facebookresearch/sam3.git",
     "albumentations>=1.4.0",
     "packaging",
     "pycocotools>=2.0.11",
-    "flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.17/flash_attn-2.8.3+cu132torch2.12-cp313-cp313-linux_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.22/flash_attn-2.8.3+cu132torch2.12-cp313-cp313-linux_aarch64.whl ; sys_platform == 'linux' and platform_machine == 'aarch64'",
-    "pyside6>=6.11.0",
+    "flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.4/flash_attn-2.8.3+cu128torch2.11-cp313-cp313-linux_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "ruff>=0.15.9",
     "matplotlib",
     "torchsde>=0.2.6",
@@ -60,24 +59,17 @@ dependencies = [
     "spandrel>=0.4.2",
     "sqlalchemy>=2.1.0b2",
     "aiohttp>=3.13.5",
-    "comfy-cli>=1.10.3",
-    "comfy-aimdo>=0.4.9",
     "av>=17.0.1",
     "alembic>=1.18.4",
     "pydantic-settings>=2.14.0",
     "kornia>=0.8.2",
-    "comfy-kitchen>=0.2.18",
     "simpleeval>=1.0.7",
     "pytest>=9.0.3",
     "blake3>=1.0.8",
     "softtorch>=0.1.1",
-    "controlnet-aux>=0.0.10",
     "scikit-learn>=1.9.0",
     "datasets>=4.8.5",
     "send2trash>=2.1.0",
-    "onnxruntime-gpu>=1.27.0; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'win32'",
-    # PyPI onnxruntime-gpu has no aarch64 wheels; Microsoft ships CUDA-13 builds for ARM64.
-    "onnxruntime-gpu @ https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-13/pypi/download/onnxruntime-gpu/1.26.0/onnxruntime_gpu-1.26.0-cp313-cp313-manylinux_2_34_aarch64.whl ; platform_machine == 'aarch64' and sys_platform == 'linux'",
     "peft>=0.20.0",
     "fugashi>=1.5.2",
     "unidic-lite>=1.0.8",
@@ -105,11 +97,8 @@ dev = [
 ]
 
 [tool.uv]
-required-environments = [
-    "sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "sys_platform == 'linux' and platform_machine == 'aarch64'",
-    "sys_platform == 'win32'",
-]
+# colab-cu128 branch: the Colab VM is the only target.
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 index-strategy = "unsafe-best-match"
 # `cuda-windows` is default-on so the no-flag `uv sync` run by old updaters
 # lands the CUDA stack on Windows (GH #92). ROCm opts in with
@@ -130,7 +119,13 @@ override-dependencies = [
     "numpy>=2.0.0",
     # AMD's torch metadata requests a Linux-only triton distribution even on
     # Windows. triton-windows is declared in both Windows backend extras.
-    "triton ; sys_platform != 'win32'",
+    # colab-cu128 branch: torch 2.11 wants triton 3.6.0; a bare override drops the pin.
+    "triton==3.6.0 ; sys_platform != 'win32'",
+    # colab-cu128 branch: anime-tools declares torch>=2.12 and sam3; pin the
+    # VM's torch over it and drop sam3 (the line imports neither 2.12 API nor sam3).
+    "torch==2.11.0 ; sys_platform != 'win32'",
+    "torchvision==0.26.0 ; sys_platform != 'win32'",
+    "sam3 ; sys_platform == 'never'",
 ]
 
 [tool.uv.sources]
@@ -148,18 +143,24 @@ diffusers = { git = "https://github.com/huggingface/diffusers", rev = "80c7ed262
 # source; it conflicts with the default `anime-tools-git` group by design).
 anime-tools = [
     { git = "https://github.com/sorryhyun/anime_tools", tag = "v0.7.5", group = "anime-tools-git" },
-    { path = "../anime_tools", editable = true, group = "anime-tools-dev" },
+    # colab-cu128 branch: no sibling checkout on the VM; dev takes the tag too.
+    { git = "https://github.com/sorryhyun/anime_tools", tag = "v0.7.5", group = "anime-tools-dev" },
 ]
 torch = [
-    { index = "pytorch-cu132", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
+    { index = "pytorch-cu128", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
     { index = "pytorch-cu132", group = "cuda-windows" },
     { index = "amd-rocm-100", group = "rocm-windows" },
 ]
 torchvision = [
-    { index = "pytorch-cu132", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
+    { index = "pytorch-cu128", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
     { index = "pytorch-cu132", group = "cuda-windows" },
     { index = "amd-rocm-100", group = "rocm-windows" },
 ]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
 
 [[tool.uv.index]]
 name = "pytorch-cu132"
@@ -171,6 +172,8 @@ explicit = true
 [[tool.uv.index]]
 name = "amd-rocm-100"
 url = "https://stable.repo.amd.com/rocm/whl-next/"
+# colab-cu128 branch: explicit, or unsafe-best-match pulls torch 2.11.0+rocm10.0.0.
+explicit = true
 
 [tool.ruff.lint.per-file-ignores]
 # `train.py` / `inference.py` call `install_no_window_default()` at module scope
