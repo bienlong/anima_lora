@@ -7,10 +7,16 @@ on a T4 smoke and an L4 smoke (2026-09-27, run `t4smoke_a` =
 
 ## Setup: one command
 
-1. Rebase `colab-cu128` onto main and push it; the VM clones it from origin.
+1. Rebase `colab-cu128` onto main and push it
+   (`git push --force-with-lease origin colab-cu128`); the VM clones it
+   from origin. The rebase needs a checkout of the branch:
+   `git worktree add .claude/worktrees/colab-cu128 colab-cu128`, and
+   `git worktree remove` it afterwards.
 2. `colab new --gpu L4 -s <name>` (from the CLI, not the browser).
-3. From the branch checkout (`.claude/worktrees/colab-cu128`):
-   `./colab_push.sh <name> [--pieces]`.
+3. From main's checkout, with no branch checkout needed:
+   `bash <(git show colab-cu128:colab_push.sh) <name> [--pieces]`.
+   Do not pipe it into `bash -s`, because the script's ssh calls would read
+   the rest of the script from stdin.
 
 `colab_push.sh` refuses unless origin's branch matches the local one, then
 clones (or resets to origin) at the local absolute path, sends the assets
