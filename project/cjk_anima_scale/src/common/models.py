@@ -6,6 +6,7 @@ Torch and the library are imported lazily so CPU-only stages can import this.
 from __future__ import annotations
 
 import copy
+import os
 from pathlib import Path
 
 from .shapes import wh
@@ -190,6 +191,9 @@ def _te_key(uniq) -> str:
         else None
     )
     h.update(pj.read_bytes() if pj is not None and pj.exists() else b"no-pack")
+    # per-glyph routing changes the T5 ids (plan_retrain § 2); keyed only when set
+    if route := os.environ.get("ANIMA_VOCAB_GLYPH_ROUTE", "").strip():
+        h.update(f"glyph_route={route}".encode())
     return h.hexdigest()[:16]
 
 

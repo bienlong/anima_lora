@@ -138,3 +138,16 @@ experiments read the old stage-layout dirs (`data_<stage>_<tag>`) through
   `native_piece/`. **Ran 2026-09-27** → 4 glyphs need 270 (contained
   7 → 18 / 64), 3 glyphs stay at 90, 5 glyphs are not a budget problem
   (`../reports/long_b0_2026_09_27.md`; `budget.RULES`).
+- `p2_route/` — plan_retrain § 4 C0 / C2: per-glyph routing
+  (`ANIMA_VOCAB_GLYPH_ROUTE`, set in-process) rendered against the spelled
+  and the unrouted (piece-row) caption of the same word, same prompts ×
+  seeds; routed renders only in each dir's `native_route/`. **Ran
+  2026-09-28 (c0)** → `p1_mix` routed ≤ 1 edit 14 vs spelled 11 / 16, piece
+  row 0 (`../plan_retrain.md` § 4). **c2**: 8 held-in donor words on floor /
+  Stage B / `p1_cold` / `p1_mix` / `p1_lone` → routed = spelled on every
+  arm, `p1_mix` ≤ 1 edit 80 / 128 (floor 1, `p1_lone` 9).
+- `c3_kanji/` — plan_retrain § 4 C3: 36 kanji, cold, on `p1_mix`'s rows as
+  context; windows of dialogue lines (2–4 glyphs, kanji-first draw) as the
+  in-word tier, routed captions, `p1_mix`'s table, 225 steps / row.
+  **Ran 2026-09-28** → words ≤ 1 edit 3 → 36 / 96; new kanji official
+  0 → 51 / 192, the seed's dense kanji 65 → 31 (`../plan_retrain.md` § 4).

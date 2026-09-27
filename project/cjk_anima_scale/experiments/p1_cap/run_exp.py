@@ -29,8 +29,15 @@ pools' rng state, so they are Stage B's items (the data leg asserts it).
 Steps × (all items / in-word items) = ``MIX_STEPS`` / row, so the in-word
 items get p1_cold's exposure and the lone tier is the one change.
 
+After P1b, ``p1_lone`` (plan_retrain.md § 4 C1): the same 36 donors, cold,
+on the production table alone (``builder.TABLE``: the single kind is
+``b0709`` only, 2 400 lone items, no in-word item), 90 steps / row. Is the
+in-word tier load-bearing, or does a cold start alone compose? Its data dir
+is ``OUT/<LONE_DATA>/data``.
+
 Legs:
-  data      (CPU) the mix arms' data dir, checked against Stage B's
+  data      (CPU) the mix / lone arms' data dirs (the mix checked against
+            Stage B's)
   train     (GPU) the arms (``--arms``), cold, from their data dir
   read      (GPU) each arm on the donor keys (``HELD_IN`` spelled + the nine
             donor singles, en), vs the floor and vs Stage B's donor
@@ -59,9 +66,16 @@ _spec.loader.exec_module(SB)
 
 EXP = OUT / "experiments"
 SB_DIR = OUT / SB.NAME  # the Stage B donor: its data dir, its native_spell/ reads
-# name → (row_cap, mix): mix arms add the lone b0709 group
-ARMS = {"p1_cold": (None, False), "p1_cap": ("t5", False), "p1_mix": (None, True)}
+# name → (row_cap, data): "sb" = Stage B's items, "mix" = + the lone b0709
+# group, "lone" = the production table alone
+ARMS = {
+    "p1_cold": (None, "sb"),
+    "p1_cap": ("t5", "sb"),
+    "p1_mix": (None, "mix"),
+    "p1_lone": (None, "lone"),
+}
 MIX_DATA = "run0927_p1_mix"
+LONE_DATA = "run0928_p1_lone"
 MIX_SHARE = 0.5  # of the single kind's items: 1 200 beside Stage B's 2 400
 MIX_STEPS = 135  # 90 × 3 600 / 2 400: the in-word items keep p1_cold's exposure
 
@@ -121,18 +135,28 @@ def main():
         )
 
     def data_of(name: str) -> Path:
-        return OUT / MIX_DATA / "data" if ARMS[name][1] else SB_DIR / "data"
+        kind = ARMS[name][1]
+        return {"sb": SB_DIR, "mix": OUT / MIX_DATA, "lone": OUT / LONE_DATA}[
+            kind
+        ] / "data"
 
     run_dir = make_run_dir(
         "p1_cap", label=args.label, root=LINE / "experiments" / "p1_cap" / "results"
     )
     metrics: dict = {
         "arms": {
-            a: {"row_cap": ARMS[a][0], "mix": ARMS[a][1], "data": str(data_of(a))}
+            a: {"row_cap": ARMS[a][0], "items": ARMS[a][1], "data": str(data_of(a))}
             for a in args.arms
         }
     }
-    if "data" in args.legs and any(ARMS[a][1] for a in args.arms):
+    if "data" in args.legs and "lone" in {ARMS[a][1] for a in args.arms}:
+        from cjk_scale.builder import build
+
+        build(rc_of(LONE_DATA), workers=args.workers)
+        n = sum(1 for _ in (OUT / LONE_DATA / "data" / "train.jsonl").open())
+        metrics["lone_items"] = n
+        print(f"lone items {n}", flush=True)
+    if "data" in args.legs and "mix" in {ARMS[a][1] for a in args.arms}:
         from cjk_scale import recipes
         from cjk_scale.builder import build
 
@@ -153,7 +177,7 @@ def main():
                 out=EXP / name,
                 cold=True,
                 row_cap=row_cap,
-                steps_per_row=MIX_STEPS if mix else None,
+                steps_per_row=MIX_STEPS if mix == "mix" else None,
             )
     if "read" in args.legs:
         chars = SB.donor_keys()

@@ -50,6 +50,15 @@ cjk_anima_scale line's gated ``v_line`` (``project/cjk_anima_scale/
 proposal.md`` § 1): the model side stays a plain row lookup. A pack without
 ``line`` encodes bit-identically to before.
 
+Per-glyph routing (``mapping["glyph_route"]``, or ``ANIMA_VOCAB_GLYPH_ROUTE``
+through :class:`~library.anima.vocab_pack.VocabPack`): every JA Qwen token
+(one holding a kana or kanji) resolves on the T5 side to its glyphs' single
+rows instead of its own row — a piece (こんにちは) becomes five single ids,
+a space-prefixed glyph (`` の``) its glyph's row. The Qwen text is untouched.
+A token with a glyph that has no single row keeps its own row. It is the
+cjk_anima_scale line's P2 (``project/cjk_anima_scale/plan_retrain.md`` § 2).
+Off, the encoder is bit-identical to before.
+
 Pure-CPU module — no model load; consumers pass embedding tensors in.
 """
 
@@ -86,6 +95,17 @@ _CJK_RANGES = (
 def is_cjk_char(ch: str) -> bool:
     o = ord(ch)
     return any(lo <= o <= hi for lo, hi in _CJK_RANGES)
+
+
+def is_ja_glyph(ch: str) -> bool:
+    """Kana or a CJK ideograph: what per-glyph routing splits a token into."""
+    o = ord(ch)
+    return (
+        0x3040 <= o <= 0x30FF
+        or 0x31F0 <= o <= 0x31FF
+        or 0x4E00 <= o <= 0x9FFF
+        or 0x3400 <= o <= 0x4DBF
+    )
 
 
 def is_hangul_char(ch: str) -> bool:
@@ -373,6 +393,7 @@ _DIGEST_KEYS = (
     "route",
     "iso",
     "line",
+    "glyph_route",
 )
 
 
@@ -724,9 +745,17 @@ class HybridT5Encoder:
     # with an ext neighbour move to ``T5_TABLE_SIZE + line_start + row``.
     line_start: int | None = None
     line_src_end: int | None = None
+    # Per-glyph routing: Qwen id of a JA token → its glyphs' single rows
+    # (a glyph's row: the token that is exactly it, else its char row).
+    # Tokens absent keep their own row; ``None`` when off.
+    glyph_split: dict[int, list[int]] | None = None
 
     @classmethod
-    def from_mapping(cls, t5_tok, qwen_tok, mapping: dict) -> "HybridT5Encoder":
+    def from_mapping(
+        cls, t5_tok, qwen_tok, mapping: dict, glyph_route: bool | None = None
+    ) -> "HybridT5Encoder":
+        """``glyph_route``: per-glyph routing; ``None`` = the pack's
+        ``mapping["glyph_route"]`` (off when absent)."""
         qwen_map = {int(k): v for k, v in mapping["qwen"].items()}
         # The symbol block (if the pack has one) is a plain extension of the
         # same two lookups — kept separate in the json only so the CJK row
@@ -738,10 +767,28 @@ class HybridT5Encoder:
         char_map = dict(mapping["char"])
         char_map.update(mapping.get("sym_char") or {})
         ids = sorted(qwen_map)
-        for qid, s in zip(ids, qwen_tok.batch_decode([[i] for i in ids])):
+        surf = dict(zip(ids, qwen_tok.batch_decode([[i] for i in ids])))
+        for qid, s in surf.items():
             core = s.strip()
             if len(core) == 1:
                 char_map.setdefault(core, qwen_map[qid])
+        if glyph_route is None:
+            glyph_route = bool(mapping.get("glyph_route"))
+        glyph_split = None
+        if glyph_route:
+            # A glyph's single row is the token that is exactly it (not the
+            # space-prefixed `` の``, which char_map may hold), else its char row.
+            glyph = {
+                **char_map,
+                **{s: qwen_map[q] for q, s in surf.items() if len(s) == 1},
+            }
+            glyph_split = {}
+            for qid, s in surf.items():
+                core = "".join(s.split())
+                rows = [glyph.get(c) for c in core]
+                if any(is_ja_glyph(c) for c in core) and None not in rows:
+                    if rows != [qwen_map[qid]]:
+                        glyph_split[qid] = rows
         return cls(
             t5_tok=t5_tok,
             qwen_tok=qwen_tok,
@@ -753,6 +800,7 @@ class HybridT5Encoder:
             iso_offset=(iso.start if (iso := IsoSpec.from_mapping(mapping)) else None),
             line_start=(ln.start if (ln := LineSpec.from_mapping(mapping)) else None),
             line_src_end=ln.src_end if ln else None,
+            glyph_split=glyph_split,
         )
 
     def apply_line(self, ids: list[int]) -> list[int]:
@@ -815,8 +863,9 @@ class HybridT5Encoder:
                 # A clean token can never complete a byte sequence — any
                 # pending fragments are unresolvable, degrade them now.
                 flush_frag()
-                out.append(base + self.qwen_map[qid])
-                offs.append(off)
+                for r in (self.glyph_split or {}).get(qid) or [self.qwen_map[qid]]:
+                    out.append(base + r)
+                    offs.append(off)
                 continue
             frag.append(qid)
             frag_off.append(off)

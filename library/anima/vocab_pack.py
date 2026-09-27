@@ -31,6 +31,7 @@ resolved prefix) because the strategy and the DiT loader both need it.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Union
@@ -183,7 +184,11 @@ class VocabPack:
         return {CKPT_META_NAME: self.name, CKPT_META_SHA: self.digest}
 
     def build_encoder(self, t5_tokenizer, qwen3_tokenizer) -> HybridT5Encoder:
-        return HybridT5Encoder.from_mapping(t5_tokenizer, qwen3_tokenizer, self.mapping)
+        """``ANIMA_VOCAB_GLYPH_ROUTE`` (``1`` / ``0``) overrides the pack's
+        ``glyph_route`` (per-glyph routing, :mod:`~library.anima.ext_vocab`)."""
+        return HybridT5Encoder.from_mapping(
+            t5_tokenizer, qwen3_tokenizer, self.mapping, glyph_route_override()
+        )
 
     @classmethod
     def load(cls, prefix: Union[str, Path]) -> "VocabPack":
@@ -199,6 +204,12 @@ class VocabPack:
             digest[:12],
         )
         return cls(prefix=prefix, table=table, mapping=mapping, digest=digest)
+
+
+def glyph_route_override() -> Optional[bool]:
+    """``ANIMA_VOCAB_GLYPH_ROUTE``: ``1`` on, ``0`` off, unset = the pack's."""
+    v = os.environ.get("ANIMA_VOCAB_GLYPH_ROUTE", "").strip()
+    return None if not v else v not in ("0", "false", "False")
 
 
 _LOADED: dict[Path, VocabPack] = {}

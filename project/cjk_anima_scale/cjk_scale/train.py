@@ -48,9 +48,7 @@ LR = 1e-3  # the lr that moved pieces (micro_warm_0923; conflict_joint report §
 BATCH = 4
 LR_DECAY = "cosine"
 WARMUP_RATIO = 0.1  # of the run's steps (micro_warm_0923: 100 / 640, 200 / 1280)
-STEPS_PER_VOCAB = (
-    90  # run0925_300f's joint budget (joint0507_0305 = 90; conflict_joint report)
-)  # the base: budget.py's factor scales it by kind × glyph count × warm / cold
+STEPS_PER_VOCAB = 90  # run0925_300f's joint budget (joint0507_0305 = 90; conflict_joint report)  # the base: budget.py's factor scales it by kind × glyph count × warm / cold
 GRID_BOX = True  # grid cells' union as the loss box (reports/grid_box_2026_09_25.md)
 BOX_SHARE = 0.25  # a single glyph's in-box share, log up to …
 BOX_SHARE_CAP = 0.5  # … the cap, at …
@@ -195,6 +193,7 @@ def train(
     cold: bool = False,
     row_cap: float | str | None = None,
     steps_per_row: int | None = None,
+    context: Path | None = None,
 ) -> Path:
     """Train the run. ``data`` / ``out`` default to the run's dirs;
     ``max_steps`` stops the loop early with the full-length schedule
@@ -207,7 +206,9 @@ def train(
     row's effective norm after each step — ``"t5"`` = the T5 table's mean
     row norm (``experiments/p1_cap``, hypothesis.md § 4 P1);
     ``steps_per_row`` replaces the budget's (a mix that adds items keeps
-    the old items' exposure). ``scale.py`` passes none of them."""
+    the old items' exposure); ``context`` replaces the seed rows as the
+    warm-from / frozen-context / merge file (plan_retrain § 5: the kanji run
+    sits on the kana run's merged rows). ``scale.py`` passes none of them."""
     from common.models import checkpoints, dit_forward, gen_args
     from library.anima.vocab_pack import attached_pack_rows, strategy_pack
     from library.inference.generation import get_generation_settings
@@ -229,6 +230,8 @@ def train(
         recs, ev, device, out, te_cache=data / "te_cache"
     )
     p = plan(rc, data, recs, vocabs, touched)
+    ctx = Path(context) if context else SEED_ROWS
+    p.record["context"] = str(ctx)
     if steps_per_row:
         p.steps_per_row = int(steps_per_row)
         p.steps = p.steps_per_row * len(p.idx)
@@ -246,7 +249,7 @@ def train(
     print(
         f"rows: {len(p.idx)} ({len(vocabs)} vocabs) — {len(p.touched)} touched "
         f"by the captions, {len(p.idx - p.touched)} with no draw; {len(p.frozen)} "
-        f"context rows frozen at {SEED_ROWS}",
+        f"context rows frozen at {ctx}",
         flush=True,
     )
     ns = SimpleNamespace(seed=SEED, batch=BATCH, train_size=512)
@@ -267,13 +270,13 @@ def train(
         device,
         p.idx,
         strategy_pack(tok),
-        warm=None if cold else SEED_ROWS,
+        warm=None if cold else ctx,
         init_anchor=INIT_ANCHOR,
         free_residual=FREE_RESIDUAL,
         lr=LR,
         touched=p.touched,
         frozen=p.frozen,
-        context=SEED_ROWS,
+        context=ctx,
         line_mode=line_mode,
         rows_frozen=rows_frozen,
         row_cap=row_cap,
@@ -285,7 +288,7 @@ def train(
         f"({p.steps_per_row}/row) × batch {BATCH}, lr {LR:g} {LR_DECAY} warmup {warmup} "
         f"({WARMUP_RATIO:g}), μ {INIT_ANCHOR:g}, box_share {BOX_SHARE} → cap "
         f"{BOX_SHARE_CAP} at {BOX_SHARE_GLYPHS} glyphs (log), grid_box {int(GRID_BOX)}, "
-        + ("cold (pack rows)" if cold else f"warm {SEED_ROWS}")
+        + ("cold (pack rows)" if cold else f"warm {ctx}")
         + (f", row cap {row_cap:.3f}" if row_cap is not None else "")
         + (f"; stopping at step {max_steps}" if max_steps else ""),
         flush=True,
