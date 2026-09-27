@@ -16,15 +16,22 @@ pre-merge files at git `48e1d6ab`.
 | F0: does the adapter modulate a row by its neighbours? | no (out cos 0.95–0.97, gain 0.97), so the gate lives at the embed hook | `reports/f0_interaction_2026_09_26.md` |
 | F1: a factorized donor, rows + a gated `v_line` | `v_line` is a working mode. The rows still render a line when alone | `reports/f1_line_2026_09_26.md` § 1–4 |
 | `v_line` dose 0.5 on the held-out 10 | ≤ 1 edit 80 / 160 (u1 66), ≤ 2 edits 131, singles at the floor, in-word `dup` 54 (floor 26) | `reports/f1_line_2026_09_26.md` § 5 |
+| § 2.1 (a): what B is | not a fill prior. It is word-final, and it is bound to the `Japanese text` clause: under `English text` ≤ 1 edit holds (40 = 40 / 80) and in-word doubling drops to the floor (7 vs en 27, floor 4). A third of `dup` is reader noise | `reports/doubling_box_2026_09_26.md` |
+| § 2.2 count twin: the Stage B donor, count tier off | no count direction: the donor difference has no shared part (split-half cos 0.15, energy 4 %), and the twin grows `u_S` again (cos 0.96). Alone-as-a-line 108 vs 102, repeat 64 vs 50 (p 0.09) | `reports/count_twin_2026_09_26.md` |
+| § 2.3 Stage I on 12 cold kanji | alone: I0 wins at 90 and at 270 steps / row (x3: contained 117 vs I1 84 / 192, p 9e-6), I2 out. **Under the mode, the kanji words never compose** (≥ 2 glyphs in order ≤ 3 / 96 on every arm, x3 included), so criterion 2 cannot rank recipes. `b0709` stays. Cold kanji need more than 90 steps / row | `reports/stage_i_2026_09_26.md` § 5 |
+| § 2.4: the gate on runs with pieces | a piece in a run renders 0 before and after. はい contained 4 → 14 / 16, target はい 0 → 6 / 8. The single beside a piece doubles (やったネ `wdup` 2 → 9) | `reports/line_pieces_2026_09_26.md` |
 
 The best configuration on record for a vocab without line training is
 **the seed rows + 0.5 · `v_line` + the run gate**. Two kinds of doubling
 remain:
 - **A, a glyph alone repeating itself (あ → ああ):** bounded. The gate
   keeps a lone row at its seed value.
-- **B, a doubled glyph inside a word (ひまわり → ひまわりり):** open, +28
-  over the floor. Collapsing doubled glyphs lifts the words from 80 to 89,
-  so B costs about a tenth of the words.
+- **B, a doubled glyph inside a word (ひまわり → ひまわりり):** open. Counted
+  as a glyph of the word doubled (`wdup`), it is 34 / 160 vs the floor's 8
+  (the `dup` of record, 54 vs 26, includes reader noise). It is mostly the
+  word-final glyph, and it lives under the `en` clause (§ 2.1). Collapsing
+  doubled glyphs lifts the words from 80 to 89, so B costs about a tenth
+  of the words.
 
 Bound by the wake roll-up:
 - Transplant + a pinned trigger is not a step saver, so nothing here
@@ -77,9 +84,19 @@ Hypotheses for B:
   Predicts that `dup` is independent of box size, concentrates on
   particular positions or bigrams, and falls with composition strength.
 
+**(a) ran (`reports/doubling_box_2026_09_26.md`): neither hypothesis as
+written.** Doubled and clean renders sit at the same px (55–85, against
+trained word px 35 / 18). The extra glyph lengthens the line at a fixed
+px, so no fixed box is being filled (H1 fails). The doubling concentrates
+by position (H2), but on the word-final glyph (24 / 34 at v0.5). The
+separating axis is the caption clause. `swap` (`English text reads as`)
+keeps ≤ 1 edit at 40 / 80 with in-word doubling at 7 (floor 4). `en`
+(`Japanese text reads as`, the clause every recipe trains on) has 27.
+Read B with `wdup`, not `dup`.
+
 Analyses:
 - **(a) px, box and position of the doubled renders (CPU, reads on
-  disk).**
+  disk).** Done, above.
   - Renders: every word render in floor / u1 / `v_line` 1 / `v_line` 0.5,
     and spell_b's and the Stage B donor's own words.
   - Per render: the reader box (`reads[].box`), the glyphs read,
@@ -91,7 +108,17 @@ Analyses:
   token lands in the image, per block: one blob or two. Only if (a) leaves
   H1 vs H2 open.
 
-Levers, chosen by (a):
+Levers, chosen by (a). (a) points past both levers below, to the
+caption:
+- **Clause split (training-free, new floor keys):** the held-out words
+  under the `japanese text` tag alone, and under the `Japanese text reads
+  as` sentence alone, at 0.5 · `v_line` against the floor. It shows which
+  part carries B.
+- **Clause-varied `scene_spelled` captions** (data, if the split
+  localizes it): retrain `v_line` on Stage B's words with the clause drawn
+  over variants, then read `en` / `swap` at dose 0.5.
+
+The levers as first written:
 - **H1 → data:** a `scene_spelled` tier at low fill (0.3–0.6, a word in a
   bubble wider than itself). Retrain `v_line` on Stage B's words with it,
   then read the held-out 10 at dose 0.5. It is the same data axis as
@@ -116,6 +143,11 @@ trained single is its seed row**, and trained rows are line-only.
   16–24 px (`band_experiment_results.md`). Then retrain F1 with the tier
   and read the donor singles alone (line ≥ 3 glyphs, official, repeat)
   against F1's 94 · 50 · 35.
+- **The count twin: ran, negative** (`reports/count_twin_2026_09_26.md`).
+  The count tier at 0.3 / 24–40 px wrote no direction, and the line mode
+  is the same without it. Alone-as-a-line is written by the word data.
+  This lowers F1b's prior: the tier moved same-glyph repeats, not the
+  line. The original item:
 - **The count twin** (old § 3.3 d): the Stage B donor with the count tier
   off, same words and seed. The Δ difference between the twins, own-row
   part removed, is the count direction: roughly ⟂ `u_S` means a separate
@@ -164,6 +196,14 @@ Setup:
   here.
 - Pick the recipe that wins 2 without losing 1.
 
+**Ran (`reports/stage_i_2026_09_26.md`):** on the kanji micro set
+(山 田 野 郎 太 道 場 星 空 天 地 小, cold):
+- I2 is out. I0 beats I1 at 90 and at 270 steps / row, so `b0709` stays.
+- Criterion 2 is 0 at both budgets. `v_line` (kana-trained) does not
+  compose kanji rows: a word renders its first glyph, then unrelated text.
+- Open: kanji vs kana, or row maturity. The seed's kana rows are
+  `b0709`-trained too, and they compose.
+
 Order: I0 / I1 / I2 first; I3 / I4 only if I1 moves 1 or 2. It closes if
 every candidate ties on 2: then the identity source does not matter beyond
 scene vs flat (09-16), `b0709` stays, and the gain is all in the mode.
@@ -172,8 +212,15 @@ scene vs flat (09-16), `b0709` stays, and the gain is all in the mode.
 
 `v_line` was trained on singles. The gate fires on any run, so a caption
 with adjacent piece rows (って ください) gets it too. Nothing has read that.
-- **Read first (training-free):** the piece ruler and the sent ruler with
-  0.5 · `v_line` on the seed rows, against the floor.
+- **Read (`reports/line_pieces_2026_09_26.md`):**
+  - The piece ruler is lone pieces (one id each), so the gate never fires
+    there.
+  - On the sent / target rulers, runs of singles gain (はい contained
+    4 → 14 / 16, the user's target はい 0 → 6 / 8, おしい ≤ 1 edit
+    8 → 14).
+  - A piece inside a longer run renders 0 before and after (った,
+    ちょっと). The single beside it doubles (やったネ `wdup` 2 → 9: やや…).
+  - Gate-off keys are identical to the floor.
 - **First look, in ComfyUI (2026-09-26, the user's renders, not scored).**
   The pack `anima_cjk_vocab_pack_300fsp_line05` (300f_sp rows +
   0.5 · `v_line` as a line block) on a scene prompt ending
@@ -183,8 +230,10 @@ with adjacent piece rows (って ください) gets it too. Nothing has read tha
   wrong glyphs plus a trailing ♥. Two further tries (prompts not recorded
   here) rendered へい and んぃいい: dropped glyphs and in-word doubling
   (§ 2.1).
-- **If pieces lose:** gate by kind (single-kind rows only) until a piece
-  mode exists. `u_P` (Stage A) is the post-hoc candidate for one, and a
+- **Next: the kind gate** (`v_line` on single-kind rows only). Pieces
+  lost no identity but gained doubling beside them. The kind gate is a hook
+  change plus the same ≈ 3 min read, and it also shows whether B rides on
+  the piece row or on its neighbours. It holds until a piece mode exists. `u_P` (Stage A) is the post-hoc candidate for one, and a
   `v_line` trained on pieces is the learned one.
 
 ### 2.5 Shipping the mode
@@ -236,12 +285,17 @@ one of those failures.
 
 ## 3. Order
 
-1. **§ 2.1 (a)** (CPU, reads on disk): what B is.
-2. **§ 2.4 read** (training-free, GPU): does the gate hurt pieces?
-3. **§ 2.1 lever**, as (a) says: the low-fill spelled tier (H1) or the
-   finer dose (H2).
+1. ~~§ 2.1 (a)~~ done: B is clause-bound and word-final.
+2. ~~§ 2.4 read~~ done: pieces in a run gain nothing, their neighbours
+   double.
+3. ~~§ 2.2 the count twin~~ done, negative: no count direction.
+   ~~§ 2.3 Stage I~~ done: `b0709` stays (criterion 1). The mode does not
+   compose kanji rows, which is a new open item.
+   Parked (user, 2026-09-26: no more time on tokenization / caption
+   tricks): the § 2.1 clause split and clause-varied captions, and the
+   § 2.4 kind gate. B stays open and is read as `wdup`.
 4. **§ 2.3 Stage I**: I0 / I1 / I2 against 0.5 · `v_line`.
-5. **§ 2.2**: the count twin, then F1b once its band-law row exists.
+5. **§ 2.2 F1b**, once its band-law row exists.
 6. **§ 2.5**: shipping, then the sent test.
 
 ## 4. What closes it

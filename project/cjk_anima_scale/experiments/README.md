@@ -108,3 +108,27 @@ experiments read the old stage-layout dirs (`data_<stage>_<tag>`) through
   in-word `dup` 77; the rows keep the line layout alone
   (`../reports/f1_line_2026_09_26.md`). The `dose` leg (`--doses`) reads
   seed + d · `v_line`: at 0.5, ≤ 1 edit 80 / 160, `dup` 54 (report § 5).
+- `doubling_box/` — proposal § 2.1 (a), CPU on the reads on disk: per word
+  render the line box, px, orientation, the doubled glyph's class and
+  position, per clause. **Ran 2026-09-26** → not a fill prior. B is
+  word-final and bound to the `Japanese text` clause (`swap`: ≤ 1 edit
+  40 = 40, in-word dup 7 vs 27), and a third of `dup` is reader noise
+  (`../reports/doubling_box_2026_09_26.md`).
+- `line_pieces/` — proposal § 2.4: seed + 0.5 · `v_line` on the sent and
+  target rulers (the piece ruler's lone pieces never fire the gate).
+  **Ran 2026-09-26** → runs of singles gain (はい 4 → 14 / 16). A piece in
+  a run stays at 0, and the single beside it doubles
+  (`../reports/line_pieces_2026_09_26.md`).
+- `count_twin/` — proposal § 2.2: Stage B's donor with the count tier off
+  (same donors, words, seed, trainer; b0305 item-identical). `C` = the two
+  donors' tangential Δ difference, `c` its mean. The singles alone are
+  scored with the line metric (≥ 3 glyphs read; `--legs score` reproduces
+  F1's 47 / 102 / 94). **Ran 2026-09-26** → no count direction (split-half
+  0.15, the twin's shared direction = `u_S` at cos 0.96). Alone-as-a-line
+  108 vs 102 (`../reports/count_twin_2026_09_26.md`).
+- `stage_i/` — proposal § 2.3: I0 (`b0709`) / I1 (scene, px spread, fill
+  0.2–1.0) / I2 (small grid cells) on 12 cold kanji the seed lacks, read
+  with their rows + 0.5 · `v_line` alone (12 kanji) and on six spelled
+  words, floor in the seed dir's `native_stagei/`. **Ran 2026-09-26** →
+  alone I0 ≥ I1 ≫ I2. Words 0 / 96 everywhere: underpowered at 90 steps /
+  row (`../reports/stage_i_2026_09_26.md`).
