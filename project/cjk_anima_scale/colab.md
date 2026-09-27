@@ -117,8 +117,20 @@ need for this (`colab_plan.md` § 1).
 ## Running
 
 - No daemon on the VM. Run the verbs directly:
-  `.venv/bin/python project/cjk_anima_scale/scale.py <run> data --workers 2`,
-  then `… <run> train`.
+  `.venv/bin/python project/cjk_anima_scale/scale.py <run> data`, then
+  `… <run> train`. The T4 smoke passed `--workers 2`; the L4 shape has
+  12 vCPU, so the default (cpu − 2) fits.
+- **L4 (2026-09-27, `colab_plan.md` § 4):** `train` runs at 1.29 it/s
+  steady (0.59× local), peak VRAM 17.2 / 23 GB, host RAM 5.6 / 52 GB.
+- `colab status` shows the kernel only: it reads `IDLE` while an ssh job
+  trains. Read progress with `colab exec`, which takes the code on stdin,
+  not as an argument:
+  `echo "import subprocess;print(subprocess.run('tail -c 700 /content/train.log',shell=True,capture_output=True,text=True).stdout)" | colab exec -s <name>`.
+- In an ssh command, `pkill -f "<pattern>"` also matches the ssh's own shell
+  (its command line contains the pattern) and kills it. Bracket one letter:
+  `pkill -f "[n]vidia-smi"`.
+- When pulling with `ssh … 'tar cf - …' > x.tar`, nothing else may write to
+  stdout in that command, or the text lands in front of the archive.
 - `data` on the T4 VM (2 vCPU): 200 items (single, `b0709`) in 0.4 min, and
   the pack loads with the right sha.
 - `train` loads the DiT, builds the latent / TE caches and reaches compile,

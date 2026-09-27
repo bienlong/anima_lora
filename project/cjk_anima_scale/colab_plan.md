@@ -80,7 +80,29 @@ repeating it:
 - the `output/wake_probe/scenes_*` symlinks are missing;
 - `LD_LIBRARY_PATH` in ssh shells, and `colab upload`'s speed (use scp).
 
-## 4. The L4 smoke checklist
+## 4. The L4 smoke checklist — done 2026-09-27 (session `l4smoke`)
+
+Results:
+
+- **VM (L4, standard shape):** 12 vCPU, 52 GB RAM, 236 GB disk, L4 with
+  23 GB, driver 580.82. `colab_push.sh` took 3 min 17 s from a fresh VM to
+  the passing cuda + flash_attn check.
+- **`data`:** 200 items in 0.4 min at `--workers 2`; pack sha
+  `7b9fce0bb57b…` in the log.
+- **`train`:** 270 steps, rc 0. Steady state is **1.29 it/s** (steps
+  25→250, from `train_log.json`), 0.59× the local ≈ 2.2. The six static
+  graphs compile lazily inside the first steps; the whole process (load,
+  caches, compile, 270 steps, save) took 308 s. Peak VRAM 17.2 GB of 23;
+  peak host RAM 5.6 GB of 52.
+- **Back here:** `trained.pt` matches the VM's md5 and loads as a merged
+  run. Local `eval` through the daemon reads single 6/6 and EN 24/24 on the
+  trained side (`report.md`); the three kanji start warm from the seed, so
+  this shows that the round trip works, not that training helped. The full
+  eval renders every ruler (7.5 min, stopped before the end); for a smoke,
+  `report.md` + `sheet_single.png` are enough.
+- **Cost:** 1.54 CU/h; the smoke used 0.25 CU.
+
+The checklist as run:
 
 Once paid, create the session with `colab new --gpu L4 -s <name>`, then:
 
@@ -103,13 +125,14 @@ Once paid, create the session with `colab new --gpu L4 -s <name>`, then:
 ## 5. Before the real run
 
 - **Resume.** `train` writes `trained_partial.pt` every 5 000 steps but
-  cannot resume from it. A (27.5 k steps) is ≈ 3.3 h here, and C-k
-  (58.2 k at 150) ≈ 7 h. If L4 runs slower than local, or the session limit
-  is shorter than the run, either split the run or add resume (rows +
-  optimizer + step + rng). Resume is a line code change on main, with a
-  test.
-- **Data build.** At 2 vCPU, `data` for A (≈ 20 k items) is roughly
-  30–40 min by the smoke's rate. The alternative is to build here and
+  cannot resume from it. At the L4's 1.29 it/s: A (27.5 k steps) ≈ 5.9 h
+  (≈ 9 CU), C-k (58.2 k at 150) ≈ 12.5 h (≈ 19 CU; at 270 ≈ 22.6 h), C-p
+  (73.1 k) ≈ 15.7 h (≈ 24 CU). The session limit is unmeasured. Runs this
+  long want resume (rows + optimizer + step + rng) or a split; resume is a
+  line code change on main, with a test.
+- **Data build.** The L4 shape has 12 vCPU (the T4 had 2), so `data`
+  on the VM at the default workers should be far under the T4 estimate of
+  30–40 min for A (≈ 20 k items); unmeasured at scale. The alternative is to build here and
   upload (≈ 4 GB at 5.7 MB/s ≈ 12 min). Both work, since the checkout sits
   at the same path.
 - **Which run goes.** plan_2900 puts C on Colab and A local; this session
