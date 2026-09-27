@@ -1,150 +1,160 @@
 # colab.md — running a line run on a Colab VM
 
-How to drive a `scale.py <run> data | train` on Colab through the `colab` CLI
-(uv tool, `google-colab-cli`). Everything below was measured on a T4 smoke
-(2026-09-27, run `t4smoke_a` = `chars:精俺感`, VM-only config). What is still
-open before a real run is in `colab_plan.md`.
+How to drive `scale.py <run> data | train` on Colab through the `colab` CLI
+(uv tool, `google-colab-cli`), and bring the run back for eval here. Measured
+on a T4 smoke and an L4 smoke (2026-09-27, run `t4smoke_a` =
+`chars:精俺感`, VM-only config).
 
-## Session
+## Setup: one command
 
-- Create the session **from the CLI**: `colab new --gpu L4 -s <name>`. A
-  session opened in the browser shows as `[?]` in `colab sessions` (an orphan
-  with no local token); `exec` / `ssh` cannot attach to it.
-- `colab sessions` lists what the server holds; `colab usage` shows the
-  compute-unit balance and rate.
-- `colab stop -s <name>` when done. An idle VM keeps billing.
+1. Rebase `colab-cu128` onto main and push it; the VM clones it from origin.
+2. `colab new --gpu L4 -s <name>` (from the CLI, not the browser).
+3. From the branch checkout (`.claude/worktrees/colab-cu128`):
+   `./colab_push.sh <name> [--pieces]`.
+
+`colab_push.sh` refuses unless origin's branch matches the local one, then
+clones (or resets to origin) at the local absolute path, sends the assets
+(≈ 1 GB, tar over ssh), creates the `wake_probe/` symlinks, writes
+`/content/env.sh`, runs `uv sync`, fetches the DiT / TE / VAE with
+`tasks.py download-model anima`, and checks torch.cuda + flash_attn.
+`--pieces` also sends `$MANGA109S/derived/dialogue_2_10.tsv` to
+`/content/manga109s/` and writes the VM's `.env`. From a fresh L4 VM it
+took 3 min 17 s. Every step is safe to re-run.
+
+### The `colab-cu128` branch
+
+One commit on top of main that changes only the install surface; it never
+merges into main. The VM has torch `2.11.0+cu128` on driver 580, and main
+locks cu132 / torch 2.12. The branch:
+
+- takes torch 2.11.0 / torchvision 0.26.0 from `pytorch-cu128`, pinned also
+  in `override-dependencies` (anime-tools 0.7.5 declares `torch>=2.12`), and
+  `triton==3.6.0` (main's bare `triton` override lets 3.7.0 in);
+- uses the `cu128torch2.11` flash-attn wheel (it also runs on sm120 here);
+- makes `amd-rocm-100` explicit (otherwise `unsafe-best-match` installs
+  `torch 2.11.0+rocm10.0.0`);
+- restricts `environments` to linux x86_64, drops the `../anime_tools` dev
+  path source (both groups take the tag), and drops sam3, pyside6, comfy-*,
+  controlnet-aux and onnxruntime-gpu.
+
+The line runs on torch 2.11 with no 2.12-only API: `data` + `train` with
+compile passed on the branch venv here and on the L4. On a rebase that
+conflicts in `pyproject.toml` / `uv.lock`, keep the branch's hunks (each is
+marked `colab-cu128 branch`) and run `uv lock` again.
+
+## Session and billing
+
+- A session opened in the browser shows as `[?]` in `colab sessions` (no
+  local token); `exec` / `ssh` cannot attach to it.
+- `colab usage` shows the balance and rate. L4 costs 1.54 CU/h.
+- `colab stop -s <name>` when done. An idle VM keeps billing. Stopping loses
+  the VM's disk, so pull what comes back first.
+- `colab status` shows the kernel only. It reads `IDLE` while an ssh job
+  trains.
 
 ## Shell and transfer
 
-- `colab upload` runs at ≈ 0.25 MB/s (8.9 MB in 38 s). Use ssh / scp through
-  the proxy instead, which ran at ≈ 5.7 MB/s (285 MB in 50 s). No
-  `~/.ssh/config` edit is needed:
+- Use ssh / scp through the proxy (≈ 5.7 MB/s). `colab upload` runs at
+  ≈ 0.25 MB/s. No `~/.ssh/config` edit is needed:
 
   ```bash
   SSHO=(-o "ProxyCommand=colab ssh --proxy-mode -s <name>" \
         -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
   ssh "${SSHO[@]}" root@colab '<cmd>'
-  scp "${SSHO[@]}" <local> root@colab:<remote>
-  tar cf - <dirs> | ssh "${SSHO[@]}" root@colab 'cd <root> && tar xf -'
   ```
 
-- **One ssh connection per runtime.** A second one gets HTTP 429 while the
-  first is open, so never leave an ssh that sleeps. `colab exec -s <name>`
-  (Python in the kernel) does not count against it, so use it to read logs
-  while an ssh is busy.
-- The kernel sets `LD_LIBRARY_PATH=/usr/lib64-nvidia`, but an ssh shell does
-  not, and without it torch reports "Found no NVIDIA driver". Source an env
-  file in every ssh command:
+- **One ssh connection per runtime.** A second one fails (HTTP 429, exit
+  255) while the first is open, so an ssh that waits on a job blocks every
+  other ssh. `colab exec` does not count against it. It takes the code on
+  stdin, not as an argument:
 
   ```bash
-  # /content/env.sh
-  export LD_LIBRARY_PATH=/usr/lib64-nvidia
-  export LIBRARY_PATH=/usr/local/cuda/lib64/stubs
-  export PATH=/usr/local/cuda/bin:$PATH
-  export ANIMA_VOCAB_PACK=models/vocab_packs/anima_cjk_vocab_pack
-  cd /home/sorryhyun/anima/anima_lora
+  echo "import subprocess;print(subprocess.run('tail -c 700 /content/train.log',shell=True,capture_output=True,text=True).stdout)" \
+    | colab exec -s <name>
   ```
 
-- Long jobs run detached: `nohup bash -c ". /content/env.sh; .venv/bin/python …" > /content/<log> 2>&1 &`.
-  Read the log with `colab exec` or a short ssh.
+- An ssh shell lacks the kernel's `LD_LIBRARY_PATH=/usr/lib64-nvidia`, and
+  without it torch finds no driver. Start every ssh command with
+  `. /content/env.sh` (it also sets `ANIMA_VOCAB_PACK` and cds into the
+  checkout).
+- Run long jobs detached:
+  `nohup bash -c ". /content/env.sh; .venv/bin/python …" > /content/<log> 2>&1 &`.
+- `pkill -f "<pattern>"` in an ssh command also matches that ssh's own shell
+  (its command line contains the pattern) and kills it. Bracket one letter:
+  `pkill -f "[n]vidia-smi"`.
+- In `ssh … 'tar cf - …' > x.tar`, nothing else in that command may write to
+  stdout, or the text lands in front of the archive.
 
-## The VM (T4, standard shape)
+## The VM
 
-Tesla T4 (sm75, 15 GB), driver 580.82, CUDA 12.8. System Python 3.13.15
-already has `torch 2.11.0+cu128`, `torchvision 0.26.0+cu128`, `triton 3.6.0`
-and `uv 0.12.9`. 12 GB RAM, 2 vCPU, 113 GB disk (≈ 66 GB free), user `root`.
-T4 has no native bf16 (`is_bf16_supported(including_emulation=False)` is
-False), and flash-attn 2 does not support sm75.
-
-## Checkout
-
-Put the repo at **the same absolute path** as here
-(`/home/sorryhyun/anima/anima_lora`). `train.jsonl` and the scene records
-store absolute paths, so a different root breaks both. Clone origin, then
-bring unpushed commits over as a bundle:
-
-```bash
-git bundle create tail.bundle origin/main..main            # here
-scp "${SSHO[@]}" tail.bundle root@colab:/content/
-ssh "${SSHO[@]}" root@colab 'mkdir -p /home/sorryhyun/anima && cd /home/sorryhyun/anima \
-  && git clone -q https://github.com/sorryhyun/anima_lora.git \
-  && cd anima_lora && git pull -q /content/tail.bundle main'
-```
-
-## Install (main, no branch — what the smoke used)
-
-Superseded by the `colab-cu128` branch: `./colab_push.sh <session>` there
-does the checkout, install, assets and weights (`colab_plan.md` § 1–2).
-The procedure below is the record of the smoke.
-
-Reuse the VM's torch through a venv that sees system site-packages, and
-install the rest with `--no-sources` plus overrides:
-
-```bash
-uv venv --system-site-packages --python /usr/bin/python3 .venv
-# /content/overrides.txt
-#   torch==2.11.0
-#   torchvision==0.26.0
-#   flash-attn ; sys_platform == 'never'       (likewise sam3, pyside6, comfy-cli,
-#   ...                                          comfy-aimdo, comfy-kitchen,
-#                                                controlnet-aux, onnxruntime-gpu)
-#   diffusers @ git+https://github.com/huggingface/diffusers@80c7ed262aeffbeb43ef13ae04baeb9b84515a69
-uv pip install --python .venv/bin/python --no-sources --prerelease allow \
-  --override /content/overrides.txt -e . \
-  "anime-tools @ git+https://github.com/sorryhyun/anime_tools@v0.7.5"
-```
-
-**Trap:** this still installs `torch 2.11.0+rocm10.0.0`. The pyproject's
-`amd-rocm-100` index is not explicit, and `index-strategy = "unsafe-best-match"`
-lets it win. Fix after install:
-`uv pip uninstall --python .venv/bin/python torch torchvision triton rocm rocm-bootstrap rocm-sdk-core rocm-sdk-libraries`.
-The venv then falls back to the system cu128 build. A Colab branch removes the
-need for this (`colab_plan.md` § 1).
+- **L4, standard shape:** 12 vCPU, 52 GB RAM, 236 GB disk, L4 with 23 GB,
+  driver 580.82, CUDA 12.8, system Python 3.13.15, user `root`.
+- **T4 does not work:** flash-attn 2 has no sm75 build, and the line fixes
+  `attn_mode="flash"` (`src/common/models.py`). T4 also has no native bf16.
 
 ## What goes over
 
-| what | size | how |
+`colab_push.sh` sends all of this. The checkout sits at the same absolute
+path as here (`/home/sorryhyun/anima/anima_lora`), because `train.jsonl` and
+the scene records store absolute paths.
+
+| what | size | notes |
 |---|---|---|
-| DiT `anima-base-v1.0`, TE `qwen_3_06b_base`, VAE `qwen_image_vae` | 4.2 GB + 1.2 GB + 254 MB | on the VM: `hf_hub_download("circlestone-labs/Anima", "split_files/<kind>/<file>")` → `models/<kind>/` |
-| raw pack `models/vocab_packs/anima_cjk_vocab_pack.{safetensors,json}` | 274 MB | scp (not on the Hub; the `-cjk` repo holds only preview / preview2). Its load-log sha is `7b9fce0bb57b…` (a pack digest, not the file's sha256) |
-| seed rows `output/cjk_anima_scale/rows_step1_0921_merged/trained.pt` | 8.9 MB | scp |
-| `project/cjk_anima_scale/assets/fonts/` | 80 MB | tar over ssh |
-| `output/cjk_anima_scale/scenes_{s1,s1w,sl1w,ja_comic}/` | 630 MB | tar over ssh. **All four for every run**: `config.py`'s pool list loads them regardless of kind |
-| `output/wake_probe/scenes_<p>` → `../cjk_anima_scale/scenes_<p>` | symlinks | create on the VM; the scene records' `file` paths go through `wake_probe/` |
-| `post_image_dataset/render/ja/{resized,heldout}/boxes.jsonl` | 1.6 MB + 0.3 MB | scp (the only corpus files `data` reads; no images) |
-| `$MANGA109S/derived/dialogue_2_10.tsv` + `.env` | — | piece runs only; untested on the VM |
+| DiT, TE, VAE (`anima` catalog pack) | 5.6 GB | fetched on the VM from the Hub |
+| raw pack `models/vocab_packs/anima_cjk_vocab_pack.{safetensors,json}` | 274 MB | not on the Hub. Load-log sha `7b9fce0bb57b…` (a pack digest, not the file's sha256) |
+| seed rows `output/cjk_anima_scale/rows_step1_0921_merged/trained.pt` | 8.9 MB | all `train` reads of that dir |
+| `project/cjk_anima_scale/assets/fonts/` | 80 MB | gitignored |
+| `output/cjk_anima_scale/scenes_{s1,s1w,sl1w,ja_comic}/` | 630 MB | all four for every run: `config.py`'s pool list loads them regardless of kind |
+| `output/wake_probe/scenes_<p>` → `../cjk_anima_scale/scenes_<p>` | symlinks | the scene records' `file` paths go through `wake_probe/` |
+| `post_image_dataset/render/ja/{resized,heldout}/boxes.jsonl` | 1.9 MB | the only corpus files `data` reads |
+| `$MANGA109S/derived/dialogue_2_10.tsv` + `.env` | — | `--pieces` only; not yet run on a VM |
 
 ## Running
 
 - No daemon on the VM. Run the verbs directly:
   `.venv/bin/python project/cjk_anima_scale/scale.py <run> data`, then
-  `… <run> train`. The T4 smoke passed `--workers 2`; the L4 shape has
-  12 vCPU, so the default (cpu − 2) fits.
-- **L4 (2026-09-27, `colab_plan.md` § 4):** `train` runs at 1.29 it/s
-  steady (0.59× local), peak VRAM 17.2 / 23 GB, host RAM 5.6 / 52 GB.
-- `colab status` shows the kernel only: it reads `IDLE` while an ssh job
-  trains. Read progress with `colab exec`, which takes the code on stdin,
-  not as an argument:
-  `echo "import subprocess;print(subprocess.run('tail -c 700 /content/train.log',shell=True,capture_output=True,text=True).stdout)" | colab exec -s <name>`.
-- In an ssh command, `pkill -f "<pattern>"` also matches the ssh's own shell
-  (its command line contains the pattern) and kills it. Bracket one letter:
-  `pkill -f "[n]vidia-smi"`.
-- When pulling with `ssh … 'tar cf - …' > x.tar`, nothing else may write to
-  stdout in that command, or the text lands in front of the archive.
-- `data` on the T4 VM (2 vCPU): 200 items (single, `b0709`) in 0.4 min, and
-  the pack loads with the right sha.
-- `train` loads the DiT, builds the latent / TE caches and reaches compile,
-  then fails at the first attention call (`TypeError: 'NoneType' object is
-  not callable` in `attention_dispatch.flash_attn_func`).
-  `src/common/models.py` fixes `attn_mode="flash"`, and the VM had no
-  flash-attn. On L4 the cu128 flash-attn wheel should cover it; on T4 it
-  would need SDPA. Throughput is still unmeasured on any Colab GPU (local
-  A0: ≈ 2.2 it/s on the 5070 Ti).
-- `train` cannot resume. `trained_partial.pt` is written every 5 000 steps,
-  but a dropped VM loses the run.
+  `… <run> train`. The default `--workers` (cpu − 2) fits the L4 shape.
+- L4 smoke: `data` built 200 items in 0.4 min (`--workers 2`). `train` ran
+  270 steps at **1.29 it/s** steady (0.59× the local ≈ 2.2). The whole
+  process (load, caches, compile, steps, save) took 308 s. Peak VRAM was
+  17.2 / 23 GB and peak host RAM 5.6 / 52 GB.
+- Wall time and cost at 1.29 it/s:
+
+  | run | steps | time | cost |
+  |---|---|---|---|
+  | A | 27.5 k | ≈ 5.9 h | ≈ 9 CU |
+  | C-k (150 steps/row) | 58.2 k | ≈ 12.5 h | ≈ 19 CU |
+  | C-k (270 steps/row) | ≈ 105 k | ≈ 22.6 h | ≈ 35 CU |
+  | C-p | 73.1 k | ≈ 15.7 h | ≈ 24 CU |
 
 ## What comes back
 
-`<run>/trained.pt`, `train_record.json`, `train_log.json`, and
-`<run>/data/{vocabs.json,build.json,eval.json}`. Eval runs here through the
-daemon, against the floor cache in `rows_step1_0921_merged/`.
+Pull `<run>/{trained.pt,train_log.json,train_record.json}` and
+`<run>/data/{vocabs.json,build.json,eval.json}` into the same paths here:
+
+```bash
+ssh "${SSHO[@]}" root@colab 'cd /home/sorryhyun/anima/anima_lora && tar cf - \
+  output/cjk_anima_scale/<run>/{trained.pt,train_log.json,train_record.json} \
+  output/cjk_anima_scale/<run>/data/{vocabs.json,build.json,eval.json}' | tar xf -
+```
+
+Then check `md5sum trained.pt` on both sides. Eval runs here through the
+daemon (`scale.py <run> eval --submit`), against the floor cache in
+`rows_step1_0921_merged/`; a VM-side eval would render a second floor. On
+the smoke, the returned rows loaded as a merged run and read single 6/6, EN
+24/24. A full eval renders every ruler (the smoke's was stopped after
+7.5 min); to check that a run trained, `report.md` and `sheet_single.png`
+are enough.
+
+## Open before a real run
+
+- **No resume; partials instead** (user, 2026-09-27). `train` writes
+  `trained_partial.pt` every 5 000 steps (`SAVE_EVERY`), in the same merged
+  format as `trained.pt`, so eval reads it as is. It lives on the VM's disk,
+  which a dropped session loses, so pull it during a long run. The session
+  limit is unmeasured, and the C runs take 12–23 h.
+- **Which runs go.** plan_2900 puts C on Colab and A local.
+- **C-k budget** (150 or 270 steps/row) is open in plan_2900.
+- **Data build at scale** is unmeasured on the VM. The alternative is to
+  build here and upload (≈ 4 GB at 5.7 MB/s ≈ 12 min).
+- **Piece runs** (`--pieces`, MANGA109S on the VM) have not run on a VM.
