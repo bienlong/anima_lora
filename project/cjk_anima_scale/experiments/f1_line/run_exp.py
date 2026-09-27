@@ -24,6 +24,12 @@ Legs:
             (``--doses``, from ``run0926_f1_line``), built and read on the
             held-out keys like ``transplant`` — does in-word ``dup`` fall
             back toward u1's while composition holds? (report § 4)
+  ungated   (GPU) ``tf_<label>_ug<d>`` = the seed rows with d · ``v_line``
+            added to the held-out 10's rows themselves (Stage B's arm
+            build), so it reaches a lone glyph too — no gate, no hook
+            change. Read on the held-out keys against the floor and the
+            gated ``tf_<label>_line0.5`` on disk, plus singles alone as a
+            line (proposal § 2.0: what the gate buys for ``v_line``)
 
 Reads of record to beat (proposal § 3): donor singles alone official ·
 repeat / 144 floor 91 · 29, plain donor 43 · 50; こんにちは ≤ 2 edits plain
@@ -37,6 +43,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -67,7 +74,7 @@ def parse_args():
         "--legs",
         nargs="+",
         default=["train"],
-        choices=["train", "build", "read", "transplant", "dose"],
+        choices=["train", "build", "read", "transplant", "dose", "ungated"],
     )
     p.add_argument("--doses", type=float, nargs="+", default=[0.5])
     p.add_argument("--dry_run", action="store_true")
@@ -163,6 +170,46 @@ def line_arm(name: str, dose: float) -> None:
     )
 
 
+GLYPH = re.compile(r"[ぁ-ゟァ-ヿ一-鿿]")
+
+
+def alone_line(path: Path, chars, clauses: str) -> dict:
+    """Per single render: either reader reads ≥ 3 kana / kanji (count_twin's
+    read, over ``clauses``) — keyed like ``SB.hits``."""
+    from common.readers import norm
+
+    cl = set(clauses.split(","))
+    out = {}
+    for m in json.loads(path.read_text("utf-8")):
+        if m["text"] not in chars or len(m["text"]) != 1 or m["clause"] not in cl:
+            continue
+        reads = [
+            norm(r.get(x) or "") for r in m.get("reads", []) for x in ("sfx", "vl")
+        ]
+        out[(m["text"], m["clause"], m["pi"], m["seed"])] = any(
+            len(GLYPH.findall(r)) >= 3 for r in reads
+        )
+    return out
+
+
+def paired_line(a: dict, b: dict) -> list:
+    keys = sorted(set(a) & set(b))
+    return [sum(a[k] and not b[k] for k in keys), sum(b[k] and not a[k] for k in keys)]
+
+
+def ungated_arm(name: str, dose: float, ids: dict) -> dict:
+    """The seed rows with ``dose`` · ``v_line`` added to the held-out rows
+    (``SB.build_arm``): every render of a held-out glyph carries it, alone
+    or in a word."""
+    import torch
+
+    d = torch.load(OUT / NAME / "trained.pt", map_location="cpu", weights_only=False)[
+        "delta"
+    ]
+    v = d["line"].float() * float(d["row_scale"])  # effective units
+    return SB.build_arm(name, v, dose, [ids[c] for c in SB.HELD])
+
+
 def read_held(metrics: dict, key: str, path: Path, fh: dict, uh: dict) -> None:
     chars = SB.held_keys()
     print(f"{path.name}, held-out keys:", flush=True)
@@ -221,7 +268,7 @@ def main():
                 f"  vs plain {metrics[f'donor_{arm}']['paired_vs_plain']}",
                 flush=True,
             )
-    if {"transplant", "dose"} & set(args.legs):
+    if {"transplant", "dose", "ungated"} & set(args.legs):
         chars = SB.held_keys()
         floor = SB.check_floor(chars, "en,swap")
         fh = SB.hits(floor, chars, "en,swap")
@@ -238,6 +285,49 @@ def main():
             line_arm(name, dose)
             names[f"line{dose:g}"] = name
             read_held(metrics, f"held_line{dose:g}", EXP / name, fh, uh)
+    if "ungated" in args.legs:
+        chars = SB.held_keys()
+        gated = EXP / f"{names['line']}0.5" / f"native_{SB.TAG}" / "native_reads.json"
+        assert gated.exists(), f"no gated 0.5 reads at {gated} — run the dose leg"
+        gh = SB.hits(gated, chars, "en,swap")
+        print("tf_line0.5 (gated), held-out keys:", flush=True)
+        metrics["held_gated0.5"] = SB.tally(gh)
+        fl = alone_line(floor, chars, "en,swap")
+        gl = alone_line(gated, chars, "en,swap")
+        metrics["held_floor"]["singles_line"] = sum(fl.values())
+        metrics["held_gated0.5"]["singles_line"] = sum(gl.values())
+        print(
+            f"  SINGLES alone as a line: floor {sum(fl.values())}, gated 0.5 "
+            f"{sum(gl.values())} / {len(fl)}",
+            flush=True,
+        )
+        for dose in args.doses:
+            name = f"tf_{args.label}_ug{dose:g}"
+            names[f"ug{dose:g}"] = name
+            moved = ungated_arm(name, dose, ids)
+            rel = [m["rel"] for m in moved.values()]
+            print(
+                f"{name}: {dose:g} · v_line on the held-out rows, rel "
+                f"{min(rel):.3f}–{max(rel):.3f}",
+                flush=True,
+            )
+            key = f"held_ug{dose:g}"
+            read_held(metrics, key, EXP / name, fh, uh)
+            reads = EXP / name / f"native_{SB.TAG}" / "native_reads.json"
+            h = SB.hits(reads, chars, "en,swap")
+            ln = alone_line(reads, chars, "en,swap")
+            metrics[key]["moved"] = moved
+            metrics[key]["paired_vs_gated0.5"] = SB.paired(h, gh)
+            metrics[key]["singles_line"] = sum(ln.values())
+            metrics[key]["singles_line_vs_floor"] = paired_line(ln, fl)
+            metrics[key]["singles_line_vs_gated0.5"] = paired_line(ln, gl)
+            print(
+                f"  vs gated 0.5 {metrics[key]['paired_vs_gated0.5']}\n"
+                f"  SINGLES alone as a line {sum(ln.values())} / {len(ln)} "
+                f"(vs floor {metrics[key]['singles_line_vs_floor']}, vs gated "
+                f"{metrics[key]['singles_line_vs_gated0.5']})",
+                flush=True,
+            )
     write_result(
         run_dir,
         script=__file__,

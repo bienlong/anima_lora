@@ -775,6 +775,44 @@ def test_ext_delta_line_gate():
     assert torch.allclose(emb(ids)[0], rows)
 
 
+def test_ext_delta_line_ungated():
+    """``line_gate`` ``"all"`` (F2a): ``line`` on every pack row, the lone
+    one too; the gate round-trips through the state, and a frozen ``raw``
+    leaves ``line`` the only gradient."""
+    import torch
+    from types import SimpleNamespace
+
+    from common.hooks import ExtDelta
+
+    T = 32128
+    emb = torch.nn.Embedding(T + 10, 4)
+    torch.nn.init.zeros_(emb.weight)
+    emb.requires_grad_(False)
+    anima = SimpleNamespace(llm_adapter=SimpleNamespace(embed=emb))
+    d = ExtDelta(anima, [1, 2, 3], 4, "cpu", row_scale=2.0)
+    with torch.no_grad():
+        d.raw.copy_(torch.eye(3, 4))
+    d.raw.requires_grad_(False)
+    ids = torch.tensor([[5, T + 1, 7, T + 2, T + 3, 9, T + 3, T + 1, T + 2]])
+    d.line = torch.nn.Parameter(torch.full((4,), 0.5))
+    d.line_gate = "all"
+    out = emb(ids)
+    pack = ids[0] >= T
+    rows = torch.zeros(9, 4)
+    for p, e in enumerate(ids[0].tolist()):
+        if e >= T:
+            rows[p] = d.raw[d.index[e - T]] * 2.0
+    assert torch.allclose(out[0], rows + pack[:, None] * 1.0)
+    out.sum().backward()
+    assert float(d.line.grad.sum()) == 6 * 4 * 2.0  # all 6 pack positions
+    sd = d.state_dict()
+    assert sd["line_gate"] == "all"
+    d2 = ExtDelta.from_state(anima, sd, "cpu")
+    assert d2.line_gate == "all"
+    for h in (*d.handles, *d2.handles):
+        h.remove()
+
+
 # ---------------------------------------------------------------------------
 # plan_2900 § 5: the budget rule, the single ruler, the merge verb
 

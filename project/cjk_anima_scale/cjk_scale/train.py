@@ -190,13 +190,16 @@ def train(
     data: Path | None = None,
     out: Path | None = None,
     max_steps: int | None = None,
-    line_mode: bool = False,
+    line_mode: bool | str = False,
+    rows_frozen: bool = False,
 ) -> Path:
     """Train the run. ``data`` / ``out`` default to the run's dirs;
     ``max_steps`` stops the loop early with the full-length schedule
     (``experiments/parity_300f`` replays a run's first steps); ``line_mode``
     trains a gated ``v_line`` beside the rows (``rows.Rows``,
-    ``experiments/f1_line``) — ``scale.py`` passes none of them."""
+    ``experiments/f1_line``), ``"all"`` an ungated one, and ``rows_frozen``
+    holds the rows at the seed so ``v_line`` alone trains
+    (``experiments/f2a_line``) — ``scale.py`` passes none of them."""
     from common.models import checkpoints, dit_forward, gen_args
     from library.anima.vocab_pack import attached_pack_rows, strategy_pack
     from library.inference.generation import get_generation_settings
@@ -219,7 +222,9 @@ def train(
     )
     p = plan(rc, data, recs, vocabs, touched)
     if line_mode:
-        p.record["line_mode"] = True
+        p.record["line_mode"] = "run" if line_mode is True else line_mode
+    if rows_frozen:
+        p.record["rows_frozen"] = True
     print(
         f"rows: {len(p.idx)} ({len(vocabs)} vocabs) — {len(p.touched)} touched "
         f"by the captions, {len(p.idx - p.touched)} with no draw; {len(p.frozen)} "
@@ -246,6 +251,7 @@ def train(
         frozen=p.frozen,
         context=SEED_ROWS,
         line_mode=line_mode,
+        rows_frozen=rows_frozen,
     )
     assert rows.n_rows == len(p.idx), (rows.n_rows, len(p.idx))
     steps, warmup, record = p.steps, p.warmup, p.record

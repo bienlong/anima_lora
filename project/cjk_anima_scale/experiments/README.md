@@ -1,7 +1,7 @@
 # experiments — idea validation for the scale line, bench-style
 
-One directory per experiment; each validates one idea (usually from
-`../idea.md`) before any production code changes. This is the line's
+One directory per experiment; each validates one idea before any
+production code changes. This is the line's
 `bench/`: same envelope, same discipline, but scoped to the line and free
 to import `cjk_scale/` and the line's `src/` primitives. The two influence
 experiments read the old stage-layout dirs (`data_<stage>_<tag>`) through
@@ -33,7 +33,7 @@ experiments read the old stage-layout dirs (`data_<stage>_<tag>`) through
 
 ## Experiments
 
-- `influence_smoke/` — first contact for `idea.md`'s gradient bank +
+- `influence_smoke/` — first contact for the gradient bank +
   validation influence: does `I[c, s] = v_sᵀ ḡ_c` rank the recipes the way
   the rulers did, and does the linearized prediction match the measured
   dev-loss change across the run0925_300f delta? **Ran 2026-09-25** →

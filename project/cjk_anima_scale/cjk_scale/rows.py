@@ -28,6 +28,10 @@ pre-merge vocabs-only file fails eval's check and needs a retrain.
 ``v_line`` (``ExtDelta.line``, zero-init, the rows' lr, no pull) added at the
 hook to every pack row in a run of ≥ 2, so the rows ``r_i`` and the line
 mode split by the data's gate on / off exposure. Saved as ``delta['line']``.
+``line_mode`` ``"all"`` (F2a, proposal.md § 2.0) drops the gate: ``v_line``
+on every pack row, alone or in a run. ``rows_frozen`` holds every row at its
+warm (seed) value — ``raw`` takes no gradient and ``v_line`` is the only
+trainable, so ``v_line`` is fit onto the rows it will be summed onto.
 """
 
 from __future__ import annotations
@@ -73,7 +77,8 @@ class Rows:
         touched=None,
         frozen=(),
         context=None,
-        line_mode=False,
+        line_mode=None,
+        rows_frozen=False,
     ):
         from common.hooks import ExtDelta
 
@@ -94,11 +99,20 @@ class Rows:
         self.init_anchor = float(init_anchor)
         self.free_residual = float(free_residual)
         self.delta = ExtDelta(anima, idx | frozen, dim, device, self.row_scale)
-        self.params = [{"params": [self.delta.raw], "lr": lr}]
+        self.rows_frozen = bool(rows_frozen)
+        self.params = [] if rows_frozen else [{"params": [self.delta.raw], "lr": lr}]
         if line_mode:
+            gate = "run" if line_mode is True else str(line_mode)
+            assert gate in ("run", "all"), line_mode
             self.delta.line = torch.nn.Parameter(torch.zeros(dim, device=device))
+            self.delta.line_gate = gate
             self.params.append({"params": [self.delta.line], "lr": lr})
-            print("rows: line mode on — v_line (zero-init) at runs of ≥ 2", flush=True)
+            print(
+                "rows: line mode on — v_line (zero-init) "
+                + ("at runs of ≥ 2" if gate == "run" else "on every pack row, ungated"),
+                flush=True,
+            )
+        assert self.params, "rows_frozen needs line_mode — nothing would train"
         self.touched_mask = torch.tensor(
             [int(e) in touched for e in self.delta.ext_ids],
             dtype=torch.bool,
@@ -120,6 +134,10 @@ class Rows:
             self._warm_start(warm)
         if frozen:
             self._fill_frozen()
+        if rows_frozen:
+            self.delta.raw.requires_grad_(False)
+            print(f"rows: all {self.n_rows} rows frozen at the warm rows", flush=True)
+        elif frozen:
             live = (~self.frozen_mask).float()[:, None]
             self.delta.raw.register_hook(lambda g: g * live)
 

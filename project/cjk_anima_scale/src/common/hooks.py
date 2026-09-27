@@ -22,7 +22,10 @@ class ExtDelta:
     **run** — a pack position whose left or right neighbour in the T5 ids is
     also a pack row (a spelled word; a lone glyph or a lone piece is not).
     It is read from the ids at the hook, never from the row, and saved as
-    ``delta['line']``; a state without it reads exactly as before."""
+    ``delta['line']``; a state without it reads exactly as before.
+    ``line_gate`` ``"all"`` (proposal.md § 2.0, F2a) drops the gate: ``line``
+    is added to every pack row, alone or in a run; saved as
+    ``delta['line_gate']`` only then, so a gated state reads as before."""
 
     def __init__(self, anima, ext_ids, dim, device, row_scale: float):
         from library.anima.ext_vocab import T5_TABLE_SIZE
@@ -37,6 +40,7 @@ class ExtDelta:
         self.scale = 1.0
         self.common = None
         self.line = None
+        self.line_gate = "run"
         # ``pinned`` (rows, dim), fixed, added to every trained row on every
         # item: the inherited shared direction a_r · m̂ (``--pin_dir``); the
         # trainable ``raw`` is then the per-row residual only. Saved tables
@@ -56,7 +60,9 @@ class ExtDelta:
                 if bool(mask.any()):
                     self.state["mask"] = mask
                     self.state["ext"] = args[0][mask] - self.T
-                    if self.line is not None:
+                    if self.line is not None and self.line_gate == "all":
+                        self.state["run"] = torch.ones_like(mask[mask])
+                    elif self.line is not None:
                         nb = torch.zeros_like(mask)
                         nb[..., 1:] |= mask[..., :-1]
                         nb[..., :-1] |= mask[..., 1:]
@@ -115,6 +121,8 @@ class ExtDelta:
         }
         if self.line is not None:
             sd["line"] = self.line.detach().cpu().float()
+            if self.line_gate != "run":
+                sd["line_gate"] = self.line_gate
         return sd
 
     def load(self, sd):
@@ -123,3 +131,4 @@ class ExtDelta:
         self.row_scale = sd["row_scale"]
         if sd.get("line") is not None:
             self.line = sd["line"].float().to(self.raw.device)
+            self.line_gate = sd.get("line_gate", "run")

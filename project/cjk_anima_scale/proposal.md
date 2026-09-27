@@ -25,6 +25,8 @@ so a closed section keeps a one-line stub. Numbers cited from before the
 | § 2.2 count twin: the Stage B donor, count tier off | no count direction: the donor difference has no shared part (split-half cos 0.15, energy 4 %), and the twin grows `u_S` again (cos 0.96). Alone-as-a-line 108 vs 102, repeat 64 vs 50 (p 0.09) | `reports/count_twin_2026_09_26.md` |
 | § 2.3 Stage I on 12 cold kanji | alone: I0 wins at 90 and at 270 steps / row (x3: contained 117 vs I1 84 / 192, p 9e-6), I2 out; `b0709` stays. Under the mode the kanji words never compose (≥ 2 glyphs in order ≤ 3 / 96 on every arm) | `reports/stage_i_2026_09_26.md` § 5 |
 | § 2.3 kanji_mode: warm seed kanji under 0.5 · `v_line` | barely compose: ≤ 1 edit 2 → 10 / 96 (p 0.04), ≥ 2 in order 3 → 14, against kana 5 → 40 / 80 and 72 / 80. Kanji vs kana, not row maturity | `experiments/kanji_mode/results/20260927-1138-k1-score/` (no report) |
+| § 2.0 F1's `v_line` ungated at 0.5 (held-out 10, the arm built into the rows) | the gate buys the singles: official 124 vs gated 152 / 320, repeat 43 vs 26, alone as a line 91 vs 74. Words as gated (≤ 1 edit 78 vs 80 / 160) | `experiments/f1_line/results/20260927-1609-l1/` (no report) |
+| § 2.0 F2a: `v_line` trained ungated, rows frozen, words + b0709 lone | dose 1 fails both axes: words ≤ 1 edit 40, ≤ 2 edits 64 (floor 93), `dup` 88; singles official 69, repeat 48, line 128. `v_line` did not shrink (norm 205 = F1's 204, cos 0.85 to it). At dose 0.5 it is no better than F1's ungated 0.5 on either axis: words ≤ 1 edit 64 vs 78 (p 0.08), `dup` 66 vs 50 (p 0.04); singles official 117 vs 124, repeat 49 vs 43, line 103 vs 91 (p 0.05). The b0709 lone items bought nothing alone | `experiments/f2a_line/results/20260927-1644-a1/` (no report) |
 | § 2.4: the gate on runs with pieces | a piece in a run renders 0 before and after. はい contained 4 → 14 / 16, target はい 0 → 6 / 8. The single beside a piece doubles (やったネ `wdup` 2 → 9). A line-block pack in ComfyUI rendered へんたい as へんてだ♥ | `reports/line_pieces_2026_09_26.md` |
 
 The best configuration on record for a vocab without line training is
@@ -110,6 +112,33 @@ reads it first.
   every lone item carries `v_line` and must still render one glyph. Read
   on the held-out 10 kana (the same keys as F1, cached floor): alone and
   words, against F1's gated 0.5.
+  **Ran 2026-09-27 (`a1`)** with the count tier dropped: words
+  (b0507 + b0305) + b0709 lone (`scene_single` + `grid_single`, the
+  donors, share 0.5 → 1 200 of 3 600). Dose 1 fails both axes, and dose
+  0.5 is no better than F1's gated-trained `v_line` read ungated (§ 0).
+  The likely hole is the bands: the lone items sat only at σ 0.7–0.9 and
+  the words only at 0.3–0.7, so the loss could keep `v_line` harmless at
+  high σ and let it compose at mid / low σ, where no lone item asked
+  anything of it. A lone glyph passes every σ at inference.
+- **F2a′, lone at the words' bands:** the same trainer (ungated, rows
+  frozen), and every word band gets a lone counterpart at its own px, so
+  word and lone differ only in the neighbours:
+  - b0507: the count tier (`scene_single_small`, 28–40 px, fill 0.2–0.4),
+    at 0.5 of the group, not Stage B's 0.3.
+  - b0305: lone glyphs at the words' ≈ 18 px (`scene_single_small`,
+    glyph_px 12–24). It needs a window row for a single under 24 px,
+    ceiling-only like the 24–40 px row: A.1's single letter, flat, reads
+    live 0.2–0.6 at 12–16 px and 0.25–0.6 at 20 px, peak 0.4–0.5
+    (`band_experiment_results.md` § 2), so the row is 0.3–0.5.
+    `test_unread_cells_have_no_window`'s "never renders that small in a
+    bubble" was a limit of the fit-sized builder, and
+    `scene_single_small` shrinks below the fit.
+  - b0709 lone kept at a smaller share.
+
+  Read as F2a: the held-out 10 at dose 1 and 0.5, plus the donor singles
+  (こんにちは's glyphs + あ う が と, en, floor cached). If the donors hold
+  alone and the held-out 10 do not, the constraint trained but does not
+  transfer.
 - **F2b, the data axes:** F2a's mix plus spelled kanji words (§ 2.3) and
   runs with a piece in them (§ 2.4), with lone pieces. Read adds
   kanji_mode's words and the piece ruler.
@@ -151,8 +180,8 @@ trained single is its seed row**, and trained rows are line-only.
 
 - **F1b:** alone items at the b0305 px (≈ 18 px). The count tier covers
   24–40 px only, because a single under 24 px has no window in the band
-  law. **It needs a band-law row first:** a read of the single's window at
-  16–24 px (`band_experiment_results.md`). Then retrain F1 with the tier
+  law. **It needs a band-law row first:** the ceiling-only 12–24 px
+  single row that F2a′ writes (§ 2.0). Then retrain F1 with the tier
   and read the donor singles alone (line ≥ 3 glyphs, official, repeat)
   against F1's 94 · 50 · 35. The count twin lowered its prior: the tier
   moved same-glyph repeats, not the line.
@@ -216,20 +245,17 @@ one of those failures.
   clause-varied `scene_spelled` captions if the split localizes B; and a
   caption marker for the line mode (spelled items captioned `, spelled.`),
   the last resort.
-- **The outside opinion's adapter replay / distillation**
-  (`opinion_factorizedrows.md` § 2–4). F0 found no context-dependent
-  component in the adapter worth localizing, and adapter distances have
-  not predicted renders (piece ↔ glyph R² ≈ 0.03).
 - **The `u_P` → こんにちは-singles bridge** (no training, cached floor):
   low priority.
 
 ## 3. Order
 
-1. **§ 2.0 F2a**: the ungated, rows-frozen `v_line` on kana (code first).
+1. **§ 2.0 F2a′**: F2a with lone items at every word band (the 12–24 px
+   single window row first). F2a ran: dose 1 fails (§ 0).
 2. **§ 2.0 F2b**: + kanji words (§ 2.3) + piece runs (§ 2.4).
 3. The gated fallback: **§ 2.1** the dose sweep, **§ 2.5** the sent test,
    then the post-train comparison.
-4. **§ 2.2 F1b**, once its band-law row exists.
+4. **§ 2.2 F1b**, on F2a′'s band-law row.
 
 Parked: § 2.4's kind gate and § 2.7's caption levers.
 

@@ -171,7 +171,12 @@ def add_line(table: torch.Tensor, mapping: dict, src: Path, dose: float) -> dict
     d = sd["delta"]
     if d.get("line") is None:
         raise ValueError(f"{src}: its delta carries no line vector")
-    vec = d["line"].float() * float(d["row_scale"]) * float(dose)
+    if d.get("line_gate", "run") != "run":
+        raise ValueError(
+            f"{src}: an ungated line (line_gate {d['line_gate']!r}) — the line "
+            "block is the run gate; fold it into the rows instead"
+        )
+    vec =d["line"].float() * float(d["row_scale"]) * float(dose)
     if vec.shape != (table.shape[1],):
         raise ValueError(f"line vector {tuple(vec.shape)} vs pack dim {table.shape[1]}")
     iso = IsoSpec.from_mapping(mapping)

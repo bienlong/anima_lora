@@ -52,9 +52,7 @@ between arms are made on a **dev set** of the same shape and disjoint
 strings — native prompts, the small-px / mixed-string cases, pieces the
 acceptance strings do not contain (e.g. ありがとう / それを / すごい in
 `run0925_72`'s inventory) — read with the same both-reader rule and the
-same sheet. The dev set is what a gradient-bank surrogate (`idea.md`) is
-calibrated against; the acceptance set stays untouched until one arm is
-chosen. Both sets are listed in the run file (`[eval] sent_strings` for
+same sheet. The acceptance set stays untouched until one arm is chosen. Both sets are listed in the run file (`[eval] sent_strings` for
 acceptance, a `dev_strings` key when the eval grows it), never chosen
 per run.
 
