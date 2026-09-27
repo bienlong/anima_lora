@@ -2,8 +2,8 @@
 
 How to drive `scale.py <run> data | train` on Colab through the `colab` CLI
 (uv tool, `google-colab-cli`), and bring the run back for eval here. Measured
-on a T4 smoke and an L4 smoke (2026-09-27, run `t4smoke_a` =
-`chars:精俺感`, VM-only config).
+on T4, L4, A100 and G4 smokes (2026-09-27; runs `t4smoke_a` (the L4 one),
+`a100smoke_a` and `g4smoke_a`, all `chars:精俺感`, VM-only configs).
 
 ## Setup: one command
 
@@ -12,7 +12,8 @@ on a T4 smoke and an L4 smoke (2026-09-27, run `t4smoke_a` =
    from origin. The rebase needs a checkout of the branch:
    `git worktree add .claude/worktrees/colab-cu128 colab-cu128`, and
    `git worktree remove` it afterwards.
-2. `colab new --gpu L4 -s <name>` (from the CLI, not the browser).
+2. `colab new --gpu G4 -s <name>` (from the CLI, not the browser). G4 is
+   the fastest at the same cost per step (§ Running).
 3. From main's checkout, with no branch checkout needed:
    `bash <(git show colab-cu128:colab_push.sh) <name> [--pieces]`.
    Do not pipe it into `bash -s`, because the script's ssh calls would read
@@ -24,8 +25,8 @@ clones (or resets to origin) at the local absolute path, sends the assets
 `/content/env.sh`, runs `uv sync`, fetches the DiT / TE / VAE with
 `tasks.py download-model anima`, and checks torch.cuda + flash_attn.
 `--pieces` also sends `$MANGA109S/derived/dialogue_2_10.tsv` to
-`/content/manga109s/` and writes the VM's `.env`. From a fresh L4 VM it
-took 3 min 17 s. Every step is safe to re-run.
+`/content/manga109s/` and writes the VM's `.env`. From a fresh VM it took
+3 min 17 s (L4, A100) and 4 min 47 s (G4). Every step is safe to re-run.
 
 ### The `colab-cu128` branch
 
@@ -52,7 +53,8 @@ marked `colab-cu128 branch`) and run `uv lock` again.
 
 - A session opened in the browser shows as `[?]` in `colab sessions` (no
   local token); `exec` / `ssh` cannot attach to it.
-- `colab usage` shows the balance and rate. L4 costs 1.54 CU/h.
+- `colab usage` shows the balance and rate. L4 costs 1.54 CU/h, A100
+  5.30 CU/h, G4 8.90 CU/h.
 - `colab stop -s <name>` when done. An idle VM keeps billing. Stopping loses
   the VM's disk, so pull what comes back first.
 - `colab status` shows the kernel only. It reads `IDLE` while an ssh job
@@ -93,8 +95,16 @@ marked `colab-cu128 branch`) and run `uv lock` again.
 
 ## The VM
 
-- **L4, standard shape:** 12 vCPU, 52 GB RAM, 236 GB disk, L4 with 23 GB,
-  driver 580.82, CUDA 12.8, system Python 3.13.15, user `root`.
+- **Standard shapes**, all with a 236 GB disk, driver 580.82, CUDA 12.8,
+  system Python 3.13.15, user `root`:
+
+  | GPU | VRAM | vCPU | RAM |
+  |---|---|---|---|
+  | L4 | 23 GB | 12 | 52 GB |
+  | A100 (SXM4, sm80) | 40 GB | 12 | 83 GB |
+  | G4 (RTX PRO 6000 Blackwell Server, sm120) | 96 GB | 48 | 176 GB |
+
+- The branch's flash-attn wheel runs on all three.
 - **T4 does not work:** flash-attn 2 has no sm75 build, and the line fixes
   `attn_mode="flash"` (`src/common/models.py`). T4 also has no native bf16.
 
@@ -119,19 +129,32 @@ the scene records store absolute paths.
 
 - No daemon on the VM. Run the verbs directly:
   `.venv/bin/python project/cjk_anima_scale/scale.py <run> data`, then
-  `… <run> train`. The default `--workers` (cpu − 2) fits the L4 shape.
-- L4 smoke: `data` built 200 items in 0.4 min (`--workers 2`). `train` ran
-  270 steps at **1.29 it/s** steady (0.59× the local ≈ 2.2). The whole
-  process (load, caches, compile, steps, save) took 308 s. Peak VRAM was
-  17.2 / 23 GB and peak host RAM 5.6 / 52 GB.
-- Wall time and cost at 1.29 it/s:
+  `… <run> train`. The default `--workers` (cpu − 2) fits every shape.
+- Smokes: 270 steps, batch 4. "Steady" is the rate between logged steps
+  after compile (`train_log.json`'s `it_s` is the running mean from step 0).
+  The `train` time covers load, caches, compile, steps and save.
 
-  | run | steps | time | cost |
-  |---|---|---|---|
-  | A | 27.5 k | ≈ 5.9 h | ≈ 9 CU |
-  | C-k (150 steps/row) | 58.2 k | ≈ 12.5 h | ≈ 19 CU |
-  | C-k (270 steps/row) | ≈ 105 k | ≈ 22.6 h | ≈ 35 CU |
-  | C-p | 73.1 k | ≈ 15.7 h | ≈ 24 CU |
+  | GPU | steady it/s | CU per 1 k steps | `data` / `train` | peak VRAM | peak host RAM |
+  |---|---|---|---|---|---|
+  | L4 | 1.29 | 0.33 | 0.4 min (`--workers 2`) / 308 s | 17.2 GB | 5.6 GB |
+  | A100 | 4.12 | 0.36 | 23 s / 156 s | 18.6 GB | 6.5 GB |
+  | G4 | 7.18 | 0.34 | 15 s / 76 s | 17.8 GB | 7.1 GB |
+
+  The local GPU runs ≈ 2.2 it/s. Cost per step is the same on all three, so
+  the GPU choice sets wall time only. At batch 4, VRAM stays under 19 GB, and
+  the G4's 96 GB goes unused.
+- Wall time and cost:
+
+  | run | steps | L4 | A100 | G4 |
+  |---|---|---|---|---|
+  | A | 27.5 k | 5.9 h / 9 CU | 1.9 h / 10 CU | 1.1 h / 9 CU |
+  | C-k (150 steps/row) | 58.2 k | 12.5 h / 19 CU | 3.9 h / 21 CU | 2.3 h / 20 CU |
+  | C-k (270 steps/row) | ≈ 105 k | 22.6 h / 35 CU | 7.1 h / 38 CU | 4.1 h / 36 CU |
+  | C-p | 73.1 k | 15.7 h / 24 CU | 4.9 h / 26 CU | 2.8 h / 25 CU |
+- The VM has no `/usr/bin/time`. To start a job that outlives the call
+  without an ssh connection, run `subprocess.Popen(['bash', '-c', cmd],
+  stdout=open(log, 'w'), stderr=subprocess.STDOUT, start_new_session=True)`
+  through `colab exec`. The kernel's env already has the driver path.
 
 ## What comes back
 
@@ -158,7 +181,8 @@ are enough.
   `trained_partial.pt` every 5 000 steps (`SAVE_EVERY`), in the same merged
   format as `trained.pt`, so eval reads it as is. It lives on the VM's disk,
   which a dropped session loses, so pull it during a long run. The session
-  limit is unmeasured, and the C runs take 12–23 h.
+  limit is unmeasured. The C runs take 2.3–4.1 h on a G4 (12–23 h on an
+  L4).
 - **Which runs go.** plan_2900 puts C on Colab and A local.
 - **C-k budget** (150 or 270 steps/row) is open in plan_2900.
 - **Data build at scale** is unmeasured on the VM. The alternative is to
