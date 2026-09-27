@@ -42,7 +42,17 @@ RULES = (
         "reports/stage_i_2026_09_26.md § 5); 150 lies between, unmeasured "
         "(plan_2900 § 3, the C-k budget is the user's call)",
     ),
-    # 3+-glyph pieces: B0 (plan_2900 § 2) sets this row; until then 90
+    Rule(
+        "piece",
+        (4, 5),
+        None,
+        270,
+        "long_b0 (reports/long_b0_2026_09_27.md): warm, piece table, 90 → 270 "
+        "steps / row: 4-glyph contained 7 → 18 / 64 (4 / 4 pieces up), "
+        "5-glyph 3 → 4 (near 8 → 13), 3-glyph 13 → 15 (stays at 90); "
+        "user 2026-09-27: 270 for 4–5, cold pieces too (plan_2900 § 2 — B0 "
+        "sets C-p's; cold is not read)",
+    ),
 )
 
 

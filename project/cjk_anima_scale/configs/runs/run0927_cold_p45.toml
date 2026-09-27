@@ -1,0 +1,7 @@
+# run0927_cold_p45 — plan_2900 § 3 (Run C-p, 2026-09-27): the 99 cold pieces of
+# 4–5 glyphs, ranks 1984–3013, 270 steps / row (budget.RULES: long_b0, cold not
+# read). Joins run0927_cold_p23 by `scale.py <out> merge`. Read: the piece ruler +
+# run0925_300f's sent strings (cached floor).
+
+vocabs = "ja_cold_1901_2900_p45_99.txt"
+read = ["はい", "おしい", "やったネ", "ちょっと来い", "こんにちは"]

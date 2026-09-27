@@ -1,0 +1,7 @@
+# run0927_long_p45 — plan_2900 § 2 (Run B, 2026-09-27): the seed's 168 pieces of
+# 4–5 glyphs, warm, 270 steps / row (budget.RULES: long_b0). Joins
+# run0927_long_p3 by `scale.py <out> merge`. Read: the piece ruler (24) +
+# run0925_300f's sent strings (their floor keys are cached).
+
+vocabs = "ja_long_p45_0927_168.txt"
+read = ["はい", "おしい", "やったネ", "ちょっと来い", "こんにちは"]

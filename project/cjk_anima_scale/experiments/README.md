@@ -132,3 +132,9 @@ experiments read the old stage-layout dirs (`data_<stage>_<tag>`) through
   words, floor in the seed dir's `native_stagei/`. **Ran 2026-09-26** →
   alone I0 ≥ I1 ≫ I2. Words 0 / 96 everywhere: underpowered at 90 steps /
   row (`../reports/stage_i_2026_09_26.md`).
+- `long_b0/` — plan_2900 § 2's micro: 12 warm pieces (4 per glyph count)
+  on the piece table at 90 vs 270 steps / row, read alone on the piece
+  ruler's `native` stage (`en`), floor keys into the seed dir's
+  `native_piece/`. **Ran 2026-09-27** → 4 glyphs need 270 (contained
+  7 → 18 / 64), 3 glyphs stay at 90, 5 glyphs are not a budget problem
+  (`../reports/long_b0_2026_09_27.md`; `budget.RULES`).

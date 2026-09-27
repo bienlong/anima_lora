@@ -217,7 +217,11 @@ def test_front_door_parser():
         with pytest.raises(SystemExit):
             p.parse_args(gone)
     a = p.parse_args(["rows_2900_merged", "merge", "run_a", "run_b"])
-    assert a.verb == "merge" and a.run == "rows_2900_merged" and a.runs == ["run_a", "run_b"]
+    assert (
+        a.verb == "merge"
+        and a.run == "rows_2900_merged"
+        and a.runs == ["run_a", "run_b"]
+    )
     with pytest.raises(AssertionError, match="takes no run list"):
         scale.main(["run0925_300f", "train", "run_b"])
 
@@ -791,13 +795,16 @@ _QMAP = {1: 101, 2: 102, 3: 103, 4: 104, 5: 105, 6: 106}
 
 
 def test_budget_rule():
-    """Cold singles take the cold-kanji row (stage_i § 5), everything else
-    the base; a run mixing budgets is refused, a uniform one gets its factor."""
+    """Cold singles take the cold-kanji row (stage_i § 5), 4–5-glyph pieces
+    the long_b0 row, everything else the base; a run mixing budgets is
+    refused, a uniform one gets its factor."""
     from cjk_scale import budget
 
     assert budget.factor("single", 1, False) == 150 / budget.BASE_STEPS
     assert budget.factor("single", 1, True) == 1.0
-    assert budget.factor("piece", 4, False) == 1.0
+    assert budget.factor("piece", 3, True) == 1.0
+    assert budget.factor("piece", 4, True) == 3.0
+    assert budget.factor("piece", 5, False) == 3.0
     tokq, seeds = (_Tok(), _QMAP), frozenset({101, 103, 105, 106})
     f = budget.vocab_factors(["精", "山", "すごい", "って", "あっ"], tokq, seeds)
     assert f == {"精": 1.0, "山": 150 / 90, "すごい": 1.0, "って": 1.0, "あっ": 1.0}
@@ -811,7 +818,9 @@ def test_plan_groups_take_the_budget():
     from cjk_scale.builder import ITEMS_PER_VOCAB, plan_groups
 
     got = plan_groups({"single": ["s"] * 3, "piece": [], "multi": []}, budget=150 / 90)
-    assert [(g.name, n) for g, n in got] == [("b0709", round(3 * ITEMS_PER_VOCAB * 150 / 90))]
+    assert [(g.name, n) for g, n in got] == [
+        ("b0709", round(3 * ITEMS_PER_VOCAB * 150 / 90))
+    ]
 
 
 def test_ruler_sample():
@@ -821,9 +830,11 @@ def test_ruler_sample():
 
     small = [f"あ{i}" for i in range(5)]
     assert ruler_sample(small) == small
-    by = {2: [f"{c}い" for c in "かきくけこさしすせそたちつてと"],  # 15
-          3: [f"{c}いう" for c in "かきくけこさしすせそたちつてと"],  # 15
-          4: ["かいうえ", "きいうえ"]}  # 2
+    by = {
+        2: [f"{c}い" for c in "かきくけこさしすせそたちつてと"],  # 15
+        3: [f"{c}いう" for c in "かきくけこさしすせそたちつてと"],  # 15
+        4: ["かいうえ", "きいうえ"],  # 2
+    }
     pool = [v for g in (2, 3, 4) for v in by[g]]
     got = ruler_sample(pool)
     assert len(got) == RULER_N == 24 and len(set(got)) == 24
@@ -852,7 +863,12 @@ def _rows_file(path, ids, raw, scale, **extra):
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
-            "delta": {"ext_ids": ids, "raw": torch.tensor(raw), "row_scale": scale, **extra},
+            "delta": {
+                "ext_ids": ids,
+                "raw": torch.tensor(raw),
+                "row_scale": scale,
+                **extra,
+            },
             "arm": "rows",
             "seed_merged": "seed.pt",
         },
@@ -874,7 +890,12 @@ def test_merge_rows(tmp_path, monkeypatch):
     idx = {"a": {10}, "b": {11, 13}, "c": {10}, "l": {12}}
     monkeypatch.setattr(mg, "run_idx", lambda r, tokq: idx[r])
     _rows_file(tmp_path / "a" / "trained.pt", [10, 11, 12], [[1.0], [2.0], [3.0]], 1.0)
-    _rows_file(tmp_path / "b" / "trained.pt", [10, 11, 12, 13], [[0.0], [5.0], [0.0], [7.0]], 2.0)
+    _rows_file(
+        tmp_path / "b" / "trained.pt",
+        [10, 11, 12, 13],
+        [[0.0], [5.0], [0.0], [7.0]],
+        2.0,
+    )
     out = mg.merge("m", ["a", "b"])
     sd = torch.load(out / "trained.pt", weights_only=False)
     assert sd["delta"]["ext_ids"] == [10, 11, 12, 13]
