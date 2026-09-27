@@ -56,6 +56,25 @@ row), and EN over 60 sampled Qwen word tokens (158 pieces):
 - **Ambiguity takes context in EN.** Pieces by share (how many of Qwen's
   68 923 Latin tokens hold the piece in their quoted T5 spelling), terciles:
   share 1–20 → 0.74, 20–89 → 0.67, 102–10 159 → 0.46.
+- **In EN, share and norm are one axis** (post-hoc, 2026-09-27: c2's 114
+  `en_word` pieces, each piece's row norm from the base DiT's
+  `net.llm_adapter.embed.weight`, table mean 212; not a script):
+
+  | | r |
+  |---|---|
+  | log share ↔ norm | **−0.87** (a common piece has a small row) |
+  | log share ↔ cos | −0.74 |
+  | norm ↔ cos | +0.68 |
+  | share, norm held (partial) | **−0.42** |
+  | norm, share held (partial) | 0.10 |
+
+  By norm tercile: 139–196 → 0.47, 197–222 → 0.68, 222–265 → 0.72. EN's
+  natural variation is organised by share. Norm follows it and adds little
+  beyond it, and EN's loudest pieces (≈ the seed's 252) still read context at
+  0.72, not 0.965. The JA arms respond far more steeply to the same norm range
+  (`raw` 206 → `raw_at_seed` 252: 0.66 → 0.94). So c2's norm effect is shown
+  only by rescaling JA rows; EN's own context read is not shown to be a norm
+  effect.
 
 **Vocab granularity** (tokenizers, CPU):
 
@@ -87,8 +106,21 @@ without its neighbours.
   Nothing in the table asks the adapter to read a JA row by its neighbours.
 - **Not H0 (Qwen).** c1 rules out the Qwen word context as the lever.
 
-H1 is the measured one. H2 is EN-side evidence (the share terciles) plus the
-design of the pack, not a JA read.
+H1 is the measured one on JA rows (c2's arms). H2 is EN-side evidence plus
+the design of the pack, not a JA read, and in EN the two cannot be told
+apart: share and norm correlate at −0.87, and share keeps a partial effect
+(−0.42) that norm does not (0.10) (§ 1). Two readings remain:
+- **H1 generic:** a pre-norm residual (`LLMAdapterTransformerBlock`:
+  `x + f(norm(x))`, so an update's size does not grow with ‖x‖) makes any
+  row's context read fall with its norm. EN's weak norm slope is then because
+  EN rows vary little in norm for a given share. A norm cap is enough.
+- **H2 learned:** the adapter learned how large an update to give by token
+  (update size tracks the row's direction; common pieces get large ones).
+  JA rows, pack or seed, never took part in that learning, so a cap brings
+  a JA row down to EN's norm but not to EN's context read. A cap is
+  necessary, not sufficient.
+
+P0b (§ 4) separates them at the adapter; P1's 2 × 2 at training.
 
 ### Against the record
 
@@ -105,9 +137,9 @@ design of the pack, not a JA read.
   2026-09-26: piece ↔ glyph R² ≈ 0.03). An adapter cos is not a render. Every
   proposal below is gated on § 4 P0.
 - **Closed: row-space geometry penalties (decorrelation / orthogonality /
-  whitening), shape encoders, IDS splits.** A norm bound is none of these,
-  but it acts on `r_i`; if the roll-up is read as covering norm, P1 is out
-  and P0 still stands.
+  whitening), shape encoders, IDS splits.** A norm bound is none of these
+  (user, 2026-09-27: the ban does not cover a norm clamp), so P1 is open. If
+  P0 points there, a seed retrain under the bound is acceptable.
 
 ## 3. The user's lever: fewer piece rows
 
@@ -139,18 +171,81 @@ piece rows are whole strings); EN sits at 2.4.
 
 ## 4. Proposals, in order
 
-- **P0, render the norm arms (training-free, the cached floor).** The
-  held-out 10 (en + swap), no `v_line`, on `seed_n200` and `seed_at_pack`
-  (and `raw` as the lower anchor): does words ≤ 1 edit rise from the floor's
-  11 / 160 while singles official stays near 149 / 320? About 25 min per arm.
+- **P0, render the norm arms (training-free, the cached floor)** —
+  `experiments/norm_p0/` (launched 2026-09-27, job
+  `20260927-213257-5b19e6`). Every seed row's effective row × 0.8 and × 0.65
+  (the held-out rows 271–322 → 217–257 / 176–209), and `raw` as the lower
+  anchor, on the held-out 10 (en + swap), no `v_line`: does words ≤ 1 edit
+  rise from the floor's 11 / 160 while singles official stays near 149 / 320?
+  About 25 min per arm.
   - Words up, singles held → H1 has render support; P1 next.
   - Words flat, singles fall → the norm buys identity, not a context read
     the DiT uses; H1 stays adapter-only and the gate stands.
-- **P1, norm-bounded identity training.** A `b0709` micro arm with the
-  effective row norm held at the T5 table's (≈ 210; a clamp after each step,
-  or the existing norm pull on the effective row rather than the delta),
-  read on the identity ruler (singles) and on spelled held-out words, against
-  `b0709` as trained. Check the roll-up's geometry clause first (§ 2).
+
+  **Read (`results/20260927-2133-p0/`; `raw` skipped): the second branch.**
+
+  | held-out 10 | floor × 1 | × 0.8 | × 0.65 |
+  |---|---|---|---|
+  | singles official / 320 | 149 | 89 (p 2e-11) | **20** |
+  | singles contained | 280 | 206 | 87 |
+  | singles alone as a line | 78 | 94 | 143 |
+  | words ≤ 1 edit / 160 | 11 | 16 (p 0.42) | 1 |
+  | words ≤ 2 edits | 93 | 63 (p 8e-4) | 5 |
+  | words `dup` | 26 | 60 | 65 |
+
+  A trained row scaled down loses its glyph and drifts toward generic text
+  (Latin gibberish in the renders), and it gains no composition. In-word
+  doubling rises. Identity is carried partly by the norm of a trained row.
+- **P0b, EN rows rescaled (adapter only, minutes).** c2's `en_word` with the
+  EN pieces' T5 rows × 0.8 / × 1.2 (the probe c2 ran on JA, run on EN):
+  - EN cos moves as steeply as JA's → H1 generic; the cap is the lever.
+  - EN barely moves → H2 learned; the cap is necessary but will not bring a
+    JA row to EN's context read, and P1's in-word column carries the test.
+
+  **Read (`ctx_trigger --probe c3`, `results/20260927-2226-c3/`, job
+  `20260927-222625-25e457`): both, and direction is the larger part.** Out
+  cos (en clause), the rows' mean norm:
+
+  | α | EN pieces | JA held-out glyphs (≈ 300 × α) |
+  |---|---|---|
+  | 0.65 | 135 → 0.49 | ≈ 195 → 0.81 |
+  | 0.8 | 166 → 0.50 | ≈ 240 → 0.91 |
+  | 1 | 207 → 0.55 | ≈ 300 → 0.965 |
+  | 1.2 | 249 → 0.65 | ≈ 360 → 0.98 |
+  | 1.5 | 311 → 0.82 | ≈ 450 → 0.99 |
+
+  - **The norm lever is generic, upward.** EN pieces made loud go
+    context-immune too (0.55 → 0.82 at × 1.5), every share tercile alike.
+    Below × 1, EN flattens at ≈ 0.5: a quieter row does not read more
+    context.
+  - **At matched norm the seed rows sit 0.25–0.3 above EN** (≈ 240: JA 0.91
+    vs EN 0.65; ≈ 200: 0.81 vs 0.55). c2's pack rows at their own norm (206
+    → 0.66) sit on EN's curve, so the offset came with identity training,
+    and it is the rows' direction: c2's 0.1–0.15 "direction" understated it.
+  - With P0: taking a trained row down to EN's norm leaves it context-free
+    (0.81) and loses its glyph. **A norm cap alone is unlikely to be the
+    lever.** A capped retrain has to find identity in a direction the adapter
+    reads in context, and nothing in the lone `b0709` data asks for one.
+    P1's in-word column is the only arm that could, and Stage B's uncapped
+    in-word donors read 0.95–0.97.
+- **P1, norm-bounded identity training.** The effective row (pack + delta)
+  projected back to a cap after every optimizer step (a hard clamp, no
+  penalty weight; the cap value is P0's winning arm), everything else as
+  trained. Micro first, on a set whose floor is cached (stage_i's or A0's 12),
+  at × 1 and, if identity falls short, × 3. As a 2 × 2:
+
+  | | lone (`b0709`) | in-word, shared (Stage B's data) |
+  |---|---|---|
+  | uncapped | the reads on record | Stage B on record (F0: 0.95–0.97) |
+  | capped | H1: identity under the cap? | **H2 at training: does a shared, capped row read context?** |
+
+  Plus a warm arm: the seed projected to the cap, then capped `b0709`
+  fine-tuning. If it holds identity, the cap does not need a cold 2 274-row
+  seed retrain (≈ 200 k steps, ≈ 25 h local / ≈ 8 h G4). Singles only: a
+  piece row is the only address of its string (H2), and P2 leaves it unused.
+  No word items or `v_line` beside the cap in the lone column (one variable).
+  Stage B's `data/` keeps `img/` + `train.jsonl`; its caches were cleared
+  2026-09-27 and rebuild at train.
 - **P2, per-glyph routing** (§ 3): an encoder flag, read on `native_sent`
   and the held-out words, on the rows from P1. Only if P1 composes.
 - **Not proposed:** retraining the adapter (outside the frozen-DiT
@@ -163,8 +258,12 @@ piece rows are whole strings); EN sits at 2.4.
 - P1's bounded rows lose identity (singles official well under `b0709`'s)
   without composing: norm is how identity is bought, and H1 is a trade, not a
   lever.
+- P0b: EN barely moves under rescaling, and P1's capped in-word rows stay
+  context-free: context is learned by token, and no row-side lever reaches it
+  under the frozen adapter.
 - A per-glyph-routed caption of a trained word renders worse than the piece
   row (P2): granularity is not the constraint.
 
-Scripts: `experiments/ctx_trigger/run_exp.py` (`--probe c1 | c2`). F2a /
+Scripts: `experiments/ctx_trigger/run_exp.py` (`--probe c1 | c2`),
+`experiments/norm_p0/run_exp.py` (P0). F2a /
 F2a′: `experiments/f2a_line/` (`20260927-1644-a1`, `20260927-1950-a2`).

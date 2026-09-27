@@ -51,6 +51,19 @@ and ``en_word`` over ``N_EN_BIG`` sampled Qwen word tokens, each T5 piece
 tagged with its share (how many Qwen Latin tokens' T5 spelling holds it):
 does an ambiguous piece take more context?
 
+``--probe c3`` (hypothesis.md § 4 P0b, after P0: × 0.8 / × 0.65 of the
+seed rows lost identity with no composition gain): in EN, share and norm are
+one axis (r −0.87), so is JA's steep norm response generic to the pre-norm
+adapter, or learned by token? The same α on both sides, the prompt's rows
+untouched:
+
+    en_word    @ x<a>   the T5 rows of the quoted words' pieces × a
+    ja_spaced  @ x<a>   the seed's effective rows × a (c2's arms, as α)
+
+``ALPHAS`` 0.65 / 0.8 / 1 / 1.2 / 1.5. EN moving as steeply as JA → the norm
+is a generic lever (H1); EN barely moving → the context read is learned by
+token (H2), and a cap alone will not reach it.
+
 ``--dry_run`` prints the pieces per condition (tokenizers only).
 """
 
@@ -85,6 +98,8 @@ CLAUSES = ("en", "swap")
 LAYERS = F0.LAYERS
 CONDS = ("en_word", "en_spaced", "en_qwen_sp", "ja_spaced", "ja_hybrid", "ja_word")
 C2_CONDS = ("en_word", "ja_spaced", "ja_word")
+C3_CONDS = ("en_word", "ja_spaced")
+ALPHAS = (0.65, 0.8, 1.0, 1.2, 1.5)  # c3: one scale for both sides
 ARMS = ("seed", "raw", "seed_n200", "seed_at_pack", "raw_at_seed")
 N_EN_BIG = 60  # c2: Qwen word tokens sampled for the share read
 _EN_BIG: list = []  # set in main for c2
@@ -93,7 +108,7 @@ _EN_BIG: list = []  # set in main for c2
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--label", required=True)
-    p.add_argument("--probe", choices=("c1", "c2"), default="c1")
+    p.add_argument("--probe", choices=("c1", "c2", "c3"), default="c1")
     p.add_argument("--device", default="cuda")
     p.add_argument("--dry_run", action="store_true")
     return p.parse_args()
@@ -247,11 +262,11 @@ def main():
     ps = F0.prompts()
     tok = Tok()
     share: dict = {}
-    if args.probe == "c2":
+    if args.probe in ("c2", "c3"):
         big, share = en_big(tok)
         _EN_BIG[:] = big
         print(f"en_word: {len(big)} Qwen word tokens: {' '.join(big)}", flush=True)
-    pl = plan(tok, ps, C2_CONDS if args.probe == "c2" else CONDS)
+    pl = plan(tok, ps, {"c2": C2_CONDS, "c3": C3_CONDS}.get(args.probe, CONDS))
     for cond, rows in pl.items():
         by_w: dict = {}
         for w, *_r, name, alone in rows:
@@ -314,8 +329,34 @@ def main():
     rs = float(delta.row_scale)
     eff0 = pack + raw0 * rs
 
-    def set_arm(arm: str) -> dict:
+    # c3: the T5 rows of every quoted EN word's pieces (the prompt's rows are
+    # not among them), and their stock values
+    W = adapter.embed.weight
+    en_ids = sorted(
+        {
+            i
+            for w, t5_text, *_r in pl.get("en_word", [])
+            for i in tok.span(ps[0], "swap", t5_text)[0]
+        }
+    )
+    en_idx = torch.tensor(en_ids, dtype=torch.long, device=W.device)
+    en0 = W.data[en_idx].clone() if en_ids else None
+
+    def set_scale(arm: str, cond: str) -> dict:
+        """c3: ``x<a>`` on ``cond``'s side, the other side stock."""
+        a = float(arm[1:])
+        a_en, a_ja = (a, 1.0) if cond.startswith("en") else (1.0, a)
+        with torch.no_grad():
+            W.data[en_idx] = en0 * a_en
+            delta.raw.copy_((eff0 * a_ja - pack) / rs)
+        delta.scale = 1.0
+        rows = en0 * a_en if cond.startswith("en") else eff0 * a_ja
+        return {"alpha": a, "row_norm": round(float(rows.norm(dim=1).mean()), 1)}
+
+    def set_arm(arm: str, cond: str = "") -> dict:
         """Put ``arm``'s effective rows on the hook; returns their mean norm."""
+        if args.probe == "c3":
+            return set_scale(arm, cond)
         pn, en = pack.norm(dim=1, keepdim=True), eff0.norm(dim=1, keepdim=True)
         v = {
             "seed": eff0,
@@ -348,14 +389,19 @@ def main():
         return {k: v for k, v in h.items() if k in LAYERS}
 
     results: dict = {}
-    jobs = [
-        (cond, arm)
-        for cond in pl
-        for arm in (ARMS if args.probe == "c2" and cond.startswith("ja") else ("seed",))
-    ]
+    if args.probe == "c3":
+        jobs = [(cond, f"x{a:g}") for cond in pl for a in ALPHAS]
+    else:
+        jobs = [
+            (cond, arm)
+            for cond in pl
+            for arm in (
+                ARMS if args.probe == "c2" and cond.startswith("ja") else ("seed",)
+            )
+        ]
     for cond, arm in jobs:
         rows = pl[cond]
-        arm_info = set_arm(arm)
+        arm_info = set_arm(arm, cond)
         by_piece: dict = {}
         vals: dict = {cl: {ly: [] for ly in LAYERS} for cl in CLAUSES}
         by_pos: dict = {"first": [], "inner": []}
