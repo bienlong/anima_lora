@@ -6,6 +6,7 @@
     scale.py <run> eval        # GPU: floor + trained on the rulers → <run>/sheet.png + reads.json
     scale.py <run> conflict    # GPU: do the run's band groups pull a row the same way (no training)
     scale.py <out> merge <run> <run> …   # CPU: disjoint runs from the seed → <out>/trained.pt
+    scale.py <out> merge … <run>@partial # that run's trained_partial.pt (step recorded)
     scale.py <run> <verb> --submit [--queue]   # enqueue on the daemon (GPU verbs must)
     scale.py <run> data --workers N            # render processes (default cpu − 2)
     scale.py windows | runs | ledger           # the band law, the run files, the job ledger

@@ -927,6 +927,7 @@ def test_merge_rows(tmp_path, monkeypatch):
     monkeypatch.setattr("data.inventory.qwen_pieces", lambda: None)
     idx = {"a": {10}, "b": {11, 13}, "c": {10}, "l": {12}}
     monkeypatch.setattr(mg, "run_idx", lambda r, tokq: idx[r])
+    monkeypatch.setattr(mg, "idx_source", lambda r: tmp_path / r / "vocabs.json")
     _rows_file(tmp_path / "a" / "trained.pt", [10, 11, 12], [[1.0], [2.0], [3.0]], 1.0)
     _rows_file(
         tmp_path / "b" / "trained.pt",
@@ -949,3 +950,31 @@ def test_merge_rows(tmp_path, monkeypatch):
     _rows_file(tmp_path / "l" / "trained.pt", [12], [[9.0]], 1.0, line=torch.zeros(1))
     with pytest.raises(AssertionError, match="line mode"):
         mg.merge("m3", ["a", "l"])
+    # a cut run: refused as trained.pt, taken as <run>@partial (step recorded)
+    (tmp_path / "p").mkdir()
+    for f in ("trained.pt", "trained_partial.pt"):
+        torch.save(
+            {
+                "delta": {
+                    "ext_ids": [12],
+                    "raw": torch.tensor([[4.0]]),
+                    "row_scale": 1.0,
+                },
+                "arm": "rows",
+                "seed_merged": "seed.pt",
+                "step": 5,
+                "args": {"train_steps": 9},
+            },
+            tmp_path / "p" / f,
+        )
+    idx["p"] = {12}
+    with pytest.raises(AssertionError, match="stopped early"):
+        mg.merge("m4", ["a", "p"])
+    with pytest.raises(AssertionError, match="no rows"):
+        mg.merge("m4", ["a", "b@partial"])
+    out = mg.merge("m4", ["a", "p@partial"])
+    sd = torch.load(out / "trained.pt", weights_only=False)
+    assert sd["delta"]["raw"][2].item() == 4.0 and "step" not in sd
+    src = json.loads((out / "merge.json").read_text())["sources"][0]
+    assert src["run"] == "p" and (src["step"], src["train_steps"]) == (5, 9)
+    assert src["path"].endswith("trained_partial.pt")
