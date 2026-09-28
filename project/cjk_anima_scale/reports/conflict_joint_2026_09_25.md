@@ -14,7 +14,7 @@ clause, of 16).
 
 ## 1. The conflict probe (job `…-230856-b86a5b`)
 
-`output/cjk_anima_scale/conflict_run0923_micro_b30/report.md`. For each of the
+`reports/conflict_run0923/conflict_run0923_micro_b30/report.md`. For each of the
 three band stages, 600 items of its data dir, σ drawn in the stage band, the
 trained loss backpropped onto the rows at the seed table
 (`rows_step1_0921_merged`), no optimizer step. Per row and stage: `‖ḡ‖` (mean

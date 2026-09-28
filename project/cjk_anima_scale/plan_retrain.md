@@ -10,8 +10,8 @@ word pool, checks C0–C3, `retrain_kana` and its read, the code that landed
 Where it stands: routing holds and pieces stay out (C0 / C2); the in-word
 tier is load-bearing (C1); windows compose kanji (C3); `retrain_kana`
 (174 cold kana rows) composes like `p1_mix` and holds the singles, so its
-rows are the kana half of the new seed. Left: the three kanji batches
-(§ 2, code in place), the bake.
+rows are the kana half of the new seed. `retrain_kanji_b1` is trained
+(2026-09-28, unread); left: b2, b3 (§ 2) and the bake.
 
 ## 1. The kanji budget — set 2026-09-28
 
@@ -64,11 +64,11 @@ too (`data.inventory.qwen_pieces(char_rows=True)`, every `cjk_scale`
 caller), so they train like any single (b1 / b2 / b3 hold one each). Ranked by `dialogue_2_10` count and cut into three batches at
 equal steps (user: three, not four):
 
-| run | kanji | new | ink < 10 | steps | local (8.3 k/h) | Colab G4 (≈ 25 k/h) |
-|---|---|---|---|---|---|---|
-| `retrain_kanji_b1` | 329 (count 1 171 → 45) | 91 | 181 | 90.7 k | ≈ 10.9 h | ≈ 3.6 h |
-| `retrain_kanji_b2` | 307 (45 → 18) | 22 | 119 | 90.3 k | ≈ 10.9 h | ≈ 3.6 h |
-| `retrain_kanji_b3` | 305 (18 → 0) | 45 | 113 | 90.3 k | ≈ 10.9 h | ≈ 3.6 h |
+| run | kanji | new | ink < 10 | steps | local (8.3 k/h) | Colab G4 (≈ 25 k/h) | status |
+|---|---|---|---|---|---|---|---|
+| `retrain_kanji_b1` | 329 (count 1 171 → 45) | 91 | 181 | 90.7 k | ≈ 10.9 h | ≈ 3.6 h | **trained** 2026-09-28 on a G4: 90 749 steps in 225.3 min (6.7 it/s); `trained.pt` pulled (md5 `db05c109…`), unread |
+| `retrain_kanji_b2` | 307 (45 → 18) | 22 | 119 | 90.3 k | ≈ 10.9 h | ≈ 3.6 h | planned |
+| `retrain_kanji_b3` | 305 (18 → 0) | 45 | 113 | 90.3 k | ≈ 10.9 h | ≈ 3.6 h | planned |
 
 Vocabs: `assets/vocabs/ja_retrain_kanji_b{1,2,3}.txt` (glyph, count, ink,
 seed row). Read: C3's six kanji-bearing words (held out of every batch's
@@ -113,6 +113,6 @@ needs each context run's `trained.pt` **and** `data/vocabs.json`
   ≈ 560 frequent glyphs with no row, so it folds into `retrain_kanji`
   instead of running on its own. B and C-p (pieces) stop: C0 passed.
 - **Where the kanji batches train** (≈ 10.9 h local vs ≈ 3.6 h on a G4
-  each). (user)
+  each). (user) b1 ran on a Colab G4 (3.75 h).
 - **The cut** is top 1 000 (99.06 %; user 2026-09-28). The 1 500 cut's
   ≈ 400 more kanji would be a fourth batch on b3's rows.
