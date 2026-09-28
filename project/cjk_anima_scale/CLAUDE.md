@@ -51,7 +51,9 @@ nothing here imports, paths into or configures from `../cjk_renderable_anima/`
   (`common/paths.py` `OUT` + `data_dir` / `arm_dir` = `--data_path` /
   `--arm_path`, no tag fallback; `common/prompts.py` `TARGET_PROMPTS`), `data/inventory.py`'s opt-in
   `qwen_pieces(char_rows=True)` (byte-split glyphs → their `char` rows; every
-  `cjk_scale` lookup passes it, the records ran without it), the
+  `cjk_scale` lookup passes it, the records ran without it),
+  `train/stage.py`'s latent cache name hashed past 200 chars (a native-size
+  dir has one shape per image), the
   trimmed `cli/` / `stages.py`, `probe/merge_tables.py` = just `row_text_map`
   + `row_texts`, and the prune. `src/` sits at the same depth as the source
   did, so `parents[N]` still lands on the repo root. `paths.bootstrap()` puts

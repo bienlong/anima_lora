@@ -173,3 +173,10 @@ experiments read the old stage-layout dirs (`data_<stage>_<tag>`) through
   read. **Ran 2026-09-28** (`rg1`) → one shared direction (⟂ the pack,
   common across runs, cos 0.83), centered PR = the seed's, no rotation, no
   read predictor (`../reports/row_geometry_2026_09_28.md`).
+- `real_kana/` — `retrain_kana`'s 174 kana rows warm-trained on the
+  training set's kanji-free OCR images (captions verbatim, loss box = the
+  quoted lines' union); `--native` (own size, batch 1, dynamic-seq compile),
+  `--full_sigma` (the LoRA trainer's sigmoid σ, no band law), `--plain_mse`.
+  **Ran 2026-09-28** (`native_sig12`, 291 images, 2 088 steps) → every read
+  ≈ 0 vs `retrain_kana` (words official 16 → 0 / 104, singles contained
+  73 → 14 / 112); plain MSE drifted further and was stopped (`../future.md` § 1).

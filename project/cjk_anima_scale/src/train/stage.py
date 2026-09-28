@@ -132,7 +132,12 @@ class LatentStore:
                 lat = lat[keep]
             print(f"latents: {tuple(lat.shape)} in {time.time() - t0:.0f}s", flush=True)
         else:
-            lat_file = data / f"latents_mixed_{'_'.join(sorted(by_shape))}.pt"
+            key = "_".join(sorted(by_shape))
+            if len(key) > 200:  # native-size dirs: one shape per image overflows a name
+                import hashlib
+
+                key = f"{len(by_shape)}shapes_{hashlib.sha1(key.encode()).hexdigest()[:16]}"
+            lat_file = data / f"latents_mixed_{key}.pt"
             # one .npy per shape, written chunk by chunk and mapped back: a
             # 100 k-item dir neither collects its latents in RAM nor loses a
             # half-done encode (the single .pt is the pre-2026-09-21 cache)
