@@ -56,6 +56,7 @@ confirm the string (one string, one box, read exact), so every item is
 in-domain for the DiT and certain for the row. Each resolution step would
 retrain the rows on that step's own confirmed renders.
 
+Piloted at 4 k on the kana rows in [`plan_polish.md`](plan_polish.md).
 First question: at 4 k tokens, do the retrain seed's rows read as they do at
 1 k (the `single` / `target` rulers rendered at 1024-tier), and if not, which
 glyph sizes lose them?
