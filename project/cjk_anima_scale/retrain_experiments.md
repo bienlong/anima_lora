@@ -331,7 +331,9 @@ floor's and `p1_mix`'s cached `native_route/`, prompts < 4), singles
   of 8 (no floor rendered; routed words read ≈ 0 on the floor).
 - **Doubling is the cost**: `dup` 42 vs `p1_mix`'s 31 (paired 20 / 9,
   p 0.06), and collapsing doubles lifts ≤ 1 edit 29 → 48 / 64. Why it
-  rose is unread (`plan_retrain.md` § 4).
+  rose is unread (`plan_retrain.md` § 4). In row space the donors carry
+  more of the shared direction than `p1_mix`'s (0.43 vs 0.28), a candidate
+  only (`reports/row_geometry_2026_09_28.md` § 6).
 - **Singles hold**: official dips without significance, contained flat
   (C1's `p1_mix` had the same shape, 82 vs 91). ノ reads 0 on both arms
   (the reader).

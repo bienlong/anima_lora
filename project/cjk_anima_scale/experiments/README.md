@@ -167,3 +167,9 @@ experiments read the old stage-layout dirs (`data_<stage>_<tag>`) through
   `native_r4_swap/`); ≈ 260 renders. **Ran 2026-09-28** (`kana`) → C2's
   words ≤ 1 edit 29 / 64 (`p1_mix` 34, floor 1), katakana words 20 / 32,
   singles at the floor, `dup` 42 vs `p1_mix`'s 31 (`../retrain_experiments.md` § 5).
+- `row_geometry/` — the retrain rows in row space (CPU, no render):
+  `retrain_kana` + `c3_kanji` 225 / 450 vs the seed, the raw pack, T5 and
+  `u_S` — shared direction, glyph-pair structure, PR, Procrustes, row vs
+  read. **Ran 2026-09-28** (`rg1`) → one shared direction (⟂ the pack,
+  common across runs, cos 0.83), centered PR = the seed's, no rotation, no
+  read predictor (`../reports/row_geometry_2026_09_28.md`).
