@@ -15,7 +15,8 @@ on T4, L4, A100 and G4 smokes (2026-09-27; runs `t4smoke_a` (the L4 one),
 2. `colab new --gpu G4 -s <name>` (from the CLI, not the browser). G4 is
    the fastest at the same cost per step (§ Running).
 3. From main's checkout, with no branch checkout needed:
-   `bash <(git show colab-cu128:colab_push.sh) <name> [--pieces]`.
+   `bash <(git show colab-cu128:colab_push.sh) <name> [<context run> …]`
+   (e.g. `… g4 retrain_kana` for `retrain_kanji_b1`).
    Do not pipe it into `bash -s`, because the script's ssh calls would read
    the rest of the script from stdin.
 
@@ -24,8 +25,14 @@ clones (or resets to origin) at the local absolute path, sends the assets
 (≈ 1 GB, tar over ssh), creates the `wake_probe/` symlinks, writes
 `/content/env.sh`, runs `uv sync`, fetches the DiT / TE / VAE with
 `tasks.py download-model anima`, and checks torch.cuda + flash_attn.
-`--pieces` also sends `$MANGA109S/derived/dialogue_2_10.tsv` to
-`/content/manga109s/` and writes the VM's `.env`. From a fresh VM it took
+It always sends `$MANGA109S/derived/dialogue_2_10.tsv` to
+`/content/manga109s/` and writes the VM's `.env` (the piece tiers and every
+single run's windows read it; `--pieces` before 2026-09-28). Each
+`<context run>` named sends that run's `trained.pt` and
+`data/vocabs.json`: a run whose file sets `context` warms from the first
+and draws windows over the second's singles (`retrain_kanji_b1` needs
+`retrain_kana`; b2 / b3 need b1 / b2, which a chain run on the same VM
+already holds). From a fresh VM it took
 3 min 17 s (L4, A100) and 4 min 47 s (G4). Every step is safe to re-run.
 
 ### The `colab-cu128` branch
@@ -164,7 +171,8 @@ the scene records store absolute paths.
 | `output/cjk_anima_scale/scenes_{s1,s1w,sl1w,ja_comic}/` | 630 MB | all four for every run: `config.py`'s pool list loads them regardless of kind |
 | `output/wake_probe/scenes_<p>` → `../cjk_anima_scale/scenes_<p>` | symlinks | the scene records' `file` paths go through `wake_probe/` |
 | `post_image_dataset/render/ja/{resized,heldout}/boxes.jsonl` | 1.9 MB | the only corpus files `data` reads |
-| `$MANGA109S/derived/dialogue_2_10.tsv` + `.env` | 1.9 MB | `--pieces` only |
+| `$MANGA109S/derived/dialogue_2_10.tsv` + `.env` | 1.9 MB | piece tiers + every single run's windows |
+| `output/cjk_anima_scale/<context run>/{trained.pt,data/vocabs.json}` | ≈ 9 MB each | a run with `context` (named on the push) |
 
 ## Running
 
