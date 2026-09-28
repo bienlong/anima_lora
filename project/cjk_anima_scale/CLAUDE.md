@@ -96,7 +96,9 @@ nothing here imports, paths into or configures from `../cjk_renderable_anima/`
   **Singles always start cold** (`budget.COLD_KINDS`, retrain_experiments): their
   in-word groups draw routed windows, and a data dir built with them
   (`build.json` `glyph_route`) is trained with `ANIMA_VOCAB_GLYPH_ROUTE=1`
-  set in-process — never in the submit shell. `vocabs.json` in
+  set in-process — never in the submit shell; `eval` reads such a run the
+  same way, against the routed floor cache `<seed rows>/routed/`
+  (`eval.floor_arm_dir`), never the unrouted cache of record. `vocabs.json` in
   the data dir is the run's manifest (a flat list; the stages' `words.json` /
   `small.json` are not written).
 - `cjk_scale/windows.py` is a **band law written as rows with provenance**, not a formula. A new

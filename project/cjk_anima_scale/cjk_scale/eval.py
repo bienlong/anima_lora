@@ -44,6 +44,13 @@ Two arms, no ``ctx`` sidecar (2026-09-25 — the merge lives in the save,
   repeat bit-for-bit across jobs, so a floor cell may come from another job
   than its trained cell (hit-level drift 0–1 per cell, piece_only § 1).
 
+A run whose data dir was built with windows (``build.json`` ``glyph_route``)
+was trained routed, so it is read routed: ``ANIMA_VOCAB_GLYPH_ROUTE=1`` is
+set in-process for the whole eval (both arms — the text strategy is a
+process-global singleton), and its floor arm is the routed cache
+``<seed rows>/routed/`` (``floor_arm_dir``; ``trained.pt`` a symlink to the
+seed's), never the unrouted cache of record.
+
 The stages open the run's dirs through ``--data_path`` / ``--arm_path``.
 ``compose`` then reads both arms' read files into ``<run>/reads.json``
 (official = sfx ∧ VL exact, loose = sfx ∨ VL, contained = the string inside
@@ -93,7 +100,29 @@ def arm_out(rc: RunConfig, arm: str) -> Path:
     """The arm's dir: the run dir itself for ``trained``, the seed rows' dir
     (the shared floor cache) for the floor."""
     assert arm in ARMS, arm
-    return run_dir(rc.name) if arm == TRAINED_ARM else floor_dir()
+    return run_dir(rc.name) if arm == TRAINED_ARM else floor_arm_dir(rc)
+
+
+def routed(rc: RunConfig) -> bool:
+    """The run's data dir was built with windows (``build.json``
+    ``glyph_route``): it trained routed, and reads routed."""
+    bj = data_dir(rc.name) / "build.json"
+    return bj.exists() and bool(
+        json.loads(bj.read_text(encoding="utf-8")).get("glyph_route", False)
+    )
+
+
+def floor_arm_dir(rc: RunConfig) -> Path:
+    """The floor cache the run reads against: the seed rows' dir, or its
+    ``routed/`` subdir for a routed run (the seed's ``trained.pt`` linked in,
+    so the stages load the same rows)."""
+    if not routed(rc):
+        return floor_dir()
+    d = floor_dir() / "routed"
+    d.mkdir(exist_ok=True)
+    if not (d / "trained.pt").exists():
+        (d / "trained.pt").symlink_to("../trained.pt")
+    return d
 
 
 def eval_groups(rc: RunConfig) -> list[str]:
@@ -294,11 +323,16 @@ def run(rc: RunConfig) -> Path:
     """Both arms' rulers, then ``compose``. The trained side reads the run's
     merged ``trained.pt`` in place and renders every time (the run may have
     been retrained); the floor renders only the keys the cache lacks
-    (``ensure_floor``)."""
+    (``ensure_floor``). A routed run reads routed (module docstring)."""
+    import os
+
     import torch
 
     from stages import run as run_stage
 
+    if routed(rc):
+        os.environ["ANIMA_VOCAB_GLYPH_ROUTE"] = "1"
+        print(f"===== {rc.name}: routed (floor {floor_arm_dir(rc)})", flush=True)
     tp = trained_path(rc.name)
     assert tp.exists(), f"no rows at {tp} — run `scale.py {rc.name} train` first"
     sd = torch.load(tp, map_location="cpu", weights_only=False)
@@ -404,7 +438,7 @@ def ensure_native_floor(rc: RunConfig, sub: str, chars, clauses: str) -> int:
 
     from stages import run as run_stage
 
-    dst = floor_dir() / sub / "native_reads.json"
+    dst = floor_arm_dir(rc) / sub / "native_reads.json"
     held = {_key("native", m) for m in _load_reads(dst)}
     n = 0
     for cl in (c for c in clauses.split(",") if c):
@@ -425,7 +459,7 @@ def ensure_native_floor(rc: RunConfig, sub: str, chars, clauses: str) -> int:
             ],
         )
         run_stage("native", a)
-        scratch = floor_dir() / f"native_add_{sub}"
+        scratch = floor_arm_dir(rc) / f"native_add_{sub}"
         n += _fold("native", _load_reads(scratch / "native_reads.json"), dst, move=True)
         shutil.rmtree(scratch)
     return n
@@ -445,7 +479,7 @@ def ensure_floor(rc: RunConfig, ruler: str) -> int:
         return ensure_native_floor(
             rc, Path(READ_FILES[ruler]).parent.name, chars, clauses
         )
-    dst = floor_dir() / READ_FILES[ruler]
+    dst = floor_arm_dir(rc) / READ_FILES[ruler]
     if ruler == "target":
         if dst.exists():
             return 0
@@ -462,7 +496,7 @@ def ensure_floor(rc: RunConfig, ruler: str) -> int:
     miss = [e for k, e in need.items() if k not in held]
     if not miss:
         return 0
-    scratch = floor_dir() / "_add_eval"
+    scratch = floor_arm_dir(rc) / "_add_eval"
     (scratch / "data").mkdir(parents=True, exist_ok=True)
     (scratch / "data" / "eval.json").write_text(
         json.dumps(miss, ensure_ascii=False, indent=1), encoding="utf-8"
@@ -481,7 +515,7 @@ def ensure_floor(rc: RunConfig, ruler: str) -> int:
         ],
     )
     run_stage("eval", a)
-    out = floor_dir() / "eval_add"
+    out = floor_arm_dir(rc) / "eval_add"
     n = _fold("eval", _load_reads(out / "eval_reads.json"), dst, move=True)
     shutil.rmtree(out)
     shutil.rmtree(scratch)

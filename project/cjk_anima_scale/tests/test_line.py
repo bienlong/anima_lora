@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import random
 
 import pytest
@@ -669,6 +670,35 @@ def test_floor_cache_and_merged_guard(tmp_path, monkeypatch):
     )
     with pytest.raises(AssertionError, match="seed_merged"):
         ev.run(rc)
+
+
+def test_routed_run_reads_routed(tmp_path, monkeypatch):
+    """A data dir built with windows (``build.json`` ``glyph_route``) reads
+    routed: eval sets ``ANIMA_VOCAB_GLYPH_ROUTE=1`` in-process and the floor
+    arm is the seed rows' ``routed/`` cache (the seed's trained.pt linked in),
+    never the unrouted cache of record."""
+    import torch
+
+    from cjk_scale import eval as ev
+    from cjk_scale import paths
+
+    monkeypatch.setattr(paths, "OUT", tmp_path)
+    monkeypatch.delenv("ANIMA_VOCAB_GLYPH_ROUTE", raising=False)
+    rc = _rc()
+    seed = paths.floor_dir()
+    seed.mkdir(parents=True)
+    torch.save({"seed": 1}, seed / "trained.pt")
+    d = paths.data_dir("t1")
+    d.mkdir(parents=True)
+    assert not ev.routed(rc) and ev.arm_out(rc, ev.FLOOR_ARM) == seed
+    (d / "build.json").write_text(json.dumps({"glyph_route": True}), encoding="utf-8")
+    assert ev.routed(rc)
+    assert ev.arm_out(rc, ev.FLOOR_ARM) == seed / "routed"
+    assert torch.load(seed / "routed" / "trained.pt") == {"seed": 1}
+    assert ev.floor_arm_dir(rc) == seed / "routed"  # idempotent
+    with pytest.raises(AssertionError):  # no trained.pt: stops after the env is set
+        ev.run(rc)
+    assert os.environ["ANIMA_VOCAB_GLYPH_ROUTE"] == "1"
 
 
 def test_compose_one_sheet(tmp_path, monkeypatch):
