@@ -278,4 +278,4 @@ are enough.
   `run0927_long_p45/trained_partial.pt` at 15 k of 45 360: cosine schedule
   cut mid-run, no resume, so neither is the recipe's result. C goes on
   Colab as well.
-- **C-k budget** (150 or 270 steps/row) is open in plan_2900.
+- **C-k budget**: folded into `retrain_kanji` (`plan_retrain.md` § 1).

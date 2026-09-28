@@ -1,6 +1,0 @@
-# run0927_dense_k — plan_2900 § 1 (Run A, 2026-09-27): 305 dense seed kanji
-# (ink ≥ 11 cells² per glyph), warm. The single ruler is the read (per glyph
-# official / contained against the floor); no sent strings.
-
-vocabs = "ja_dense_k_0927_305.txt"
-read = []

@@ -2,8 +2,8 @@
 
 Production line for the JA vocab pack: a run is its vocabs + what to read;
 one loss, one trainer, σ per item from the band law (`plan.md`). `README.md`
-= state, `design.md` = the design, `band_experiment_results.md` = the vocab
-band law. The line is self-contained: its stage code is its own `src/`, and
+= state, `plan_retrain.md` = the live plan, `band_experiment_results.md` = the
+vocab band law. The line is self-contained: its stage code is its own `src/`, and
 nothing here imports, paths into or configures from `../cjk_renderable_anima/`
 (the independent research line) — `tests/test_line.py` asserts it.
 
@@ -24,13 +24,13 @@ nothing here imports, paths into or configures from `../cjk_renderable_anima/`
   `ITEMS_PER_VOCAB`), the trainer constants (`train.py`, each naming the
   report that set it), the seed rows (`paths.SEED_ROWS`), the rulers
   (`eval.py`). Changing a rule is a code change with a report beside it.
-  The pre-collapse stage-shaped run files stay in `configs/runs/` as records
-  (`scale.py runs` lists them as such; `load_run` refuses them).
+  `run0923_micro` (the pre-collapse stage shape `load_run` refuses) and
+  `run0925_300f` stay in `configs/runs/` because the tests read them.
 - `configs/data_build/` + `configs/train/` — the pre-collapse stage / joint
   configs, **split** (2026-09-25) into their data-generation half (band +
   pools + `[[mix]]` recipes) and their trainer half (`warm_from` + the train
   values), `[eval]` blocks dropped. Records, restored so they stay tracked;
-  read only by `cjk_scale/legacy.py` for `experiments/`.
+  read only by `cjk_scale/legacy.py` (for the archived influence experiments).
 - `cjk_scale/` the line's code (`windows` = the law, `config` = the run file +
   data pools, `recipes` + `builder` = data, `rows` + `train`, `eval`,
   `conflict`, `ledger`, `budget` = steps / items per vocab by kind × glyphs ×
@@ -61,9 +61,10 @@ nothing here imports, paths into or configures from `../cjk_renderable_anima/`
 - `assets/` — what `src/` reads: `fonts/` (the render set; the font files are
   gitignored, `FONTS.md` says where they come from), `vocabs/` (vocab files),
   `target_prompts.txt` (the `target` ruler).
-- `_archive/` — the retired stage code (`joint.py`, `boxprobe.py`); gitignored
-  by the repo-wide `_archive/` rule, see its README. Its configs moved back to
-  `configs/`.
+- `_archive/` — gitignored by the repo-wide `_archive/` rule, see its README:
+  the retired stage code (`joint.py`, `boxprobe.py`), and (2026-09-28) the
+  pre-retrain docs, reports, experiments, run files and vocab lists the
+  retrain superseded. Archived experiments no longer run from there.
 - Outputs: `output/cjk_anima_scale/<run>/` — `data/` (items, `vocabs.json`,
   `build.json`, caches), `trained.pt` (**the whole merged rows**: the seed's
   rows, rescaled into the run's `row_scale`, with the run's vocabs' rows on
