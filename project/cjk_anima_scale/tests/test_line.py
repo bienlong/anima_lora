@@ -247,7 +247,14 @@ def test_recipe_table_by_kind():
     }
     single = [t.recipe for g in TABLE if g.kind == "single" for t in g.tiers]
     piece = [t.recipe for g in TABLE if g.kind == "piece" for t in g.tiers]
-    assert single == ["scene_single", "grid_single"]
+    # lone b0709 + the in-word groups (plan_retrain § 3): windows + the count tier
+    assert single == [
+        "scene_single",
+        "grid_single",
+        "scene_window",
+        "scene_single_small",
+        "scene_window",
+    ]
     assert sorted(set(piece)) == [
         "grid_string",
         "scene_piece",
@@ -255,16 +262,19 @@ def test_recipe_table_by_kind():
         "scene_short",
     ]
     assert piece.count("scene_piece") == 2  # the two px tiers
-    for kind in ("single", "piece"):
-        assert abs(sum(g.share for g in TABLE if g.kind == kind) - 1) < 1e-9
+    # the single kind draws 1.5 × its items (lone 0.5 : in-word 1.0, P1b)
+    for kind, total in (("single", 1.5), ("piece", 1.0)):
+        assert abs(sum(g.share for g in TABLE if g.kind == kind) - total) < 1e-9
     # which groups run is which kinds the vocabs hold; the volume is one rule
     pieces_only = plan_groups({"single": [], "piece": ["p"] * 300, "multi": []})
     assert [(g.name, n) for g, n in pieces_only] == [("b0507", 10000), ("b0305", 10000)]
     both = plan_groups({"single": ["s"] * 3, "piece": ["p"] * 6, "multi": []})
-    assert [(g.name, n) for g, n in both] == [
-        ("b0709", round(3 * ITEMS_PER_VOCAB)),
-        ("b0507", round(3 * ITEMS_PER_VOCAB)),
-        ("b0305", round(3 * ITEMS_PER_VOCAB)),
+    assert [(g.kind, g.name, n) for g, n in both] == [
+        ("single", "b0709", round(1.5 * ITEMS_PER_VOCAB)),
+        ("single", "b0507", round(1.5 * ITEMS_PER_VOCAB)),
+        ("single", "b0305", round(1.5 * ITEMS_PER_VOCAB)),
+        ("piece", "b0507", round(3 * ITEMS_PER_VOCAB)),
+        ("piece", "b0305", round(3 * ITEMS_PER_VOCAB)),
     ]
 
 
@@ -833,32 +843,43 @@ _QMAP = {1: 101, 2: 102, 3: 103, 4: 104, 5: 105, 6: 106}
 
 
 def test_budget_rule():
-    """Cold singles take the cold-kanji row (stage_i § 5), 4–5-glyph pieces
-    the long_b0 row, everything else the base; a run mixing budgets is
-    refused, a uniform one gets its factor."""
+    """Singles start cold (plan_retrain): cold kanji take the stage_i row,
+    cold kana P1b's (the base), 4–5-glyph pieces the long_b0 row, everything
+    else the base; a run mixing budgets is refused, a uniform one gets its
+    factor."""
     from cjk_scale import budget
 
-    assert budget.factor("single", 1, False) == 150 / budget.BASE_STEPS
+    assert budget.factor("single", 1, False, "kanji") == 150 / budget.BASE_STEPS
+    assert budget.factor("single", 1, False, "kana") == 1.0
     assert budget.factor("single", 1, True) == 1.0
+    assert budget.script_of("精") == "kanji" and budget.script_of("ー") == "kana"
     assert budget.factor("piece", 3, True) == 1.0
     assert budget.factor("piece", 4, True) == 3.0
     assert budget.factor("piece", 5, False) == 3.0
     tokq, seeds = (_Tok(), _QMAP), frozenset({101, 103, 105, 106})
     f = budget.vocab_factors(["精", "山", "すごい", "って", "あっ"], tokq, seeds)
-    assert f == {"精": 1.0, "山": 150 / 90, "すごい": 1.0, "って": 1.0, "あっ": 1.0}
-    assert budget.run_factor(["精", "すごい", "あっ"], tokq, seeds) == 1.0
-    assert budget.run_factor(["山"], tokq, seeds) == 150 / 90
+    # 精 has a seed row and still starts cold
+    assert f == {
+        "精": 150 / 90,
+        "山": 150 / 90,
+        "すごい": 1.0,
+        "って": 1.0,
+        "あっ": 1.0,
+    }
+    assert budget.run_factor(["すごい", "って", "あっ"], tokq, seeds) == 1.0
+    assert budget.run_factor(["精", "山"], tokq, seeds) == 150 / 90
     with pytest.raises(AssertionError, match="different budgets"):
-        budget.run_factor(["精", "山"], tokq, seeds)
+        budget.run_factor(["精", "すごい"], tokq, seeds)
+    assert budget.mix_factor({"single"}) == 1.5
+    assert budget.mix_factor({"piece"}) == 1.0
 
 
 def test_plan_groups_take_the_budget():
     from cjk_scale.builder import ITEMS_PER_VOCAB, plan_groups
 
     got = plan_groups({"single": ["s"] * 3, "piece": [], "multi": []}, budget=150 / 90)
-    assert [(g.name, n) for g, n in got] == [
-        ("b0709", round(3 * ITEMS_PER_VOCAB * 150 / 90))
-    ]
+    n = round(3 * ITEMS_PER_VOCAB * 150 / 90 * 0.5)
+    assert [(g.name, n) for g, n in got] == [("b0709", n), ("b0507", n), ("b0305", n)]
 
 
 def test_ruler_sample():
@@ -978,3 +999,19 @@ def test_merge_rows(tmp_path, monkeypatch):
     src = json.loads((out / "merge.json").read_text())["sources"][0]
     assert src["run"] == "p" and (src["step"], src["train_steps"]) == (5, 9)
     assert src["path"].endswith("trained_partial.pt")
+
+
+def test_window_pool():
+    """Letters only, no repeated glyph, the read strings held out by trigram
+    (a 2-glyph read: the string itself); windows cross word boundaries."""
+    from cjk_scale.recipes import window_glyphs, window_pool
+
+    g = window_glyphs(list("あいうえおかきゲーム。"))
+    assert "。" not in g and "ー" in g
+    ws = window_pool(g, ["あいう。えお", "かあかき"], held=())
+    assert "あいう" in ws and "えお" in ws
+    assert not any("。" in w for w in ws)
+    assert "かあか" not in ws and "あかき" in ws  # no repeat inside a window
+    ws = window_pool(g, ["あいうえお"], held=("いうえ", "かき"))
+    assert "あいう" in ws and "いうえ" not in ws and "あいうえ" not in ws
+    assert window_pool(g, ["かき"], held=("かき",)) == []

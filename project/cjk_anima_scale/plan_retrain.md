@@ -261,7 +261,40 @@ data job `20260928-075359-9f6158`, train job `20260928-075839-76c2d9`):
 cold, 135 / row = 23 490 steps, 17 400 items (5 800 per group). Windows
 178 846, 163 glyphs (ヂ ヵ have none: lone only), per glyph median 1 612.
 `read` (held out of the windows): C2's eight words, なにしてる, テレビ
-カメラ パソコン アイドル.
+カメラ パソコン アイドル. Trained 183 min, end row norm ≈ 250 (peaked
+≈ 291 mid-run).
+
+**`retrain_kana` read (2026-09-28, `experiments/retrain_read/results/20260928-1102-kana/`,
+job `20260928-110210-54da19`): 174 rows compose like `p1_mix`'s 36 and
+hold the singles; doubling rose.** A smaller grid than C2: 4 prompts × 2
+seeds = 8 renders / key, routed; words `en` (C2's eight pair with the
+floor's and `p1_mix`'s cached `native_route/`, prompts < 4), singles
+`swap` (hiragana floor from `native_spell/`, katakana floor rendered once).
+
+| words (en, / 8 per word) | ≤ 1 edit | ≤ 2 | official | `dup` | ≤ 1, doubles collapsed |
+|---|---|---|---|---|---|
+| floor, C2's 8 (cache) | 1 / 64 | 7 | 0 | 4 | 1 |
+| `p1_mix`, C2's 8 (cache) | 34 | 55 | 11 | 31 | 51 |
+| **`retrain_kana`, C2's 8** | **29** | 48 | 10 | **42** | 48 |
+| `retrain_kana`, なにしてる (held out) | 4 / 8 | 5 | 0 | 5 | 5 |
+| `retrain_kana`, 4 katakana words | 20 / 32 | 26 | 6 | 15 | 22 |
+
+| singles (swap) | official | contained | paired official vs floor |
+|---|---|---|---|
+| 8 hiragana: floor / `retrain_kana` | 23 / 17 of 64 | 46 / 44 | 2 / 8, p 0.11 |
+| 6 katakana: floor / `retrain_kana` | 7 / 4 of 48 | 25 / 29 | 2 / 5, p 0.45 |
+
+- **Composition holds at 174 rows**: vs the floor ≤ 1 edit 28 / 0
+  (p 7e-9); vs `p1_mix` 13 / 18 (p 0.47), ≤ 2 edits 5 / 12 (p 0.14).
+- **Katakana composes at 135 / row**: カメラ パソコン 6, アイドル 5, テレビ 3
+  of 8 (no floor rendered; routed words read ≈ 0 on the floor).
+- **Doubling is the cost**: `dup` 42 vs `p1_mix`'s 31 (paired 20 / 9,
+  p 0.06), and collapsing doubles lifts ≤ 1 edit 29 → 48 / 64. Why it
+  rose is unread (window length 2–6 vs whole lines, row count, window
+  variety).
+- **Singles hold**: official dips without significance, contained flat
+  (C1's `p1_mix` had the same shape, 82 vs 91). ノ reads 0 on both arms
+  (the reader).
 
 **Order and context.** A spelled window mixes kana and kanji. A glyph
 outside the training run rides frozen at the seed, which is the
@@ -307,6 +340,29 @@ override (§ 6).
   the seed's dense kanji lose half (65 → 31 / 192). Candidates: more steps
   / row (C3 at 450 on the same data, ≈ 2 h), a larger lone share for
   kanji, or both. `retrain_kanji` waits on it.
+
+  What is on record (2026-09-28):
+
+  | read | setting | result |
+  |---|---|---|
+  | stage_i I0 | 12 kanji with no seed row, cold, lone only, 90 → 270 / row | contained 59 → 117 / 192 |
+  | C3 | 36 kanji, cold, lone 0.5 + windows, 225 / row (150 × 1.5) | new kanji official 0 → 51, contained 4 → 104 / 192 |
+  | C3 | the seed's dense kanji (dense_a0's 12) in the same run | official 65 → 31, contained 110 → 93 (感 愛 飲 最 様 at 0) |
+  | C3 | six kanji-bearing words | ≤ 1 edit 3 → 36 / 96 |
+
+  `budget.py`'s kanji row (150) is a pick between stage_i's 90 and 270,
+  unmeasured (its source string says so). **A caution on "more steps"**:
+  the seed's rows had ≈ 80 steps / row of lone-style data (`step1_0921`
+  374 rows at 30 k, `step1_0921z` 1 900 at 152 k), and C3's lone share is a
+  third of 225 ≈ 75 / row, about the same. The dense kanji still halved,
+  so total steps alone may not bring them back: the in-word items may
+  compete with identity, or the seed's history holds more than that count.
+  Both are unread.
+
+  **Order**: C3 at 450 / row first (same data, one arm, ≈ 2 h). Dense back
+  near 65 → steps were the budget, and the row is set. Not back → a
+  lone-share arm next (e.g. lone 1.0 : in-word 1.0 for kanji). It goes on
+  the GPU after `retrain_kana` + its read.
 
 - **plan_2900.** Run A (dense kanji, warm from the old seed) is superseded
   by `retrain_kanji`. C-k (388 cold kanji, lone `b0709`) is 386 of the

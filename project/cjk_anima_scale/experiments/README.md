@@ -151,3 +151,12 @@ experiments read the old stage-layout dirs (`data_<stage>_<tag>`) through
   in-word tier, routed captions, `p1_mix`'s table, 225 steps / row.
   **Ran 2026-09-28** → words ≤ 1 edit 3 → 36 / 96; new kanji official
   0 → 51 / 192, the seed's dense kanji 65 → 31 (`../plan_retrain.md` § 4).
+- `retrain_read/` — plan_retrain § 5: a retrain run's routed read on a
+  smaller grid (4 prompts × 2 seeds = 8 renders / key), the floor and
+  `p1_mix` from their caches of record (8 × 2 restricted to prompts < 4):
+  the run's `read` words (en; C2's eight pair with the cached floor /
+  `p1_mix` `native_route/`) + 8 hiragana singles (swap, floor from
+  `native_spell/`) + 6 katakana (swap, floor rendered once into
+  `native_r4_swap/`); ≈ 260 renders. **Ran 2026-09-28** (`kana`) → C2's
+  words ≤ 1 edit 29 / 64 (`p1_mix` 34, floor 1), katakana words 20 / 32,
+  singles at the floor, `dup` 42 vs `p1_mix`'s 31 (`../plan_retrain.md` § 5).

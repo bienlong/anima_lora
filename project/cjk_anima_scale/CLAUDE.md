@@ -87,7 +87,11 @@ nothing here imports, paths into or configures from `../cjk_renderable_anima/`
 
 - A run's vocabs train from their seed row (`paths.SEED_ROWS`); every other row a
   caption touches rides frozen at the seed; `trained.pt` carries them all (the
-  merged save). A vocab the seed lacks starts cold — the only case that prints. `vocabs.json` in
+  merged save). A vocab the seed lacks starts cold — the only case that prints.
+  **Singles always start cold** (`budget.COLD_KINDS`, plan_retrain): their
+  in-word groups draw routed windows, and a data dir built with them
+  (`build.json` `glyph_route`) is trained with `ANIMA_VOCAB_GLYPH_ROUTE=1`
+  set in-process — never in the submit shell. `vocabs.json` in
   the data dir is the run's manifest (a flat list; the stages' `words.json` /
   `small.json` are not written).
 - `cjk_scale/windows.py` is a **band law written as rows with provenance**, not a formula. A new
