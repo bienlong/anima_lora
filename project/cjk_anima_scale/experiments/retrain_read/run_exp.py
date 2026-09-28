@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""retrain_read — plan_retrain § 5: a retrain run's routed read (2026-09-28)
+"""retrain_read — retrain_experiments § 5: a retrain run's routed read (2026-09-28)
 
 The ``native`` stage on a smaller grid than the reads of record — the first
 ``N_PROMPTS`` (4) scene prompts × ``SEEDS`` (2) = 8 renders per key — routed

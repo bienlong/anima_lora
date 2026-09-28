@@ -53,7 +53,7 @@ import torch
 import torch.nn.functional as F
 
 from .config import RunConfig
-from .paths import SEED_ROWS, data_dir, run_dir, trained_path
+from .paths import data_dir, run_dir, trained_path
 from .rows import Rows
 
 KINDS = ("single", "piece", "multi")
@@ -111,7 +111,7 @@ def probe(
     from .train import load_items, vocab_idx
 
     tag = rc.name
-    warm = SEED_ROWS
+    warm = rc.context_rows()
     recipes = None
     data = data_dir(rc.name)
     all_recs, ev, vocabs = load_items(data)
@@ -138,7 +138,7 @@ def probe(
     cache, train_ext, ev_ext = _encode_text(
         all_recs, ev, device, out, te_cache=data / "te_cache"
     )
-    idx: set[int] = train_ext | vocab_idx(vocabs, qwen_pieces())
+    idx: set[int] = train_ext | vocab_idx(vocabs, qwen_pieces(char_rows=True))
     label: dict[int, str] = {}
     for text, ids in ev_ext.items():
         if len(ids) == 1:

@@ -75,10 +75,22 @@ def phrase_file_lines(
     return out
 
 
-def qwen_pieces():
+class GlyphRows(dict):
+    """qwen id → pack ext row, plus ``char``: glyph → row for the glyphs Qwen
+    splits into byte fragments (the pack's ``char`` / ``sym_char`` rows —
+    緒 単 戻 …). ``pieces`` regroups such a fragment run into its glyphs, each
+    with its char row, as ``HybridT5Encoder`` does at encode (routed or not).
+    Opt-in (``qwen_pieces(char_rows=True)``, cjk_scale's lookups): the reads
+    of record ran on the plain map, where those glyphs have no row."""
+
+    char: dict = {}
+
+
+def qwen_pieces(char_rows: bool = False):
     """(Qwen3 tokenizer, qwen id → pack ext row). The pack's ext rows are
     Qwen pieces, many of them whole words (ありがとう / 行く / 明日 are one
-    piece → one row), so a "word address" is an existing row."""
+    piece → one row), so a "word address" is an existing row. ``char_rows``:
+    the map is a ``GlyphRows`` (byte-split glyphs resolve to their char rows)."""
     from library.anima.vocab_pack import VocabPack, resolve_pack_prefix
     from library.anima.weights import load_qwen3_tokenizer
 
@@ -86,14 +98,48 @@ def qwen_pieces():
     tok = load_qwen3_tokenizer(ck.text_encoder)
     pack = VocabPack.load(resolve_pack_prefix(ck.vocab_pack))
     q = {int(k): int(v) for k, v in pack.mapping["qwen"].items()}
+    if char_rows:
+        q = GlyphRows(q)
+        q.char = {
+            c: int(r)
+            for m in (pack.mapping["char"], pack.mapping.get("sym_char") or {})
+            for c, r in m.items()
+        }
     return tok, q
 
 
+_FRAG = "\ufffd"  # what a lone byte-fragment token decodes to
+
+
 def pieces(tok, q, text: str):
-    """text → [(piece text, ext row or None)] on the Qwen side."""
-    out = []
+    """text → [(piece text, ext row or None)] on the Qwen side. With a
+    ``GlyphRows`` map, a run of row-less byte-fragment tokens that decodes to
+    glyphs all holding a char row comes back as those glyphs; anything else
+    stays fragments (row None), as on the plain map."""
+    char = getattr(q, "char", None)
+    out: list = []
+    frag: list = []
+
+    def flush():
+        out.extend((tok.decode([f]), None) for f in frag)
+        frag.clear()
+
     for i in tok.encode(text, add_special_tokens=False):
-        out.append((tok.decode([i]), q.get(int(i))))
+        s, row = tok.decode([i]), q.get(int(i))
+        if char is not None and row is None and _FRAG in s:
+            frag.append(i)
+            joint = tok.decode(frag)
+            if _FRAG not in joint:
+                glyphs = [c for c in joint if not c.isspace()]
+                if glyphs and all(c in char for c in glyphs):
+                    out.extend((c, char[c]) for c in glyphs)
+                    frag.clear()
+                else:
+                    flush()
+            continue
+        flush()
+        out.append((s, row))
+    flush()
     return out
 
 

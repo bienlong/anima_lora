@@ -181,7 +181,7 @@ def test_run_file_is_vocabs_and_read(tmp_path):
     for body in (
         'vocabs = "ja_pieces_0925_300.txt"\nseed = 0\n',
         'vocabs = "ja_pieces_0925_300.txt"\n[budget]\njoint = 90\n',
-        'vocabs = "ja_pieces_0925_300.txt"\ncontext = "seed"\n',
+        'vocabs = "ja_pieces_0925_300.txt"\nwarm_from = "seed"\n',
     ):
         bad = tmp_path / "bad.toml"
         bad.write_text(body, encoding="utf-8")
@@ -194,6 +194,20 @@ def test_run_file_is_vocabs_and_read(tmp_path):
     # the pre-collapse stage-shaped run files are records: on disk, not loadable
     with pytest.raises(AssertionError, match="rules in code"):
         config.load_run("run0923_micro")
+    # context: a run name, the chain nearest first; no context = the seed rows
+    assert rs.context is None and rs.context_rows() == SEED_ROWS
+    b3 = config.load_run("retrain_kanji_b3")
+    assert b3.context == "retrain_kanji_b2"
+    assert b3.context_chain() == [
+        "retrain_kanji_b2",
+        "retrain_kanji_b1",
+        "retrain_kana",
+    ]
+    for body in ('context = "a/b"\n', 'context = "self"\n'):
+        bad = tmp_path / "self.toml"
+        bad.write_text('vocabs = ["kana"]\n' + body, encoding="utf-8")
+        with pytest.raises(AssertionError, match="context"):
+            config.load_run(str(bad))
 
 
 def test_front_door_parser():
@@ -247,7 +261,7 @@ def test_recipe_table_by_kind():
     }
     single = [t.recipe for g in TABLE if g.kind == "single" for t in g.tiers]
     piece = [t.recipe for g in TABLE if g.kind == "piece" for t in g.tiers]
-    # lone b0709 + the in-word groups (plan_retrain § 3): windows + the count tier
+    # lone b0709 + the in-word groups (retrain_experiments § 3): windows + the count tier
     assert single == [
         "scene_single",
         "grid_single",
@@ -737,10 +751,10 @@ def test_compose_one_sheet(tmp_path, monkeypatch):
     assert ev.floor_keys(rc, "target") is None
 
 
-def test_ext_delta_line_gate():
-    """``ExtDelta.line`` (F1): added only to pack rows with a pack neighbour
-    (a run of ≥ 2), gradient into it, round-trips the state; no ``line`` →
-    the output is the rows alone."""
+def test_ext_delta_rows_and_no_line():
+    """``ExtDelta`` adds each ext id's row × row_scale, round-trips its
+    state, and refuses a state carrying ``line`` (line mode removed
+    2026-09-28)."""
     import torch
     from types import SimpleNamespace
 
@@ -753,78 +767,22 @@ def test_ext_delta_line_gate():
     d = ExtDelta(anima, [1, 2, 3], 4, "cpu", row_scale=2.0)
     with torch.no_grad():
         d.raw.copy_(torch.eye(3, 4))
-    # "…" lone 1 | run 2 3 | text | run 3 1 2 at the end
-    ids = torch.tensor([[5, T + 1, 7, T + 2, T + 3, 9, T + 3, T + 1, T + 2]])
-    no_line = emb(ids).detach().clone()
-    d.line = torch.nn.Parameter(torch.zeros(4))
-    with torch.no_grad():
-        d.line.fill_(0.5)
-    out = emb(ids)
-    run = torch.tensor([0, 0, 0, 1, 1, 0, 1, 1, 1], dtype=torch.bool)
-    rows = torch.zeros(9, 4)
+    ids = torch.tensor([[5, T + 1, 7, T + 2, T + 3, 9]])
+    rows = torch.zeros(6, 4)
     for p, e in enumerate(ids[0].tolist()):
         if e >= T:
             rows[p] = d.raw.detach()[d.index[e - T]] * 2.0
-    want = rows + run[:, None] * 1.0  # 0.5 × row_scale 2
-    assert torch.allclose(out[0], want)
-    out.sum().backward()
-    assert float(d.line.grad.sum()) == 5 * 4 * 2.0  # 5 run positions × dim × row_scale
+    assert torch.allclose(emb(ids)[0], rows)
     sd = d.state_dict()
-    assert torch.allclose(sd["line"], torch.full((4,), 0.5))
-    d2 = ExtDelta.from_state(anima, sd, "cpu")
-    assert torch.allclose(d2.line, torch.full((4,), 0.5))
+    assert "line" not in sd
     for h in d.handles:
         h.remove()
+    d2 = ExtDelta.from_state(anima, sd, "cpu")
+    assert torch.allclose(emb(ids)[0], rows)
     for h in d2.handles:
         h.remove()
-    d3 = ExtDelta(anima, [1, 2, 3], 4, "cpu", row_scale=2.0)
-    with torch.no_grad():
-        d3.raw.copy_(torch.eye(3, 4))
-    assert "line" not in d3.state_dict()
-    assert torch.allclose(no_line[0], rows)
-    assert torch.allclose(emb(ids)[0], rows)
-
-
-def test_ext_delta_line_ungated():
-    """``line_gate`` ``"all"`` (F2a): ``line`` on every pack row, the lone
-    one too; the gate round-trips through the state, and a frozen ``raw``
-    leaves ``line`` the only gradient."""
-    import torch
-    from types import SimpleNamespace
-
-    from common.hooks import ExtDelta
-
-    T = 32128
-    emb = torch.nn.Embedding(T + 10, 4)
-    torch.nn.init.zeros_(emb.weight)
-    emb.requires_grad_(False)
-    anima = SimpleNamespace(llm_adapter=SimpleNamespace(embed=emb))
-    d = ExtDelta(anima, [1, 2, 3], 4, "cpu", row_scale=2.0)
-    with torch.no_grad():
-        d.raw.copy_(torch.eye(3, 4))
-    d.raw.requires_grad_(False)
-    ids = torch.tensor([[5, T + 1, 7, T + 2, T + 3, 9, T + 3, T + 1, T + 2]])
-    d.line = torch.nn.Parameter(torch.full((4,), 0.5))
-    d.line_gate = "all"
-    out = emb(ids)
-    pack = ids[0] >= T
-    rows = torch.zeros(9, 4)
-    for p, e in enumerate(ids[0].tolist()):
-        if e >= T:
-            rows[p] = d.raw[d.index[e - T]] * 2.0
-    assert torch.allclose(out[0], rows + pack[:, None] * 1.0)
-    out.sum().backward()
-    assert float(d.line.grad.sum()) == 6 * 4 * 2.0  # all 6 pack positions
-    sd = d.state_dict()
-    assert sd["line_gate"] == "all"
-    d2 = ExtDelta.from_state(anima, sd, "cpu")
-    assert d2.line_gate == "all"
-    for h in (*d.handles, *d2.handles):
-        h.remove()
-
-
-# ---------------------------------------------------------------------------
-# plan_2900 § 5: the budget rule, the single ruler, the merge verb
+    with pytest.raises(AssertionError, match="line mode was removed"):
+        ExtDelta.from_state(anima, {**sd, "line": torch.zeros(4)}, "cpu")
 
 
 class _Tok:
@@ -843,13 +801,17 @@ _QMAP = {1: 101, 2: 102, 3: 103, 4: 104, 5: 105, 6: 106}
 
 
 def test_budget_rule():
-    """Singles start cold (plan_retrain): cold kanji take the stage_i row,
-    cold kana P1b's (the base), 4–5-glyph pieces the long_b0 row, everything
-    else the base; a run mixing budgets is refused, a uniform one gets its
-    factor."""
+    """Singles start cold (plan_retrain): cold kanji split by ink (< 10 →
+    225 / row, ≥ 10 → 337.5 with the mix), cold kana P1b's (the base),
+    4–5-glyph pieces the long_b0 row, everything else the base; singles may
+    mix budgets in a run (weighted draws), other kinds may not."""
     from cjk_scale import budget
 
-    assert budget.factor("single", 1, False, "kanji") == 150 / budget.BASE_STEPS
+    assert budget.factor("single", 1, False, "kanji", 7.4) == 150 / budget.BASE_STEPS
+    assert budget.factor("single", 1, False, "kanji", 10.0) == 225 / budget.BASE_STEPS
+    with pytest.raises(AssertionError, match="ink"):
+        budget.factor("single", 1, False, "kanji")
+    assert budget.glyph_ink("山") < 10 <= budget.glyph_ink("精")  # the pinned table
     assert budget.factor("single", 1, False, "kana") == 1.0
     assert budget.factor("single", 1, True) == 1.0
     assert budget.script_of("精") == "kanji" and budget.script_of("ー") == "kana"
@@ -858,20 +820,53 @@ def test_budget_rule():
     assert budget.factor("piece", 5, False) == 3.0
     tokq, seeds = (_Tok(), _QMAP), frozenset({101, 103, 105, 106})
     f = budget.vocab_factors(["精", "山", "すごい", "って", "あっ"], tokq, seeds)
-    # 精 has a seed row and still starts cold
+    # 精 has a seed row and still starts cold; 精 is ink-dense, 山 is not
     assert f == {
-        "精": 150 / 90,
+        "精": 225 / 90,
         "山": 150 / 90,
         "すごい": 1.0,
         "って": 1.0,
         "あっ": 1.0,
     }
     assert budget.run_factor(["すごい", "って", "あっ"], tokq, seeds) == 1.0
-    assert budget.run_factor(["精", "山"], tokq, seeds) == 150 / 90
+    assert budget.run_factor(["山"], tokq, seeds) == 150 / 90
     with pytest.raises(AssertionError, match="different budgets"):
-        budget.run_factor(["精", "すごい"], tokq, seeds)
+        budget.run_factor(["精", "山"], tokq, seeds)
+    # singles mix: 2 : 3 in the draw pools; a one-budget run draws unweighted
+    b = budget.run_budget(["精", "山"], tokq, seeds)
+    assert b == {"精": 225 / 90, "山": 150 / 90}
+    assert budget.draw_weights(b) == {"精": 3, "山": 2}
+    assert budget.draw_weights({"す": 1.0, "ご": 1.0}) == {"す": 1, "ご": 1}
     assert budget.mix_factor({"single"}) == 1.5
     assert budget.mix_factor({"piece"}) == 1.0
+
+
+def test_pieces_char_rows():
+    """A byte-split glyph (緒: two row-less fragment tokens) comes back as
+    itself with its char row on a ``GlyphRows`` map, as fragments on the
+    plain map; a fragment run with no char row stays fragments."""
+    from data.inventory import GlyphRows, pieces
+
+    class Tok:
+        enc = {"緒": [7, 8], "戻る": [7, 9, 3], "謎": [7, 10]}
+        dec = {3: "る", 7: "\ufffd", 8: "\ufffd", 9: "\ufffd", 10: "\ufffd"}
+        joint = {(7, 8): "緒", (7, 9): "戻", (7, 10): "謎"}
+
+        def encode(self, text, add_special_tokens=False):
+            return self.enc[text]
+
+        def decode(self, ids):
+            if len(ids) == 1:
+                return self.dec[ids[0]]
+            return self.joint.get(tuple(ids), "\ufffd")
+
+    plain = {3: 179}
+    q = GlyphRows(plain)
+    q.char = {"緒": 37919, "戻": 33742}
+    assert pieces(Tok(), plain, "緒") == [("\ufffd", None), ("\ufffd", None)]
+    assert pieces(Tok(), q, "緒") == [("緒", 37919)]
+    assert pieces(Tok(), q, "戻る") == [("戻", 33742), ("る", 179)]
+    assert pieces(Tok(), q, "謎") == [("\ufffd", None), ("\ufffd", None)]
 
 
 def test_plan_groups_take_the_budget():
@@ -880,6 +875,13 @@ def test_plan_groups_take_the_budget():
     got = plan_groups({"single": ["s"] * 3, "piece": [], "multi": []}, budget=150 / 90)
     n = round(3 * ITEMS_PER_VOCAB * 150 / 90 * 0.5)
     assert [(g.name, n) for g, n in got] == [("b0709", n), ("b0507", n), ("b0305", n)]
+    # per vocab: a kind's items are Σ of its vocabs' factors
+    got = plan_groups(
+        {"single": ["a", "b"], "piece": [], "multi": []},
+        budget={"a": 150 / 90, "b": 225 / 90},
+    )
+    n = round(ITEMS_PER_VOCAB * (150 + 225) / 90 * 0.5)
+    assert {m for _g, m in got} == {n}
 
 
 def test_ruler_sample():
@@ -945,7 +947,7 @@ def test_merge_rows(tmp_path, monkeypatch):
 
     monkeypatch.setattr(mg, "run_dir", lambda r: tmp_path / r)
     monkeypatch.setattr(mg, "trained_path", lambda r: tmp_path / r / "trained.pt")
-    monkeypatch.setattr("data.inventory.qwen_pieces", lambda: None)
+    monkeypatch.setattr("data.inventory.qwen_pieces", lambda **k: None)
     idx = {"a": {10}, "b": {11, 13}, "c": {10}, "l": {12}}
     monkeypatch.setattr(mg, "run_idx", lambda r, tokq: idx[r])
     monkeypatch.setattr(mg, "idx_source", lambda r: tmp_path / r / "vocabs.json")

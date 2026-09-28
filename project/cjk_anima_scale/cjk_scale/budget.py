@@ -1,5 +1,5 @@
 """budget — steps and items per vocab by kind × glyph count × warm / cold
-(plan_2900 § 5-1).
+(plan_2900 § 5-1), and for cold kanji singles by ink (plan_retrain § 1).
 
 The trainer's ``STEPS_PER_VOCAB`` (90) and the builder's ``ITEMS_PER_VOCAB``
 are the base; a vocab's **factor** scales both, so items keep pace with the
@@ -7,16 +7,22 @@ steps (stage_i scaled both). A rule written as rows with provenance, like
 ``windows.py``: a new read changes a row and its source string. A vocab no
 row matches gets factor 1.
 
-A run's vocabs must share one factor. The builder draws a vocab uniformly
-within its kind and the batcher draws items uniformly, so a mixed run would
-spread its budget evenly over every vocab — ``run_factor`` refuses it. Split
-such a run by factor and join the rows with ``scale.py <out> merge``.
+**Singles may mix factors within a run** (``run_budget``): the builder
+repeats each single in the draw pools by ``draw_weights`` (the factors'
+integer ratio — the lone / count tiers' ``pools.singles``, the windows'
+``pools.window_keys``), so a row's exposure keeps pace with its steps, and
+the trainer sums each row's own steps. The piece / multi tiers draw vocabs
+and corpus lines unweighted, so a piece run's vocabs must share one factor
+— ``run_budget`` refuses it; split such a run by factor and join the rows
+with ``scale.py <out> merge``.
 
-Warm = every idx of the vocab has a seed row (``paths.SEED_ROWS``) and its
-kind does not start cold. **Singles start cold** (``COLD_KINDS``,
-plan_retrain: the singles re-seed from the pack rows on lone + in-word
-data), so a single is never warm here. Script (kana / kanji) splits the
-cold single row: the kana point is P1b's, the kanji one stage_i's.
+Warm = every idx of the vocab has a row in the run's context rows
+(``paths.SEED_ROWS``, or the run's ``context``) and its kind does not start
+cold. **Singles start cold** (``COLD_KINDS``, plan_retrain: the singles
+re-seed from the pack rows on lone + in-word data), so a single is never
+warm here. Script (kana / kanji) splits the cold single row: the kana point
+is P1b's; kanji split again by ink (``glyph_ink``, cells² at 48 px — C3 at
+450: the gain over 225 went to the ink-dense glyphs).
 
 ``mix_factor``: the steps keep pace with the items a kind's groups draw
 (Σ of ``builder.TABLE`` shares) — the single kind's lone 0.5 + in-word
@@ -25,8 +31,12 @@ cold single row: the kana point is P1b's, the kanji one stage_i's.
 
 from __future__ import annotations
 
+import json
+import math
 from dataclasses import dataclass
+from fractions import Fraction
 from functools import cache
+from pathlib import Path
 
 BASE_STEPS = 90  # train.STEPS_PER_VOCAB of record (run0925_300f; conflict_joint report)
 
@@ -39,9 +49,10 @@ class Rule:
     steps: int  # per vocab, at the base budget
     source: str
     script: str | None = None  # "kana" / "kanji" (``script_of``); None = either
+    ink: tuple | None = None  # [lo, hi) glyph ink (``glyph_ink``), hi None = open
 
 
-COLD_KINDS = ("single",)  # plan_retrain § 6-4: every single re-seeds cold
+COLD_KINDS = ("single",)  # retrain_experiments § 6: every single re-seeds cold
 
 
 RULES = (
@@ -50,7 +61,7 @@ RULES = (
         (1, 1),
         False,
         90,
-        "cold kana: p1_mix (plan_retrain § 4, hypothesis.md P1b), 36 hiragana "
+        "cold kana: p1_mix (retrain_experiments § 4, hypothesis.md P1b), 36 hiragana "
         "cold at 90 × the in-word mix 1.5 = 135 / row: singles official 82 vs "
         "the floor's 91 / 144 (p 0.69), 8 held-in words ≤ 1 edit 80 / 128 "
         "(floor 1). Katakana at this row is unread (retrain_kana reads it)",
@@ -61,12 +72,25 @@ RULES = (
         (1, 1),
         False,
         150,
-        "cold kanji: 90 → 270 steps / row doubled contained (59 → 117 / 192, "
-        "reports/stage_i_2026_09_26.md § 5); 150 lies between, unmeasured "
-        "(plan_2900 § 3, the C-k budget is the user's call). C3 (plan_retrain "
-        "§ 4) at 150 × 1.5 = 225: new kanji official 0 → 51 / 192, the seed's "
-        "dense kanji 65 → 31 — not set (plan_retrain § 7)",
+        "cold kanji, ink < 10: C3 (retrain_experiments § 4) at 150 × 1.5 = 225 / "
+        "row: new kanji official 0 → 51 / 192; at 450 the ink < 10 glyphs did "
+        "not gain (official 38 → 34, contained 78 → 81 of 7 × 16) — user "
+        "2026-09-28 (plan_retrain § 1)",
         script="kanji",
+        ink=(0.0, 10.0),
+    ),
+    Rule(
+        "single",
+        (1, 1),
+        False,
+        225,
+        "cold kanji, ink ≥ 10: C3 at 450 / row brought the seed's dense kanji "
+        "back to the floor (official 31 → 57 / 192, floor 65, p 0.38) and the "
+        "ink ≥ 10.5 glyphs doubled (44 → 86 of 17 × 16); 225 × 1.5 = 337.5 / "
+        "row is the midpoint of 225 and 450, unmeasured — user 2026-09-28 "
+        "(plan_retrain § 1)",
+        script="kanji",
+        ink=(10.0, None),
     ),
     Rule(
         "piece",
@@ -88,26 +112,63 @@ def script_of(vocab: str) -> str:
     return "kanji" if any(0x3400 <= ord(c) <= 0x9FFF for c in vocab) else "kana"
 
 
+# glyph → ink, pinned (``glyph_ink`` computes a glyph it lacks): the budget
+# must not depend on which fonts a VM has
+INK_TABLE = Path(__file__).resolve().parents[1] / "assets" / "glyph_ink.json"
+
+
+@cache
+def _ink_table() -> dict:
+    if not INK_TABLE.is_file():
+        return {}
+    return json.loads(INK_TABLE.read_text(encoding="utf-8"))
+
+
+def glyph_ink(ch: str) -> float:
+    """Ink of one glyph drawn alone, in latent cells² (``cf_sense._glyph_ink``,
+    the C3 read's measure): the pinned table, else rendered."""
+    t = _ink_table()
+    if ch in t:
+        return float(t[ch])
+    from eval.cf_sense import _glyph_ink
+
+    return float(_glyph_ink(ch))
+
+
 def starts_cold(kind: str) -> bool:
     return kind in COLD_KINDS
 
 
-def rule_for(kind: str, glyphs: int, warm: bool, script: str = "kana") -> Rule | None:
+def _in(x: float, rng: tuple) -> bool:
+    lo, hi = rng
+    return x >= lo and (hi is None or x < hi)
+
+
+def rule_for(
+    kind: str, glyphs: int, warm: bool, script: str = "kana", ink: float | None = None
+) -> Rule | None:
     for r in RULES:
         lo, hi = r.glyphs
-        if (
+        if not (
             r.kind == kind
             and glyphs >= lo
             and (hi is None or glyphs <= hi)
             and (r.warm is None or r.warm == warm)
             and (r.script is None or r.script == script)
         ):
-            return r
+            continue
+        if r.ink is not None:
+            assert ink is not None, f"rule {r.kind}/{r.script} splits by ink: pass it"
+            if not _in(ink, r.ink):
+                continue
+        return r
     return None
 
 
-def factor(kind: str, glyphs: int, warm: bool, script: str = "kana") -> float:
-    r = rule_for(kind, glyphs, warm, script)
+def factor(
+    kind: str, glyphs: int, warm: bool, script: str = "kana", ink: float | None = None
+) -> float:
+    r = rule_for(kind, glyphs, warm, script, ink)
     return 1.0 if r is None else r.steps / BASE_STEPS
 
 
@@ -123,18 +184,19 @@ def mix_factor(kinds, table=None) -> float:
 
 
 @cache
-def seed_ids() -> frozenset:
+def seed_ids(rows: Path | None = None) -> frozenset:
+    """The idx a rows file holds (default ``paths.SEED_ROWS``)."""
     import torch
 
     from .paths import SEED_ROWS
 
-    sd = torch.load(SEED_ROWS, map_location="cpu", weights_only=False)
+    sd = torch.load(rows or SEED_ROWS, map_location="cpu", weights_only=False)
     return frozenset(int(e) for e in sd["delta"]["ext_ids"])
 
 
-def vocab_factors(vocabs, tokq, seeds=None) -> dict:
-    """vocab → its factor; a vocab with no pack row (nothing trains) is left
-    out."""
+def _vocab_rules(vocabs, tokq, seeds=None) -> dict:
+    """vocab → (kind, factor); a vocab with no pack row (nothing trains) is
+    left out."""
     from data.inventory import pieces as qpieces
 
     from .windows import glyph_count, vocab_kind
@@ -149,23 +211,72 @@ def vocab_factors(vocabs, tokq, seeds=None) -> dict:
             continue
         kind = vocab_kind(v, len(ps))
         warm = not starts_cold(kind) and all(int(e) in seeds for e in idx)
-        out[v] = factor(kind, glyph_count(v), warm, script_of(v))
+        script = script_of(v)
+        n = glyph_count(v)
+        ink = glyph_ink(v) if kind == "single" and script == "kanji" else None
+        out[v] = (kind, factor(kind, n, warm, script, ink))
     return out
+
+
+def vocab_factors(vocabs, tokq, seeds=None) -> dict:
+    """vocab → its factor; a vocab with no pack row (nothing trains) is left
+    out."""
+    return {v: f for v, (_k, f) in _vocab_rules(vocabs, tokq, seeds).items()}
+
+
+def _by_factor(f: dict) -> str:
+    by: dict = {}
+    for v, x in f.items():
+        by.setdefault(x, []).append(v)
+    return "; ".join(
+        f"× {x:g} ({len(vs)}: {' '.join(vs[:6])}{' …' if len(vs) > 6 else ''})"
+        for x, vs in sorted(by.items())
+    )
+
+
+def run_budget(vocabs, tokq, seeds=None) -> dict:
+    """vocab → factor for a run: singles may mix factors (their draws are
+    weighted, ``draw_weights``); any other kind must share one."""
+    r = _vocab_rules(vocabs, tokq, seeds)
+    for kind in sorted({k for k, _f in r.values()} - {"single"}):
+        f = {v: x for v, (k, x) in r.items() if k == kind}
+        assert len(set(f.values())) <= 1, (
+            f"the run's {kind} vocabs fall under different budgets {_by_factor(f)} "
+            "— their tiers draw unweighted: split the run by budget and join the "
+            "rows with `scale.py <out> merge`"
+        )
+    return {v: x for v, (_k, x) in r.items()}
 
 
 def run_factor(vocabs, tokq, seeds=None) -> float:
     """The run's one factor; refuses a run whose vocabs fall under different
-    factors."""
+    factors (``run_budget`` is what the builder and trainer read)."""
     f = vocab_factors(vocabs, tokq, seeds)
-    by = {}
-    for v, x in f.items():
-        by.setdefault(x, []).append(v)
-    assert len(by) <= 1, (
-        "the run's vocabs fall under different budgets "
-        + "; ".join(
-            f"× {x:g} ({len(vs)}: {' '.join(vs[:6])}{' …' if len(vs) > 6 else ''})"
-            for x, vs in sorted(by.items())
-        )
-        + " — split the run by budget and join the rows with `scale.py <out> merge`"
+    assert len(set(f.values())) <= 1, (
+        f"the run's vocabs fall under different budgets {_by_factor(f)} — split "
+        "the run by budget and join the rows with `scale.py <out> merge`"
     )
-    return next(iter(by), 1.0)
+    return next(iter(f.values()), 1.0)
+
+
+MAX_DRAW_WEIGHT = 16
+
+
+def draw_weights(budget: dict) -> dict:
+    """vocab → how many times it sits in a draw pool: the factors' ratio as
+    small integers (225 : 337.5 → 2 : 3); all 1 when the factors agree, so
+    a one-budget run draws exactly what it drew before."""
+    if not budget:
+        return {}
+    lo = min(budget.values())
+    r = {
+        v: Fraction(x / lo).limit_denominator(MAX_DRAW_WEIGHT)
+        for v, x in budget.items()
+    }
+    den = math.lcm(*(q.denominator for q in r.values()))
+    w = {v: int(q * den) for v, q in r.items()}
+    assert max(w.values()) <= MAX_DRAW_WEIGHT, (
+        f"draw weights past {MAX_DRAW_WEIGHT}: {sorted(set(w.values()))} — the "
+        "factors' ratio is not a small fraction"
+    )
+    return w

@@ -1,15 +1,21 @@
-"""A run is one file: ``configs/runs/<run>.toml`` = ``{vocabs, read}`` (plan.md § 1).
+"""A run is one file: ``configs/runs/<run>.toml`` = ``{vocabs, read[, context]}`` (plan.md § 1).
 
     vocabs = "ja_pieces_0925_300.txt"     # what trains: a vocabs file, one vocab per line
                                           # (assets/vocabs/, or a path) — or a list of vocab
                                           # specs (["kana", "kanji:200"], the data.vocabs grammar)
     read = ["はい", "おしい"]              # the strings native_sent reads (en clause)
+    context = "retrain_kana"              # optional: a run whose merged rows replace the
+                                          # seed rows (plan_retrain § 2) — warm-from, frozen
+                                          # context and merge base; its trained singles (and
+                                          # its own context's, down the chain) may sit in
+                                          # this run's windows
 
 Everything else is a rule in code (plan.md § 2): σ per item from the band law
 (``windows.py``), the recipe table by kind (``builder.TABLE``), the volume
 (``builder.ITEMS_PER_VOCAB``), the trainer (``train.py``), the seed table
-(``paths.SEED_ROWS``), the automatic rulers (``eval.py``). A vocab outside
-the file rides frozen at the seed; a vocab the seed lacks starts cold.
+(``paths.SEED_ROWS``, or the ``context`` run's rows), the automatic rulers
+(``eval.py``). A vocab outside the file rides frozen at the seed (the
+context); a vocab the seed lacks starts cold.
 
 The pre-collapse configs are records: the stage-shaped run files stay in
 ``configs/runs/`` as they ran, and the stage / joint configs live split under
@@ -28,9 +34,9 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from .paths import RUN_CONFIGS, VOCABS_DIR
+from .paths import RUN_CONFIGS, SEED_ROWS, VOCABS_DIR, trained_path
 
-RUN_KEYS = ("vocabs", "read")
+RUN_KEYS = ("vocabs", "read", "context")
 
 SEED = 0  # the data draw and the trainer seed (every run of record used 0)
 
@@ -66,6 +72,7 @@ class RunConfig:
     path: Path
     vocabs: str | tuple  # a vocabs file, or vocab specs
     read: tuple
+    context: str | None = None  # a run name: its merged rows replace the seed rows
 
     def vocab_specs(self) -> list[str]:
         """The ``data.vocabs`` specs the vocabs stand for: a file is one
@@ -82,6 +89,34 @@ class RunConfig:
             return None
         v = Path(os.path.expanduser(self.vocabs))
         return v if "/" in self.vocabs else VOCABS_DIR / self.vocabs
+
+    def context_rows(self) -> Path:
+        """The rows this run sits on: the ``context`` run's merged
+        ``trained.pt`` (finished, not a partial), else ``paths.SEED_ROWS``."""
+        if not self.context:
+            return SEED_ROWS
+        p = trained_path(self.context)
+        assert p.is_file(), (
+            f"{self.name}: context {self.context} has no rows at {p} — train it first"
+        )
+        import torch
+
+        sd = torch.load(p, map_location="cpu", weights_only=False)
+        assert sd.get("seed_merged") and sd.get("step") is None, (
+            f"{p}: not a finished run's merged rows (step {sd.get('step')})"
+        )
+        return p
+
+    def context_chain(self) -> list[str]:
+        """The context runs, nearest first, down to the one on the seed."""
+        out, rc = [], self
+        while rc.context:
+            assert rc.context not in out and rc.context != self.name, (
+                f"{self.name}: context cycle through {rc.context}"
+            )
+            out.append(rc.context)
+            rc = load_run(rc.context)
+        return out
 
 
 def run_names() -> list[str]:
@@ -106,7 +141,8 @@ def load_run(run: str) -> RunConfig:
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
     extra = sorted(set(raw) - set(RUN_KEYS))
     assert not extra, (
-        f"{path}: a run is {{vocabs, read}} — {extra} are rules in code (plan.md § 2)"
+        f"{path}: a run is {{vocabs, read[, context]}} — {extra} are rules in code "
+        "(plan.md § 2)"
     )
     assert "vocabs" in raw, f"{path}: no vocabs"
     v = raw["vocabs"]
@@ -117,11 +153,17 @@ def load_run(run: str) -> RunConfig:
     assert isinstance(read, list) and all(isinstance(x, str) and x for x in read), (
         f"{path}: read is a list of strings"
     )
+    ctx = raw.get("context")
+    assert ctx is None or (isinstance(ctx, str) and ctx and "/" not in ctx), (
+        f"{path}: context is a run name"
+    )
+    assert ctx != path.stem, f"{path}: a run cannot be its own context"
     rc = RunConfig(
         name=path.stem,
         path=path,
         vocabs=v if isinstance(v, str) else tuple(v),
         read=tuple(read),
+        context=ctx,
     )
     f = rc.vocabs_file()
     assert f is None or f.is_file(), f"{path}: vocabs file {f} does not exist"

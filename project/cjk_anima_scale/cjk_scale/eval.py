@@ -170,7 +170,7 @@ def _kind_vocabs(rc: RunConfig, kind: str) -> list[str]:
 
     data = data_dir(rc.name)
     vocabs = json.loads((data / "vocabs.json").read_text(encoding="utf-8"))
-    tok, q = qwen_pieces()
+    tok, q = qwen_pieces(char_rows=True)
     out = []
     for v in vocabs:
         ps = qpieces(tok, q, v)
@@ -188,10 +188,13 @@ def piece_vocabs(rc: RunConfig) -> tuple[str, ...]:
     from data.inventory import qwen_pieces
 
     have = _kind_vocabs(rc, "piece")
-    tok, q = qwen_pieces()
+    tok, q = qwen_pieces(char_rows=True)
     first = list(
         dict.fromkeys(
-            p for s in rc.read for p, e in qpieces(tok, q, s) if e is not None and p in have
+            p
+            for s in rc.read
+            for p, e in qpieces(tok, q, s)
+            if e is not None and p in have
         )
     )[:RULER_N]
     rest = [v for v in have if v not in first]

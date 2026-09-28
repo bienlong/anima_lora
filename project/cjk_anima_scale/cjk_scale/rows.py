@@ -24,15 +24,6 @@ renders at its seed row, never as a raw pack row, everywhere the file is
 read (eval, bake, Δ reads). The ``seed_merged`` key marks the format; a
 pre-merge vocabs-only file fails eval's check and needs a retrain.
 
-``line_mode`` (experiments only; proposal.md § 1, F1): one shared
-``v_line`` (``ExtDelta.line``, zero-init, the rows' lr, no pull) added at the
-hook to every pack row in a run of ≥ 2, so the rows ``r_i`` and the line
-mode split by the data's gate on / off exposure. Saved as ``delta['line']``.
-``line_mode`` ``"all"`` (F2a, proposal.md § 2.0) drops the gate: ``v_line``
-on every pack row, alone or in a run. ``rows_frozen`` holds every row at its
-warm (seed) value — ``raw`` takes no gradient and ``v_line`` is the only
-trainable, so ``v_line`` is fit onto the rows it will be summed onto.
-
 ``row_cap`` (experiments only; hypothesis.md § 4 P1): after every optimizer
 step each trained row's effective row (pack + ``raw`` × ``row_scale``) is
 projected back onto the ball of radius ``row_cap`` — a hard clamp, no
@@ -83,8 +74,6 @@ class Rows:
         touched=None,
         frozen=(),
         context=None,
-        line_mode=None,
-        rows_frozen=False,
         row_cap=None,
     ):
         from common.hooks import ExtDelta
@@ -108,20 +97,7 @@ class Rows:
         self.delta = ExtDelta(anima, idx | frozen, dim, device, self.row_scale)
         self.pack_rows = pack.table[self.delta.ext_ids].float().to(device)
         self.row_cap = None if row_cap is None else float(row_cap)
-        self.rows_frozen = bool(rows_frozen)
-        self.params = [] if rows_frozen else [{"params": [self.delta.raw], "lr": lr}]
-        if line_mode:
-            gate = "run" if line_mode is True else str(line_mode)
-            assert gate in ("run", "all"), line_mode
-            self.delta.line = torch.nn.Parameter(torch.zeros(dim, device=device))
-            self.delta.line_gate = gate
-            self.params.append({"params": [self.delta.line], "lr": lr})
-            print(
-                "rows: line mode on — v_line (zero-init) "
-                + ("at runs of ≥ 2" if gate == "run" else "on every pack row, ungated"),
-                flush=True,
-            )
-        assert self.params, "rows_frozen needs line_mode — nothing would train"
+        self.params = [{"params": [self.delta.raw], "lr": lr}]
         self.touched_mask = torch.tensor(
             [int(e) in touched for e in self.delta.ext_ids],
             dtype=torch.bool,
@@ -143,10 +119,7 @@ class Rows:
             self._warm_start(warm)
         if frozen:
             self._fill_frozen()
-        if rows_frozen:
-            self.delta.raw.requires_grad_(False)
-            print(f"rows: all {self.n_rows} rows frozen at the warm rows", flush=True)
-        elif frozen:
+        if frozen:
             live = (~self.frozen_mask).float()[:, None]
             self.delta.raw.register_hook(lambda g: g * live)
         if self.row_cap is not None:
@@ -299,8 +272,6 @@ class Rows:
             "it_s": step / max(time.time() - t0, 1e-6),
             **(extra or {}),
         }
-        if self.delta.line is not None:
-            rec["line_norm"] = float(self.delta.line.detach().norm() * self.row_scale)
         if self.raw0 is not None and bool(self.warm_mask.any()):
             r = self.delta.raw.detach()[self.warm_mask]
             r0 = self.raw0[self.warm_mask]

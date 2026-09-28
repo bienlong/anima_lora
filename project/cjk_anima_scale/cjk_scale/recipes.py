@@ -18,7 +18,7 @@ stamps the item with its band.
     scene_sentence  a Manga109-s dialogue line, ``min_glyph`` drawn per item
     grid_string     pieces / short lines in 2×2 … 3×2 word cells at a target px
     scene_window    a window of a dialogue line in a bubble (the singles' in-word
-                    tier, plan_retrain § 3): unspaced on the image and in the
+                    tier, retrain_experiments § 3): unspaced on the image and in the
                     caption, routed per glyph at encode; drawn glyph-first
     scene_single_small  one glyph at line px in a bubble it fills 0.2–0.4 of
                     (the count tier beside the windows, Stage B)
@@ -88,6 +88,9 @@ class Pools:
     stroke: float
     horizontal_frac: float  # share of multi-glyph items / grid cells drawn as lines
     windows: dict = field(default_factory=dict)  # glyph → its windows (scene_window)
+    window_keys: list = field(
+        default_factory=list
+    )  # weighted glyph pool over ``windows``
     used: Counter = field(default_factory=Counter)  # scene index → items drawn
     decks: dict = field(default_factory=dict)
     balanced: dict = field(default_factory=dict)
@@ -170,7 +173,7 @@ def build_pools(
     )
     fonts = find_fonts()
     inv = _base_inventory(a)
-    tokq = qwen_pieces()
+    tokq = qwen_pieces(char_rows=True)
     _eval_strings(a, rng, inv)
     with tempfile.TemporaryDirectory() as scratch:
         out = Path(scratch)
@@ -636,8 +639,10 @@ def scene_window(pools: Pools, rng: random.Random, p: dict):
     """A window in one bubble, unspaced on the image and in the caption
     (routed per glyph at encode: every glyph trains its single row). A draw
     picks a glyph uniformly, then one of its windows, so exposure is per row
-    (Stage B's ``scene_spelled``, C3's ``scene_window``)."""
-    word = rng.choice(pools.windows[rng.choice(list(pools.windows))])
+    (Stage B's ``scene_spelled``, C3's ``scene_window``) — per budget, when
+    ``pools.window_keys`` repeats a glyph by its draw weight."""
+    keys = pools.window_keys or list(pools.windows)
+    word = rng.choice(pools.windows[rng.choice(keys)])
     f = p.get("fill", [0.7, 1.0])
     lo, hi = f if isinstance(f, list) else (f, f)
     fill = rng.uniform(float(lo), float(hi))
@@ -688,7 +693,7 @@ def scene_single_small(pools: Pools, rng: random.Random, p: dict):
 
 
 # ----------------------------------------------------------------------------
-# the windowed word pool (plan_retrain § 3)
+# the windowed word pool (retrain_experiments § 3)
 
 # window length: P1b's in-word words were whole lines of 2–6 glyphs (Stage B);
 # C3's kanji windows were 2–4

@@ -1,11 +1,11 @@
 #!/usr/bin/env python
-"""c3_kanji — plan_retrain.md § 4 C3: does the P1b recipe carry to kanji? (2026-09-28)
+"""c3_kanji — retrain_experiments.md § 4 C3: does the P1b recipe carry to kanji? (2026-09-28)
 
 P1b (``p1_mix``: 36 donor kana, cold, in-word + lone) held the floor's
 singles and composed. C3 runs the same recipe on 36 kanji, with the two
 changes the retrain makes:
 
-- **Windows, not whole lines** (plan_retrain § 3): an in-word item is a
+- **Windows, not whole lines** (retrain_experiments § 3): an in-word item is a
   substring of 2–4 glyphs of a dialogue line, every glyph a donor kanji or a
   kana of the context, none repeated, holding at least one donor kanji. A
   draw picks a donor kanji uniformly, then one of its windows. Windows
@@ -18,12 +18,12 @@ changes the retrain makes:
   retrain's kanji need the routed form. Every window must encode to its
   glyphs' single ids and nothing else, or it is dropped.
 
-The context is ``p1_mix``'s merged rows (plan_retrain § 5 order: the kanji
+The context is ``p1_mix``'s merged rows (plan_retrain § 2 order: the kanji
 run sits on the kana run's rows), so the windows' kana are cold-trained
 rows. Donors (``KANJI``): stage_i's 12 (no seed row) + dense_a0's 12 (seed
 rows), whose floor singles are cached; 日本人大丈夫何時 (seed rows) for the
 read words; 死父誰名 (frequent, no row yet). All start cold from the pack
-rows. Budget (plan_retrain § 5): the cold single row (150) × 1.5 = 225
+rows. Budget (plan_retrain § 2): the cold single row (150) × 1.5 = 225
 steps / row; items at the cold single factor (150 / 90), so the in-word
 items keep ``p1_mix``'s epochs (5.4).
 
@@ -39,6 +39,10 @@ Legs:
          dir's ``native_route/``
 
 ``--dry_run`` prints the windows per donor and the encodings.
+
+``--steps`` (plan_retrain § 1): the same data at another steps / row; any
+value but 225 trains into ``c3_kanji_<steps>`` and reads the 225 arm
+(cached) beside it.
 """
 
 from __future__ import annotations
@@ -84,7 +88,7 @@ KANJI = SI + DA + "日本人大丈夫何時" + "死父誰名"
 READ_WORDS = ("山田太郎", "小山田", "日本人", "大丈夫", "何時間", "愛してる")
 WIN_LEN = (2, 4)
 ITEM_FACTOR = 150 / 90  # budget.py's cold single row
-STEPS = 225  # 150 × 1.5 (plan_retrain § 5)
+STEPS = 225  # 150 × 1.5 (plan_retrain § 2)
 TAG = "route"
 FLOOR_SINGLES = {"stagei": SI, "densea0": DA}
 
@@ -98,6 +102,7 @@ def parse_args():
         "--legs", nargs="+", default=["data"], choices=["data", "train", "read"]
     )
     p.add_argument("--workers", type=int, help="data: render processes")
+    p.add_argument("--steps", type=int, default=STEPS, help="steps / row")
     p.add_argument("--dry_run", action="store_true")
     return p.parse_args()
 
@@ -244,6 +249,7 @@ def fixed_budget() -> None:
     from cjk_scale import budget
 
     budget.run_factor = lambda *a, **k: ITEM_FACTOR
+    budget.run_budget = lambda vocabs, *a, **k: dict.fromkeys(vocabs, ITEM_FACTOR)
 
 
 # ----------------------------------------------------------------------------
@@ -277,6 +283,7 @@ def read_words(arm: Path | None) -> dict:
 
 def main():
     args = parse_args()
+    name = NAME if args.steps == STEPS else f"{NAME}_{args.steps}"
     from cjk_scale import recipes
 
     recipes.RECIPES["scene_window"] = scene_window
@@ -300,7 +307,7 @@ def main():
         "n_windows": len(ok),
         "dropped": len(ws) - len(ok),
         "per_glyph_windows": cov,
-        "steps_per_row": STEPS,
+        "steps_per_row": args.steps,
         "item_factor": ITEM_FACTOR,
         "context": str(CONTEXT),
     }
@@ -331,34 +338,45 @@ def main():
 
         assert CONTEXT.exists(), CONTEXT
         train(
-            rc_of(NAME),
+            rc_of(name),
             data=OUT / DATA / "data",
-            out=EXP / NAME,
+            out=EXP / name,
             cold=True,
-            steps_per_row=STEPS,
+            steps_per_row=args.steps,
             context=CONTEXT,
         )
     if "read" in args.legs:
         arms = {"floor": None, "p1_mix": EXP / "p1_mix", NAME: EXP / NAME}
+        arms[name] = EXP / name
         sh = {"floor": read_singles(None), NAME: read_singles(EXP / NAME)}
+        sh[name] = read_singles(EXP / name)
         wh = {a: read_words(p) for a, p in arms.items()}
         out = metrics.setdefault("reads", {})
         for a, h in sh.items():
             print(f"{a} · singles:", flush=True)
             out.setdefault(a, {})["singles"] = SB.tally(h)
-        pr = SB.paired(sh[NAME], sh["floor"])
-        out[NAME]["singles_paired_vs_floor"] = pr
-        print(f"  singles {NAME} vs floor {pr}", flush=True)
+        pr = SB.paired(sh[name], sh["floor"])
+        out[name]["singles_paired_vs_floor"] = pr
+        print(f"  singles {name} vs floor {pr}", flush=True)
         for grp, chars in (("stagei", SI), ("densea0", DA)):
-            sub = {k: v for k, v in sh[NAME].items() if k[0] in chars}
+            sub = {k: v for k, v in sh[name].items() if k[0] in chars}
             fsub = {k: v for k, v in sh["floor"].items() if k[0] in chars}
             pr = SB.paired(sub, fsub)
-            out[NAME][f"singles_{grp}_paired_vs_floor"] = pr
-            print(f"  singles ({grp}) {NAME} vs floor {pr}", flush=True)
+            out[name][f"singles_{grp}_paired_vs_floor"] = pr
+            print(f"  singles ({grp}) {name} vs floor {pr}", flush=True)
         for a, h in wh.items():
             print(f"{a} · words (routed):", flush=True)
             out.setdefault(a, {})["words"] = SB.tally(h)
-        for a, ref in ((NAME, "floor"), (NAME, "p1_mix"), ("p1_mix", "floor")):
+        pairs = [(name, "floor"), (name, "p1_mix"), ("p1_mix", "floor")]
+        if name != NAME:
+            pairs.append((name, NAME))
+            for grp, chars in (("stagei", SI), ("densea0", DA)):
+                sub = {k: v for k, v in sh[name].items() if k[0] in chars}
+                rsub = {k: v for k, v in sh[NAME].items() if k[0] in chars}
+                pr = SB.paired(sub, rsub)
+                out[name][f"singles_{grp}_paired_vs_{NAME}"] = pr
+                print(f"  singles ({grp}) {name} vs {NAME} {pr}", flush=True)
+        for a, ref in pairs:
             pr = SB.paired(wh[a], wh[ref])
             out[a][f"words_paired_vs_{ref}"] = pr
             print(f"  words {a} vs {ref} {pr}", flush=True)
@@ -368,7 +386,7 @@ def main():
         args=args,
         label=args.label,
         metrics=metrics,
-        artifacts=[str(OUT / DATA), str(EXP / NAME)],
+        artifacts=[str(OUT / DATA), str(EXP / name)],
     )
     print(f"→ {run_dir / 'result.json'}", flush=True)
 

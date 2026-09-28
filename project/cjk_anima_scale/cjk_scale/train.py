@@ -35,7 +35,7 @@ from types import SimpleNamespace
 import torch
 
 from .config import RunConfig
-from .paths import SEED_ROWS, data_dir, run_dir
+from .paths import RAW_PACK_SHA, data_dir, run_dir
 from .rows import Rows
 
 # The trainer is fixed (plan.md § 2); a different trainer is a code change with
@@ -122,25 +122,39 @@ def load_items(data: Path) -> tuple[list, list, list]:
     return recs, ev, vocabs
 
 
-def plan(rc: RunConfig, data: Path, recs: list, vocabs: list, touched: set):
+def plan(
+    rc: RunConfig,
+    data: Path,
+    recs: list,
+    vocabs: list,
+    touched: set,
+    ctx: Path | None = None,
+):
     """Everything ``train`` fixes before the model loads: the rows split
     (what trains, what rides frozen) and the schedule, with the record
     ``train_record.json`` carries. CPU only — the Qwen tokenizer and the
     pack's mapping; ``touched`` = the ext rows the training captions carry
-    (``ext_ids_of`` over the TE cache)."""
+    (``ext_ids_of`` over the TE cache); ``ctx`` = the rows the run sits on.
+    Each row takes its vocab's steps (``budget.run_budget`` × the base × the
+    mix); the run's steps are their sum."""
+    from collections import Counter
+
     from data.inventory import pieces as qpieces
     from data.inventory import qwen_pieces
 
-    from .budget import mix_factor, run_factor, starts_cold
+    from .budget import mix_factor, run_budget, seed_ids, starts_cold
     from .windows import vocab_kind
 
-    tokq = qwen_pieces()
+    ctx = ctx or rc.context_rows()
+    tokq = qwen_pieces(char_rows=True)
     idx = vocab_idx(vocabs, tokq)
     # captions carry rows outside the vocabs (corpus lines): they ride frozen
-    # at the seed; what trains (and what the steps count) is the vocabs' rows
+    # at the context; what trains (and what the steps count) is the vocabs' rows
     frozen = touched - idx
     touched = touched & idx
-    budget = run_factor(vocabs, tokq)  # budget.py: × the base by kind / glyphs / warm
+    budget = run_budget(
+        vocabs, tokq, seed_ids(ctx)
+    )  # × the base by kind / glyphs / warm / ink
     ps = {v: qpieces(*tokq, v) for v in vocabs}
     kinds = {
         vocab_kind(v, len(ps[v]))
@@ -150,10 +164,18 @@ def plan(rc: RunConfig, data: Path, recs: list, vocabs: list, touched: set):
     mix = mix_factor(kinds)  # the steps keep pace with the kind's items
     cold = {starts_cold(k) for k in kinds}
     assert len(cold) <= 1, f"kinds {kinds}: some start cold, some warm — split the run"
-    steps_per_row = int(round(STEPS_PER_VOCAB * budget * mix))
-    steps = steps_per_row * len(idx)
+    row_steps: dict = {}  # idx → its steps (a shared idx takes its largest)
+    for v, f in budget.items():
+        n = int(round(STEPS_PER_VOCAB * f * mix))
+        for _p, e in ps[v]:
+            if e is not None:
+                row_steps[int(e)] = max(row_steps.get(int(e), 0), n)
+    per = Counter(row_steps[i] for i in idx if i in row_steps)
+    steps = sum(row_steps.get(i, int(round(STEPS_PER_VOCAB * mix))) for i in idx)
+    steps_per_row = next(iter(per)) if len(per) == 1 else dict(sorted(per.items()))
     warmup = int(round(WARMUP_RATIO * steps))
     bands = sorted({tuple(r["band"]) for r in recs})
+    factors = Counter(budget.values())
     record = {
         "run": rc.name,
         "run_config": str(rc.path),
@@ -162,7 +184,9 @@ def plan(rc: RunConfig, data: Path, recs: list, vocabs: list, touched: set):
         "bands": [list(b) for b in bands],
         "train_steps": steps,
         "steps_per_row": steps_per_row,
-        "budget_factor": budget,
+        "budget_factor": next(iter(factors), 1.0)
+        if len(factors) <= 1
+        else {f"{x:g}": n for x, n in sorted(factors.items())},
         "mix_factor": mix,
         "lr_warmup": warmup,
         "lr_warmup_ratio": WARMUP_RATIO,
@@ -178,7 +202,8 @@ def plan(rc: RunConfig, data: Path, recs: list, vocabs: list, touched: set):
         "seed": SEED,
         "n_rows": len(idx),
         "n_touched": len(touched),
-        "context": str(SEED_ROWS),
+        "context": str(ctx),
+        "context_run": rc.context,
         "n_context": len(frozen),
         "arm": "rows",
     }
@@ -201,8 +226,6 @@ def train(
     data: Path | None = None,
     out: Path | None = None,
     max_steps: int | None = None,
-    line_mode: bool | str = False,
-    rows_frozen: bool = False,
     cold: bool | None = None,
     row_cap: float | str | None = None,
     steps_per_row: int | None = None,
@@ -210,19 +233,16 @@ def train(
 ) -> Path:
     """Train the run. ``data`` / ``out`` default to the run's dirs;
     ``max_steps`` stops the loop early with the full-length schedule
-    (``experiments/parity_300f`` replays a run's first steps); ``line_mode``
-    trains a gated ``v_line`` beside the rows (``rows.Rows``,
-    ``experiments/f1_line``), ``"all"`` an ungated one, and ``rows_frozen``
-    holds the rows at the seed so ``v_line`` alone trains
-    (``experiments/f2a_line``); ``cold`` starts the vocabs' rows at the pack
+    (``experiments/parity_300f`` replays a run's first steps); ``cold`` starts the vocabs' rows at the pack
     rows (Δ 0) instead of the seed — ``None`` = the rule (``budget.COLD_KINDS``:
     singles start cold) — and ``row_cap`` clamps every trained
     row's effective norm after each step — ``"t5"`` = the T5 table's mean
     row norm (``experiments/p1_cap``, hypothesis.md § 4 P1);
     ``steps_per_row`` replaces the budget's (a mix that adds items keeps
     the old items' exposure); ``context`` replaces the seed rows as the
-    warm-from / frozen-context / merge file (plan_retrain § 5: the kanji run
-    sits on the kana run's merged rows). ``scale.py`` passes none of them.
+    warm-from / frozen-context / merge file (plan_retrain § 2: the kanji run
+    sits on the kana run's merged rows; the run file's ``context`` is the
+    default, ``paths.SEED_ROWS`` without one). ``scale.py`` passes none of them.
     A data dir built with windows (``build.json`` ``glyph_route``) is
     trained routed: ``ANIMA_VOCAB_GLYPH_ROUTE=1`` is set in-process before
     the TE cache (whose key carries it)."""
@@ -252,9 +272,8 @@ def train(
     cache, touched, _ev_idx = _encode_text(
         recs, ev, device, out, te_cache=data / "te_cache"
     )
-    p = plan(rc, data, recs, vocabs, touched)
-    ctx = Path(context) if context else SEED_ROWS
-    p.record["context"] = str(ctx)
+    ctx = Path(context) if context else rc.context_rows()
+    p = plan(rc, data, recs, vocabs, touched, ctx)
     if route:
         p.record["glyph_route"] = True
     cold = p.cold if cold is None else cold
@@ -268,10 +287,6 @@ def train(
             lr_warmup=p.warmup,
             steps_override=True,
         )
-    if line_mode:
-        p.record["line_mode"] = "run" if line_mode is True else line_mode
-    if rows_frozen:
-        p.record["rows_frozen"] = True
     print(
         f"rows: {len(p.idx)} ({len(vocabs)} vocabs) — {len(p.touched)} touched "
         f"by the captions, {len(p.idx - p.touched)} with no draw; {len(p.frozen)} "
@@ -285,6 +300,13 @@ def train(
     anima.requires_grad_(False)
     assert attached_pack_rows(anima), "no vocab pack attached to the DiT"
     tok, _ = ensure_text_strategies(checkpoints().text_encoder, vocab_pack=None)
+    pack = strategy_pack(tok)
+    assert pack is not None and pack.digest.startswith(RAW_PACK_SHA), (
+        f"attached pack {getattr(pack, 'name', None)} (sha "
+        f"{getattr(pack, 'digest', '')[:12]}…) is not the raw pack ({RAW_PACK_SHA}…): "
+        "rows are deltas over it and cold rows start at it — "
+        "ANIMA_VOCAB_PACK=models/vocab_packs/anima_cjk_vocab_pack"
+    )
     if row_cap == "t5":
         row_cap = float(anima.llm_adapter.embed.weight.float().norm(dim=1).mean())
     if cold:
@@ -295,7 +317,7 @@ def train(
         anima,
         device,
         p.idx,
-        strategy_pack(tok),
+        pack,
         warm=None if cold else ctx,
         init_anchor=INIT_ANCHOR,
         free_residual=FREE_RESIDUAL,
@@ -303,15 +325,18 @@ def train(
         touched=p.touched,
         frozen=p.frozen,
         context=ctx,
-        line_mode=line_mode,
-        rows_frozen=rows_frozen,
         row_cap=row_cap,
     )
     assert rows.n_rows == len(p.idx), (rows.n_rows, len(p.idx))
     steps, warmup, record = p.steps, p.warmup, p.record
+    spr = (
+        p.steps_per_row
+        if isinstance(p.steps_per_row, int)
+        else " + ".join(f"{n} × {k}" for k, n in p.steps_per_row.items())
+    )
     print(
         f"train {rc.name}: σ per item in {p.bands}, {rows.n_rows} rows, {steps} steps "
-        f"({p.steps_per_row}/row) × batch {BATCH}, lr {LR:g} {LR_DECAY} warmup {warmup} "
+        f"({spr}/row) × batch {BATCH}, lr {LR:g} {LR_DECAY} warmup {warmup} "
         f"({WARMUP_RATIO:g}), μ {INIT_ANCHOR:g}, box_share {BOX_SHARE} → cap "
         f"{BOX_SHARE_CAP} at {BOX_SHARE_GLYPHS} glyphs (log), grid_box {int(GRID_BOX)}, "
         + ("cold (pack rows)" if cold else f"warm {ctx}")

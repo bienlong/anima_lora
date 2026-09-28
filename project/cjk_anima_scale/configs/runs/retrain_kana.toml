@@ -1,4 +1,4 @@
-# retrain_kana — plan_retrain § 5: every kana single re-seeded cold from the
+# retrain_kana — retrain_experiments § 5: every kana single re-seeded cold from the
 # pack rows on lone + in-word (windows, routed) data. The seed's 80 hiragana,
 # 82 katakana (with ・ ー) and 8 punctuation singles, plus the 4 frequent kana
 # with a pack row and no seed row (ヴ 47, ヶ 13, ゔ 10, ヵ 5 lines in the

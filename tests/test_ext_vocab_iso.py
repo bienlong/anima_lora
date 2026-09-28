@@ -61,6 +61,15 @@ def test_iso_block_is_byte_deterministic_and_at_norm():
     assert off < 0.6
 
 
+def test_line_block_pack_is_refused():
+    """Line mode was removed 2026-09-28: a pack still carrying
+    ``mapping["line"]`` refuses to load rather than encode without it."""
+    mapping = {"line": {"src": [0, 4], "rows": [4, 8], "vec": [0.0] * 16}}
+    with pytest.raises(ValueError, match="line block"):
+        ev.materialize(torch.randn(4, 16), mapping)
+    assert ev.materialize(torch.randn(4, 16), {}).shape == (4, 16)
+
+
 def test_iso_spec_round_trip_and_materialize():
     spec = ev.IsoSpec(seed=3, n_rows=10, dim=16, norm=5.0, start=10)
     mapping = {"rows": 20, "iso": spec.to_json()}

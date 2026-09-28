@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""p2_route — plan_retrain.md § 4 C0: does a routed caption render what the spelled one does? (2026-09-28)
+"""p2_route — retrain_experiments.md § 4 C0: does a routed caption render what the spelled one does? (2026-09-28)
 
 Per-glyph routing (``ANIMA_VOCAB_GLYPH_ROUTE``, ``HybridT5Encoder.glyph_split``)
 sends every JA Qwen token to its glyphs' single rows on the T5 side; the Qwen
@@ -22,7 +22,7 @@ only, in either dir: this script sets the env var itself (never the submit
 shell — the daemon would carry it into every later job) and the read asserts
 every routed render carried one ext row per glyph.
 
-Decision (plan_retrain § 4): ``p1_mix`` routed ≈ spelled (≤ 1 edit within
+Decision (retrain_experiments § 4): ``p1_mix`` routed ≈ spelled (≤ 1 edit within
 noise of 11 / 16) → pieces stay out (§ 2 holds). Routed ≪ spelled → Qwen's
 word context interferes at render; the piece question reopens.
 
@@ -31,7 +31,7 @@ word context interferes at render; the piece question reopens.
 official 8 vs 5, contained 11 vs 6; the piece row 0; the seed rows 0 on all
 three. Routing holds; pieces stay out.
 
-C2 (plan_retrain § 4) widens it: ``C2_WORDS`` = こんにちは + 7 held-in words
+C2 (retrain_experiments § 4) widens it: ``C2_WORDS`` = こんにちは + 7 held-in words
 of donor glyphs, none repeated, sharing no 3-glyph substring with any donor
 word (Stage B's ``donor_words.json``), spelled **and** routed, on the floor,
 Stage B (warm), ``p1_cold``, ``p1_mix``, ``p1_lone`` (C1). Only the keys an

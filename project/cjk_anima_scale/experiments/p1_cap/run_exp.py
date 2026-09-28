@@ -29,7 +29,7 @@ pools' rng state, so they are Stage B's items (the data leg asserts it).
 Steps × (all items / in-word items) = ``MIX_STEPS`` / row, so the in-word
 items get p1_cold's exposure and the lone tier is the one change.
 
-After P1b, ``p1_lone`` (plan_retrain.md § 4 C1): the same 36 donors, cold,
+After P1b, ``p1_lone`` (retrain_experiments.md § 4 C1): the same 36 donors, cold,
 on the production table alone (``builder.TABLE``: the single kind is
 ``b0709`` only, 2 400 lone items, no in-word item), 90 steps / row. Is the
 in-word tier load-bearing, or does a cold start alone compose? Its data dir

@@ -27,6 +27,13 @@ experiments read the old stage-layout dirs (`data_<stage>_<tag>`) through
   (`ANIMA_VOCAB_PACK=models/vocab_packs/anima_cjk_vocab_pack`).
 - Never write into a `data_*` dir: sample records, keep sub-set
   latent/TE caches in the experiment's own output dir.
+- **Line mode was removed 2026-09-28** (`v_line` / `ExtDelta.line`,
+  `train(line_mode=, rows_frozen=)`, the pack's line block and
+  `bake_vocab_pack --line_from / --line_fold`). The scripts that trained or
+  read it — `f1_line/`, `f2a_line/`, `stage_i/`, `dense_a0/`,
+  `kanji_mode/`, `line_pieces/`, `count_twin/`, `doubling_box/` — stay as
+  the records of those reads and no longer run: `ExtDelta.load` refuses a
+  delta carrying `line`.
 - A verdict that closes (or opens) an idea is written into
   `../reports/` and the wake roll-up like any other read; this tree holds
   the machinery and the raw envelopes, not the line's memory.
@@ -138,20 +145,20 @@ experiments read the old stage-layout dirs (`data_<stage>_<tag>`) through
   `native_piece/`. **Ran 2026-09-27** → 4 glyphs need 270 (contained
   7 → 18 / 64), 3 glyphs stay at 90, 5 glyphs are not a budget problem
   (`../reports/long_b0_2026_09_27.md`; `budget.RULES`).
-- `p2_route/` — plan_retrain § 4 C0 / C2: per-glyph routing
+- `p2_route/` — retrain_experiments § 4 C0 / C2: per-glyph routing
   (`ANIMA_VOCAB_GLYPH_ROUTE`, set in-process) rendered against the spelled
   and the unrouted (piece-row) caption of the same word, same prompts ×
   seeds; routed renders only in each dir's `native_route/`. **Ran
   2026-09-28 (c0)** → `p1_mix` routed ≤ 1 edit 14 vs spelled 11 / 16, piece
-  row 0 (`../plan_retrain.md` § 4). **c2**: 8 held-in donor words on floor /
+  row 0 (`../retrain_experiments.md` § 4). **c2**: 8 held-in donor words on floor /
   Stage B / `p1_cold` / `p1_mix` / `p1_lone` → routed = spelled on every
   arm, `p1_mix` ≤ 1 edit 80 / 128 (floor 1, `p1_lone` 9).
-- `c3_kanji/` — plan_retrain § 4 C3: 36 kanji, cold, on `p1_mix`'s rows as
+- `c3_kanji/` — retrain_experiments § 4 C3: 36 kanji, cold, on `p1_mix`'s rows as
   context; windows of dialogue lines (2–4 glyphs, kanji-first draw) as the
   in-word tier, routed captions, `p1_mix`'s table, 225 steps / row.
   **Ran 2026-09-28** → words ≤ 1 edit 3 → 36 / 96; new kanji official
-  0 → 51 / 192, the seed's dense kanji 65 → 31 (`../plan_retrain.md` § 4).
-- `retrain_read/` — plan_retrain § 5: a retrain run's routed read on a
+  0 → 51 / 192, the seed's dense kanji 65 → 31 (`../retrain_experiments.md` § 4).
+- `retrain_read/` — retrain_experiments § 5: a retrain run's routed read on a
   smaller grid (4 prompts × 2 seeds = 8 renders / key), the floor and
   `p1_mix` from their caches of record (8 × 2 restricted to prompts < 4):
   the run's `read` words (en; C2's eight pair with the cached floor /
@@ -159,4 +166,4 @@ experiments read the old stage-layout dirs (`data_<stage>_<tag>`) through
   `native_spell/`) + 6 katakana (swap, floor rendered once into
   `native_r4_swap/`); ≈ 260 renders. **Ran 2026-09-28** (`kana`) → C2's
   words ≤ 1 edit 29 / 64 (`p1_mix` 34, floor 1), katakana words 20 / 32,
-  singles at the floor, `dup` 42 vs `p1_mix`'s 31 (`../plan_retrain.md` § 5).
+  singles at the floor, `dup` 42 vs `p1_mix`'s 31 (`../retrain_experiments.md` § 5).

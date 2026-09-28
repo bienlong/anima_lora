@@ -16,7 +16,10 @@ nothing here imports, paths into or configures from `../cjk_renderable_anima/`
   ledger`. No other flag.
 - `configs/runs/<run>.toml` — **the run, the whole live surface**: `vocabs` (a
   vocabs file under `assets/vocabs/`, one vocab per line — or a list of
-  `data.vocabs` specs) and `read` (the `native_sent` strings). Everything else
+  `data.vocabs` specs), `read` (the `native_sent` strings) and optional
+  `context` (a run whose merged rows replace the seed rows for this run —
+  warm-from, frozen context, merge base, and the singles its windows may
+  carry; `retrain_kanji_b*` chain on it). Everything else
   is a rule in code: the recipe table by kind + volume (`builder.TABLE`,
   `ITEMS_PER_VOCAB`), the trainer constants (`train.py`, each naming the
   report that set it), the seed rows (`paths.SEED_ROWS`), the rulers
@@ -46,7 +49,9 @@ nothing here imports, paths into or configures from `../cjk_renderable_anima/`
   The renderers, readers, scoring and sheets are **byte-faithful** to the
   reads of record — never clean them up; the only edits are path plumbing
   (`common/paths.py` `OUT` + `data_dir` / `arm_dir` = `--data_path` /
-  `--arm_path`, no tag fallback; `common/prompts.py` `TARGET_PROMPTS`), the
+  `--arm_path`, no tag fallback; `common/prompts.py` `TARGET_PROMPTS`), `data/inventory.py`'s opt-in
+  `qwen_pieces(char_rows=True)` (byte-split glyphs → their `char` rows; every
+  `cjk_scale` lookup passes it, the records ran without it), the
   trimmed `cli/` / `stages.py`, `probe/merge_tables.py` = just `row_text_map`
   + `row_texts`, and the prune. `src/` sits at the same depth as the source
   did, so `parents[N]` still lands on the repo root. `paths.bootstrap()` puts
@@ -85,10 +90,10 @@ nothing here imports, paths into or configures from `../cjk_renderable_anima/`
   (the whole seed rows, never inventory-filtered; `paths.floor_dir()`). Eval refuses
   a pre-merge vocabs-only `trained.pt` (no `seed_merged` key) — retrain.
 
-- A run's vocabs train from their seed row (`paths.SEED_ROWS`); every other row a
-  caption touches rides frozen at the seed; `trained.pt` carries them all (the
+- A run's vocabs train from their seed row (`paths.SEED_ROWS`, or the run's
+  `context` rows); every other row a caption touches rides frozen at the seed; `trained.pt` carries them all (the
   merged save). A vocab the seed lacks starts cold — the only case that prints.
-  **Singles always start cold** (`budget.COLD_KINDS`, plan_retrain): their
+  **Singles always start cold** (`budget.COLD_KINDS`, retrain_experiments): their
   in-word groups draw routed windows, and a data dir built with them
   (`build.json` `glyph_route`) is trained with `ANIMA_VOCAB_GLYPH_ROUTE=1`
   set in-process — never in the submit shell. `vocabs.json` in

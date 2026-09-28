@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import SEED, RunConfig, phrase_file
-from .paths import SEED_ROWS, data_dir
+from .paths import data_dir
 from .recipes import RECIPES, Pools, build_pools, missing_source
 from .windows import covers, kind_of, window
 
@@ -71,7 +71,7 @@ TABLE = (
     # single vocabs: stage0709 — glyph identity at ≥ 48 px, the bubble fit and
     # the 1×1–3×3 grids (band_b1 B.1, step1_0921; band law § 3). The lone
     # tier at share 0.5 beside the two in-word groups below: P1b's 1 : 2
-    # (plan_retrain § 3; C1: lone alone composes nothing)
+    # (retrain_experiments § 3; C1: lone alone composes nothing)
     Group(
         "b0709",
         "single",
@@ -94,7 +94,7 @@ TABLE = (
             ),
         ),
     ),
-    # single vocabs in words (plan_retrain § 3, P1b / C2 / C3): windows of
+    # single vocabs in words (retrain_experiments § 3, P1b / C2 / C3): windows of
     # dialogue lines at the piece tiers' px and bands (Stage B's
     # ``scene_spelled`` took the piece ``scene_piece`` params), routed
     # captions; b0507 carries the count tier at 0.3 (Stage B)
@@ -245,15 +245,51 @@ def vocab_kinds(pools: Pools) -> dict:
     }
 
 
-def plan_groups(kinds: dict, table: tuple = TABLE, budget: float = 1.0) -> list:
+def plan_groups(kinds: dict, table: tuple = TABLE, budget: float | dict = 1.0) -> list:
     """``[(group, n_items)]`` for the kinds present (the volume rule);
-    ``budget`` = the run's factor (``budget.run_factor``), items keep pace
-    with the steps."""
+    ``budget`` = the run's factor, or vocab → factor (``budget.run_budget``;
+    a vocab it lacks counts 1): a kind's items are ITEMS_PER_VOCAB × Σ its
+    vocabs' factors × the group's share, so items keep pace with the steps."""
+
+    def mass(vs) -> float:
+        if isinstance(budget, dict):
+            return sum(budget.get(v, 1.0) for v in vs)
+        return budget * len(vs)
+
     return [
-        (g, int(round(ITEMS_PER_VOCAB * budget * len(kinds[g.kind]) * g.share)))
+        (g, int(round(ITEMS_PER_VOCAB * mass(kinds[g.kind]) * g.share)))
         for g in table
         if kinds.get(g.kind)
     ]
+
+
+def _weigh(pool: list, w: dict) -> list:
+    """``pool`` with each vocab repeated by its draw weight (in place order;
+    all weights 1 → the pool itself)."""
+    if all(x == 1 for x in w.values()):
+        return pool
+    return [v for v in pool for _ in range(w.get(v, 1))]
+
+
+def context_singles(rc: RunConfig) -> set:
+    """The singles trained along ``rc``'s context chain (each context run's
+    ``vocabs.json``, else its vocabs file): cold-retrained rows a window may
+    carry beside the run's own. A glyph whose row is still the seed's stays
+    out of the windows (plan_retrain: that row is what the retrain replaces)."""
+    from data.vocabs import _list_file
+
+    from .merge import idx_source
+
+    out: set = set()
+    for run in rc.context_chain():
+        f = idx_source(run)
+        vs = (
+            json.loads(f.read_text(encoding="utf-8"))
+            if f.suffix == ".json"
+            else _list_file(str(f))
+        )
+        out |= {v for v in vs if len(v) == 1}
+    return out
 
 
 def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Path:
@@ -264,7 +300,7 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
     from data.inventory import qwen_pieces
     from data.stage import _ink_stats
 
-    from .budget import run_factor
+    from .budget import draw_weights, run_budget, seed_ids
 
     t0 = time.time()
     out = data_dir(rc.name)
@@ -272,12 +308,17 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
     workers = default_workers() if workers is None else max(1, int(workers))
     # the pools every group restarts from (piece vocabs bring the corpus lines)
     rng = random.Random(SEED)
-    pools = build_pools(rc.vocab_specs(), SEED_ROWS, phrase_file, rng)
+    ctx = rc.context_rows()
+    pools = build_pools(rc.vocab_specs(), ctx, phrase_file, rng)
     snap = (rng.getstate(), pools.shapes.rng.getstate())
     kinds = vocab_kinds(pools)
-    budget = run_factor(
-        [v for k in ("single", "piece", "multi") for v in kinds[k]], qwen_pieces()
+    budget = run_budget(
+        [v for k in ("single", "piece", "multi") for v in kinds[k]],
+        qwen_pieces(char_rows=True),
+        seed_ids(ctx),
     )
+    weights = draw_weights(budget)
+    pools.singles = _weigh(pools.singles, weights)
     groups = plan_groups(kinds, table, budget)
     assert groups, f"{rc.path}: no single or piece vocab — nothing to draw"
     names = [g.name for g, _n in groups]
@@ -285,7 +326,7 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
         f"{rc.path}: two kinds bring a group of one name ({names}) — split the run"
     )
     route = any(t.recipe == "scene_window" for g, _n in groups for t in g.tiers)
-    win = _windows(rc, pools, out) if route else {}
+    win = _windows(rc, pools, out, weights) if route else {}
     if kinds["multi"]:
         print(
             f"build: {len(kinds['multi'])} multi vocabs ({' '.join(kinds['multi'][:10])}"
@@ -298,7 +339,12 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
         + ", ".join(
             f"{g.name} σ {g.band[0]:.1f}–{g.band[1]:.1f} {n}" for g, n in groups
         )
-        + (f"; budget × {budget:g}" if budget != 1.0 else "")
+        + (
+            f"; budget {_budget_summary(budget)}"
+            if set(budget.values()) - {1.0}
+            else ""
+        )
+        + (f"; context {rc.context}" if rc.context else "")
         + f"; {workers} workers",
         flush=True,
     )
@@ -353,9 +399,11 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
         "vocab_specs": rc.vocab_specs(),
         "n_vocabs": {k: len(v) for k, v in kinds.items()},
         "seed": SEED,
-        "seed_rows": str(SEED_ROWS),
+        "seed_rows": str(ctx),
+        "context": rc.context,
         "items_per_vocab": ITEMS_PER_VOCAB,
-        "budget_factor": budget,
+        "budget_factor": _budget_summary(budget),
+        "draw_weights": _budget_summary(weights),
         "glyph_route": route,  # train.py routes the run's captions per glyph
         "windows": win,
         "min_overlap": MIN_OVERLAP,
@@ -393,26 +441,34 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
     return out
 
 
-def _windows(rc: RunConfig, pools: Pools, out: Path) -> dict:
+def _windows(rc: RunConfig, pools: Pools, out: Path, weights: dict) -> dict:
     """The windowed word pool on ``pools.windows`` (glyph → windows): the
-    run's letter singles over the dialogue lines, the read strings held out
+    run's letter singles, with the context chain's trained ones beside them
+    (``context_singles``), over the dialogue lines, the read strings held out
     by trigram, every window routed to its glyphs' single rows or dropped.
-    Writes ``windows.json``; returns the stats for ``build.json``."""
+    Keys are the run's glyphs only (a draw picks one of them, weighted by
+    ``weights`` on ``pools.window_keys``, then one of its windows); a
+    context glyph rides frozen at its context row. Writes ``windows.json``;
+    returns the stats for ``build.json``."""
     from .recipes import WINDOW_LEN, routed_windows, window_glyphs, window_pool
 
     glyphs = window_glyphs(pools.singles)
+    ctx = window_glyphs(context_singles(rc)) - glyphs
     lines = [
         ln.split("\t")[0]
         for ln in Path(phrase_file()).read_text(encoding="utf-8").splitlines()
     ]
-    ws = window_pool(glyphs, lines, rc.read, WINDOW_LEN)
-    ok, _ids = routed_windows(ws, glyphs)
+    ws = window_pool(glyphs | ctx, lines, rc.read, WINDOW_LEN)
+    ws = [w for w in ws if any(c in glyphs for c in w)]
+    ok, _ids = routed_windows(ws, glyphs | ctx)
     pools.windows = {g: [w for w in ok if g in w] for g in sorted(glyphs)}
     pools.windows = {g: v for g, v in pools.windows.items() if v}
+    pools.window_keys = _weigh(list(pools.windows), weights)
     n = sorted(len(v) for v in pools.windows.values())
     stats = {
         "length": list(WINDOW_LEN),
         "held": list(rc.read),
+        "context_glyphs": len(ctx),
         "n": len(ok),
         "dropped_by_encoding": len(ws) - len(ok),
         "glyphs": len(pools.windows),
@@ -432,6 +488,11 @@ def _windows(rc: RunConfig, pools: Pools, out: Path) -> dict:
         flush=True,
     )
     return stats
+
+
+def _budget_summary(f: dict) -> dict:
+    """factor → how many vocabs take it (``build.json``)."""
+    return {f"{x:g}": n for x, n in sorted(Counter(f.values()).items())}
 
 
 def _restart(pools: Pools, rng, snap) -> None:

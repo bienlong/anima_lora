@@ -52,7 +52,23 @@ marked `colab-cu128 branch`) and run `uv lock` again.
 ## Session and billing
 
 - A session opened in the browser shows as `[?]` in `colab sessions` (no
-  local token); `exec` / `ssh` cannot attach to it.
+  local record). The CLI has no adopt command, but the server's assignment
+  list carries the proxy token, so a local record can be added through the
+  CLI's own store (2026-09-28, `l4web`); `ssh -s <name>` then works on it
+  (and `exec` while its kernel is idle — see Shell and transfer):
+
+  ```bash
+  ~/.local/share/uv/tools/google-colab-cli/bin/python - <<'EOF'
+  from colab_cli.common import state, _apply_proxy_info
+  from colab_cli.state import SessionState
+  local = {s.endpoint for s in state.store.list().values()}
+  a, = [a for a in state.client.list_assignments() if a.endpoint not in local]
+  s = SessionState(name="<name>", token="", url="", endpoint=a.endpoint,
+                   variant="GPU", accelerator="<L4|G4|A100>")
+  _apply_proxy_info(s, a.runtime_proxy_info)
+  state.store.add(s)
+  EOF
+  ```
 - `colab usage` shows the balance and rate. L4 costs 1.54 CU/h, A100
   5.30 CU/h, G4 8.90 CU/h.
 - `colab stop -s <name>` when done. An idle VM keeps billing. Stopping loses
@@ -72,9 +88,10 @@ marked `colab-cu128 branch`) and run `uv lock` again.
   (`~/.config/colab-cli/history/g4runA.jsonl`). The disk goes with the VM,
   and so does every partial not yet pulled. `session_terminated: pruned`
   in the history is when a local `colab` call noticed, not when the VM died.
-  **Launch a run so the kernel stays busy** (§ Running: a blocking
-  `colab exec` cell). Keeping it alive by contacting it is the other way,
-  but that needs a client that never leaves a gap.
+  A busy kernel is **not** enough (`l4conn`, below): a blocking cell whose
+  client exited died in the same kind of gap. What kept Run A alive is a
+  client contacting the VM the whole run, and that client must never
+  leave a gap.
 
 ## Shell and transfer
 
@@ -87,15 +104,22 @@ marked `colab-cu128 branch`) and run `uv lock` again.
   ssh "${SSHO[@]}" root@colab '<cmd>'
   ```
 
-- **One ssh connection per runtime.** A second one fails (HTTP 429, exit
-  255) while the first is open, so an ssh that waits on a job blocks every
-  other ssh. `colab exec` does not count against it. It takes the code on
-  stdin, not as an argument:
+- **Check a run with a short ssh, not `colab exec`.** `colab exec` runs as
+  a kernel cell, so it queues behind a busy kernel and never returns: on
+  `l4web` (2026-09-28, a `train` running from a browser cell) two exec
+  checks hung past 120 s and 40 min, while ssh answered at once. Bound
+  every check and exit, reading the log, not waiting on the job:
 
   ```bash
-  echo "import subprocess;print(subprocess.run('tail -c 700 /content/train.log',shell=True,capture_output=True,text=True).stdout)" \
-    | colab exec -s <name>
+  timeout 90 ssh "${SSHO[@]}" -o ConnectTimeout=30 root@colab \
+    '. /content/env.sh; nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader;
+     grep "^{" /content/train_<run>.log | tail -1'
   ```
+
+- **One ssh connection per runtime.** A second one fails (HTTP 429, exit
+  255) while the first is open, so an ssh that waits on a job blocks every
+  other ssh, including the checks. Launch jobs detached (`nohup … &`) and
+  keep each check ssh short.
 
 - An ssh shell lacks the kernel's `LD_LIBRARY_PATH=/usr/lib64-nvidia`, and
   without it torch finds no driver. Start every ssh command with
@@ -184,21 +208,35 @@ the scene records store absolute paths.
   | C-k (270 steps/row) | ≈ 105 k | 22.6 h / 35 CU | 7.1 h / 38 CU | 4.1 h / 36 CU |
   | C-p | 73.1 k | 15.7 h / 24 CU | 4.9 h / 26 CU | 2.8 h / 25 CU |
 - The VM has no `/usr/bin/time`.
-- **Launch `train` as a blocking kernel cell**, so the kernel reads `BUSY`
-  for the whole run (§ Session and billing). Send this through
-  `colab exec`, and let the local client exit (or `timeout` it). Jupyter
-  keeps running the cell after the websocket closes. The kernel's env
-  already has the driver path.
+- **A blocking kernel cell does not keep the VM** (`l4conn`, L4,
+  2026-09-28). `train` was launched as a blocking `colab exec` cell:
 
   ```python
   import subprocess
   subprocess.run(['bash', '-c', cmd], stdout=open(log, 'w'), stderr=subprocess.STDOUT)
   ```
 
-  Untested as of 2026-09-27. Check it on the first long run: early on, leave
-  the session untouched for more than 30 min and confirm it survives. A
-  `Popen(..., start_new_session=True)` returns at once, and the kernel goes
-  `IDLE`, so it is not a launch for a long job.
+  The local client was `timeout`-ed after 60 s. The kernel read `BUSY` and
+  training ran (checked by ssh at 11:54 KST). Nothing contacted the VM
+  after that. At 12:34 the session was gone, with the disk and the log.
+  The balance drop (0.68 CU from creation at 11:46) puts the death at
+  ≈ 12:13, ≈ 20 min after the last contact: the same gap that killed
+  `longb*`. Whether the backend reclaims on no client or the cell died
+  with its websocket is unread. Either way, a long run needs a client
+  that contacts the VM every ≈ 60 s for its whole length, as Run A had.
+- **A browser-opened session kept its VM: passed** (`l4web`, L4,
+  2026-09-28, user). The same `l4conn` train, started from a cell in the
+  browser tab with a browser terminal running `watch -n 0.5 nvidia-smi`,
+  trained for 88 min (5 875 / 8 910 steps, 1.1 it/s) with the VM up
+  2 h 24 min, through a 35 min gap between local ssh checks (13:31 →
+  14:06 KST) — past the 22–25 min that killed `longb*`. Stopped
+  by hand at 14:22 KST (1.41 CU); the run was not finished or read.
+- **`colab ssh` on a dead session creates a new runtime.** The ssh
+  `ProxyCommand` (`colab ssh --proxy-mode -s <name>`) calls
+  `_auto_create_session` when the session is gone (`colab_cli/commands/ssh.py`):
+  it printed `Creating runtime` and opened a fresh one (a CPU runtime here,
+  stopped after 13 s). `colab status -s` only prints `not found`. A check
+  must look at `colab sessions` first and stop before any ssh.
 
 ## What comes back
 

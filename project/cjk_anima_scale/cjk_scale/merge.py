@@ -82,7 +82,7 @@ def merge(out: str, runs: list[str]) -> Path:
     assert len(set(runs)) == len(runs), f"a run named twice: {runs}"
     dst = run_dir(out)
     assert not (dst / "trained.pt").exists(), f"{dst} already holds rows"
-    tokq = qwen_pieces()
+    tokq = qwen_pieces(char_rows=True)
     sds, idxs = {}, {}
     for r in runs:
         run, partial = split_spec(r)
