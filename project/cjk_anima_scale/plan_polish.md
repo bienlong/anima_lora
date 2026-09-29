@@ -60,3 +60,62 @@ transposes), where users render.
    read at 4 k as at 1 k (words official 16 / 104 at 1 k)?
 
 Step 1 runs alone first; step 2 is sized on its keep count.
+
+## SFX and small text: a text-free canvas in the post-b3 polish (planned 2026-09-29)
+
+Not run; it waits for `retrain_kanji_b3` (the polish follows the chain,
+`plan_retrain` § 3; `experiments/polish_b1` is that polish's pilot on b1).
+
+**Why.** Every item the rows have seen is bubble-interior lettering: the
+base's bubble, the anchor erased with the ring-median fill, a dark upright
+glyph (`render_into_scene`: the anchor's ink or black / (30,30,30) /
+(60,40,40), no stroke), in the `reads_as / bubble_reads / saying / sign`
+frames, singles at ≥ 28 px. So the rows render only that: a white or
+lightly outlined bubble, near-black regular glyphs. SFX (ビクッ, ドキドキ)
+and small lettering never appear, and `Japanese SFX reads as "…"` (the
+clause `anime_tools` writes into real captions) never trained. The fix is
+the style mix, not the seed: identity is the chain's job, and SFX is mostly
+kana (COO: 70 % katakana, p50 2 glyphs), which `retrain_kana` already holds.
+
+**The canvas: a text-free pool `sfx` (new; user, 2026-09-29).** Not the EN-
+anchor pools: an erase over art (not a flat bubble) leaves a ring-median
+blot, and a bubble in every SFX item ties SFX to bubbles. The prompts carry
+no `english text`, no `speech bubble`, no text frame; they carry scene tags
+SFX goes with (`surprised`, `flinch`, `running`, `motion lines`, `heart`,
+…), and the negative carries `text, speech bubble, sound effects`. The
+judge is one rule: the text detector (`common.readers`) finds no box.
+Without the `english text` tag the base draws pseudo-Japanese (t4k:
+multi_box 57 / 200), so the rule is load-bearing. No anchor, no erase, no
+read-back: the whole canvas is the DiT's. A 512-tier pool for the 1 k
+polish; a 1024-tier one only if the 4 k step goes ahead.
+
+**The items: SFX pasted over the art.**
+- Strings: real SFX, from the sincos SFX reads (`dedupe_sfx` keys) and the
+  COO text frequencies (Manga109 strings never enter the repo), kept when
+  every glyph is a trained single (routed, as `scene_line` does), the read
+  words held out by trigram.
+- Render: the SFX faces of `assets/fonts/` (TanukiMagic, 破線G, 源真ゴシック
+  Bold, Corporate Logo); a thick contrasting stroke (white fill / black
+  stroke, or a colour fill / white stroke — `flat.py`'s jitter inks, stroke
+  2–6 scaled by px); tilt up to ± 20°, per-glyph scale and offset jitter,
+  diagonal runs; anywhere on the canvas.
+- Two sizes, banded by the law's px table (`band_experiment_results.md`
+  § 2): **large** 80–200 px at p0507 (> 128 px is outside the table,
+  unmeasured), **small** 16–24 px (ドキ, ぎゅっ beside a character) at
+  p0305.
+- Caption: the canvas's own tags + `sound effects` + `Japanese SFX reads as
+  "ビクッ".` — the real-caption clause, not a new frame.
+
+**The mix.** The SFX tiers take a large share of the polish's items (user,
+2026-09-29; the number is open), beside `polish_b1`'s bubble singles,
+windows and lines, which stay: the same row has to appear in both styles,
+so the caption carries the style and the row only the glyph.
+
+**Read.** `polish_b1`'s reads, plus an SFX read: SFX prompts on text-free
+canvases, read by `SfxReader` (`anime_tools.ocr.sfx`), against the
+unpolished rows.
+
+**Round 2 (optional).** Render SFX with the polished rows and keep only
+the `SfxReader`-exact ones (`future.md` § 3's filter). The text is then the
+DiT's own too, so the FM signal is small and the filter carries it (§ Why a
+self-generated canvas above); round 1's composites come first.

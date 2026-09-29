@@ -111,38 +111,49 @@ def decode_image(vae, latent, device):
 def encode_images(vae, files, device, size=None, out_file=None):
     """VAE latents (float32, CPU) for image files, 8 per VAE call; ``size``
     ``(W, H)`` resizes first. Pixels go in at the IMAGE_TRANSFORMS range.
+    The next chunks are decoded on a thread pool while the VAE runs (b2's
+    64 k encode, decode in line, ran at ≈ 44 img/s); the chunks and their
+    order are unchanged, so the latents are the same.
 
     ``out_file`` (a ``.npy`` path): the latents are written into that file
     chunk by chunk instead of being collected in RAM, ``<out_file>.done``
     holds the number of finished items so an interrupted encode resumes, and
     the result is the file mapped copy-on-write (pages are evictable)."""
+    from collections import deque
+    from concurrent.futures import ThreadPoolExecutor
+    from itertools import islice
+
     import numpy as np
     import torch
     from PIL import Image
 
-    def chunk(i):
+    def load(i):
         ims = [Image.open(f).convert("RGB") for f in files[i : i + 8]]
         px = np.stack([np.array(im.resize(size) if size else im) for im in ims])
-        px = (
-            torch.from_numpy(px)
-            .permute(0, 3, 1, 2)
-            .float()
-            .div(127.5)
-            .sub(1.0)
-            .to(device)
-        )
-        return vae.encode_pixels_to_latents(px).float().cpu()
+        return torch.from_numpy(px).permute(0, 3, 1, 2).float().div(127.5).sub(1.0)
+
+    def chunks(start):
+        """``(i, latents)`` per chunk from ``start``, 8 chunks decoded ahead."""
+        starts = iter(range(start, len(files), 8))
+        with ThreadPoolExecutor(4) as pool:
+            ahead = deque((i, pool.submit(load, i)) for i in islice(starts, 8))
+            while ahead:
+                i, fut = ahead.popleft()
+                for j in starts:
+                    ahead.append((j, pool.submit(load, j)))
+                    break
+                px = fut.result().to(device)
+                yield i, vae.encode_pixels_to_latents(px).float().cpu()
 
     if out_file is None:
         with torch.no_grad():
-            return torch.cat([chunk(i) for i in range(0, len(files), 8)])
+            return torch.cat([lat for _, lat in chunks(0)])
     out_file = Path(out_file)
     mark = out_file.with_suffix(out_file.suffix + ".done")
     done = int(mark.read_text()) if mark.exists() and out_file.exists() else 0
     mm = np.load(out_file, mmap_mode="r+") if done else None
     with torch.no_grad():
-        for i in range(done, len(files), 8):
-            lat = chunk(i)
+        for i, lat in chunks(done):
             if mm is None:
                 mm = np.lib.format.open_memmap(
                     out_file, "w+", np.float32, (len(files), *lat.shape[1:])
@@ -161,15 +172,21 @@ def encode_images(vae, files, device, size=None, out_file=None):
 class _TextEntry:
     """One cached caption, indexed like the tuple ``(prompt_embeds, attn_mask,
     t5_ids, t5_mask)``: row ``i`` of ``encode_captions``' four arrays (the
-    max-padded embeds are an mmapped file)."""
+    embeds are an mmapped file stored ``width`` positions long and zero-padded
+    back to ``pad_to`` here — the max-padded embeds the model expects)."""
 
-    __slots__ = ("arrs", "i")
+    __slots__ = ("arrs", "i", "pad")
 
-    def __init__(self, arrs, i):
-        self.arrs, self.i = arrs, i
+    def __init__(self, arrs, i, pad=0):
+        self.arrs, self.i, self.pad = arrs, i, pad
 
     def __getitem__(self, k):
-        return self.arrs[k][self.i]
+        row = self.arrs[k][self.i]
+        if k == 0 and self.pad:
+            import torch.nn.functional as F
+
+            row = F.pad(row, (0, 0, 0, self.pad))
+        return row
 
 
 _TE_REST = ("attn_mask", "t5_ids", "t5_mask")
@@ -202,8 +219,15 @@ def encode_captions(captions, device, cache_dir=None):
     t5_mask) on CPU.
 
     Everything is written to disk chunk by chunk as it is encoded — the
-    max-padded embeds as a raw bf16 file (a row is 1 MB), the three id / mask
-    arrays as ``.npy`` — and read back mapped, so nothing accumulates in RAM.
+    embeds as a raw bf16 file, the three id / mask arrays as ``.npy`` — and
+    read back mapped, so nothing accumulates in RAM. The captions are encoded
+    max-padded as before, but the pad positions come out 0 (right-padded, set
+    by ``encode_tokens``), so the file keeps only the longest caption's width
+    (b3's 64 k captions: ≤ 118 of 512 positions, 67 GB → 16 GB) and an entry
+    pads back to ``qwen3_max_length`` with zeros on read — bit-exact. (Encoding
+    each batch at its own length is not: 7 / 41 b3 captions moved, CPU,
+    2026-09-29.) A cache written before this (width 512) is read and resumed
+    as it is.
     ``cache_dir``: keep the files there (``meta.json`` holds the key and the
     number of finished captions; an interrupted encode resumes, a finished one
     is reused without loading the text encoder). Without it they go to a temp
@@ -235,6 +259,11 @@ def encode_captions(captions, device, cache_dir=None):
         from library.inference.text import ensure_text_strategies
 
         tok, enc = ensure_text_strategies(checkpoints().text_encoder, vocab_pack=None)
+        if "shape" not in meta:  # a fresh cache: the width is the longest caption
+            q = tok.qwen3_tokenizer(
+                uniq, truncation=True, max_length=tok.qwen3_max_length
+            )["attention_mask"]
+            meta["shape"] = [max(map(sum, q)), None]
         te = load_text_encoder(
             text_encoder=checkpoints().text_encoder, dtype=torch.bfloat16, device=device
         ).eval()
@@ -244,9 +273,11 @@ def encode_captions(captions, device, cache_dir=None):
                 pe, am, t5, t5m = enc.encode_tokens(
                     tok, [te], tok.tokenize(uniq[i : i + 16])
                 )
-                pe = pe.to(torch.bfloat16).cpu().contiguous()
-                shape = tuple(pe.shape[1:])
-                assert meta.setdefault("shape", list(shape)) == list(shape), shape
+                width, dim = meta["shape"]
+                meta["shape"][1] = dim = dim or pe.shape[2]
+                assert pe.shape[2] == dim and not pe[:, width:].any(), (pe.shape, width)
+                pe = pe[:, :width].to(torch.bfloat16).cpu().contiguous()
+                shape = (width, dim)
                 f.seek(i * shape[0] * shape[1] * 2)
                 f.write(memoryview(pe.view(torch.int16).numpy()))
                 others = [o.cpu().numpy() for o in (am, t5.long(), t5m)]
@@ -284,7 +315,8 @@ def encode_captions(captions, device, cache_dir=None):
     ]
     if cache_dir is None:  # mapped: the files go with the process
         shutil.rmtree(d, ignore_errors=True)
-    return {c: _TextEntry(arrs, i) for i, c in enumerate(uniq)}
+    pad = arrs[1].shape[1] - shape[0]  # the attn mask keeps qwen3_max_length
+    return {c: _TextEntry(arrs, i, pad) for i, c in enumerate(uniq)}
 
 
 def ext_ids_of(cache) -> set[int]:

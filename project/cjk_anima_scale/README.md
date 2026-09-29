@@ -51,7 +51,7 @@ A new read that changes a row of the law goes into
 | [`product_criteria.md`](product_criteria.md) | what a pack has to do to ship: the text axis and the page axis, dev set vs acceptance set |
 | [`colab.md`](colab.md) | running `data` / `train` on a Colab VM (G4 = the kanji batches) |
 | [`future.md`](future.md) | not planned: real images do not train rows, an OCR-reward update, token scaling as the last stage |
-| [`plan_polish.md`](plan_polish.md) | pilot only: `future.md` § 3 at 4 k tokens on a self-generated EN-anchor canvas |
+| [`plan_polish.md`](plan_polish.md) | pilot only: `future.md` § 3 at 4 k tokens on a self-generated EN-anchor canvas; planned: SFX / small text on a text-free canvas in the post-b3 polish |
 | `reports/` | the reads the live code cites: [`conflict_joint_2026_09_25.md`](reports/conflict_joint_2026_09_25.md) + [`grid_box_2026_09_25.md`](reports/grid_box_2026_09_25.md) (the trainer constants), [`piece_2026_09_25.md`](reports/piece_2026_09_25.md) (the piece ruler), [`long_b0_2026_09_27.md`](reports/long_b0_2026_09_27.md) (the long-piece budget row), [`stage_i_2026_09_26.md`](reports/stage_i_2026_09_26.md) (`b0709`, the cold-kanji budget), [`row_geometry_2026_09_28.md`](reports/row_geometry_2026_09_28.md) (the retrain rows in row space) |
 | `configs/runs/*.toml` | the runs — `{vocabs, read[, context]}`: `retrain_kana`, `retrain_kanji_b1..b3`; `run0923_micro` / `run0925_300f` stay for the tests |
 | `cjk_scale/` | the code (`windows` = the law, `config` = the run file + data pools, `recipes` + `builder` = data, `rows` + `train` = the fixed trainer, `budget`, `eval` = floor + trained on one sheet, `conflict`, `merge`, `ledger`); `scale.py` is the front door |
