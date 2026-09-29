@@ -49,6 +49,13 @@ A token with a glyph that has no single row keeps its own row. It is the
 cjk_anima_scale line's P2 (``project/cjk_anima_scale/retrain_experiments.md`` § 2).
 Off, the encoder is bit-identical to before.
 
+Encode fold (``mapping["fold"]``: one char → one char): applied to the text
+before routing and encoding, on the T5 side only (the Qwen text is the text
+as typed) — ``！`` → ``!``, ``~`` → ``～``, ``『`` → ``「`` … so variant forms
+share one row (``project/cjk_anima_scale/plan_retrain.md`` § 2c). Char for
+char, so every offset still indexes the typed text. A pack without it encodes
+bit-identically to before.
+
 Pure-CPU module — no model load; consumers pass embedding tensors in.
 """
 
@@ -305,6 +312,7 @@ _DIGEST_KEYS = (
     "route",
     "iso",
     "glyph_route",
+    "fold",
 )
 
 
@@ -656,6 +664,9 @@ class HybridT5Encoder:
     # (a glyph's row: the token that is exactly it, else its char row).
     # Tokens absent keep their own row; ``None`` when off.
     glyph_split: dict[int, list[int]] | None = None
+    # Encode fold (``mapping["fold"]``) as a ``str.translate`` table; ``None``
+    # when the pack has none.
+    fold: dict[int, str] | None = None
 
     @classmethod
     def from_mapping(
@@ -696,6 +707,11 @@ class HybridT5Encoder:
                 if any(is_ja_glyph(c) for c in core) and None not in rows:
                     if rows != [qwen_map[qid]]:
                         glyph_split[qid] = rows
+        fold = mapping.get("fold") or None
+        if fold:
+            bad = {k: v for k, v in fold.items() if len(k) != 1 or len(v) != 1}
+            assert not bad, f"pack fold maps one char to one char: {bad}"
+            fold = str.maketrans(fold)
         return cls(
             t5_tok=t5_tok,
             qwen_tok=qwen_tok,
@@ -706,7 +722,12 @@ class HybridT5Encoder:
             route=Route.from_mapping(mapping),
             iso_offset=(iso.start if (iso := IsoSpec.from_mapping(mapping)) else None),
             glyph_split=glyph_split,
+            fold=fold,
         )
+
+    def folded(self, text: str) -> str:
+        """``text`` under the pack's encode fold (unchanged without one)."""
+        return text.translate(self.fold) if self.fold else text
 
     @property
     def quote_routing(self) -> bool:
@@ -714,8 +735,8 @@ class HybridT5Encoder:
         return bool(self.iso_offset is not None and self.route and self.route.quotes)
 
     def routes(self, text: str) -> bool:
-        """Does any char of ``text`` leave the spiece path under this pack?"""
-        return (self.route or Route.default()).any(text)
+        """Does any char of ``text`` (folded) leave the spiece path under this pack?"""
+        return (self.route or Route.default()).any(self.folded(text))
 
     def _encode_cjk(
         self, span: str, offset: int = 0
@@ -838,6 +859,7 @@ class HybridT5Encoder:
         sides. Offsets cover the real tokens only — the trailing EOS gets a
         zero-width span at ``len(text)`` and padding gets none.
         """
+        text = self.folded(text)
         ids: list[int] = []
         offs: list[tuple[int, int]] = []
         base = 0

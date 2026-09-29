@@ -42,7 +42,8 @@ VOCABS_DIR = LINE / "assets" / "vocabs"
 # step1_0921z merge, 2 274 rows. Every run's vocabs train from it, every other
 # row rides frozen at it, and the floor arm is it whole.
 SEED_ROWS = OUT / "rows_step1_0921_merged" / "trained.pt"
-# the raw pack's digest (``VocabPack.digest``, the load log's ``sha 7b9fce0bb57b…``):
+# the raw pack's digest (``VocabPack.digest`` with the encode fold left out — the
+# load log said ``sha 7b9fce0bb57b…`` before the pack json took ``fold``):
 # the seed rows are deltas over it and a cold row starts at its rows, so the
 # trainer refuses any other attached pack (colab.md's pack row)
 RAW_PACK_SHA = "7b9fce0bb57b"

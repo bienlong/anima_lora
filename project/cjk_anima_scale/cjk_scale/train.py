@@ -247,6 +247,7 @@ def train(
     trained routed: ``ANIMA_VOCAB_GLYPH_ROUTE=1`` is set in-process before
     the TE cache (whose key carries it)."""
     from common.models import checkpoints, dit_forward, gen_args
+    from library.anima.ext_vocab import pack_digest
     from library.anima.vocab_pack import attached_pack_rows, strategy_pack
     from library.inference.generation import get_generation_settings
     from library.inference.models import load_dit_model
@@ -301,9 +302,16 @@ def train(
     assert attached_pack_rows(anima), "no vocab pack attached to the DiT"
     tok, _ = ensure_text_strategies(checkpoints().text_encoder, vocab_pack=None)
     pack = strategy_pack(tok)
-    assert pack is not None and pack.digest.startswith(RAW_PACK_SHA), (
-        f"attached pack {getattr(pack, 'name', None)} (sha "
-        f"{getattr(pack, 'digest', '')[:12]}…) is not the raw pack ({RAW_PACK_SHA}…): "
+    # the rows and ids must be the raw pack's; its encode fold (plan_retrain
+    # § 2c) is an encode rule on top, outside this check
+    raw_sha = (
+        pack_digest(pack.table, {k: v for k, v in pack.mapping.items() if k != "fold"})
+        if pack is not None
+        else ""
+    )
+    assert raw_sha.startswith(RAW_PACK_SHA), (
+        f"attached pack {getattr(pack, 'name', None)} (sha without fold "
+        f"{raw_sha[:12]}…) is not the raw pack ({RAW_PACK_SHA}…): "
         "rows are deltas over it and cold rows start at it — "
         "ANIMA_VOCAB_PACK=models/vocab_packs/anima_cjk_vocab_pack"
     )

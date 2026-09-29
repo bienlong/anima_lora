@@ -36,7 +36,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .config import SEED, RunConfig, phrase_file
+from .config import SEED, RunConfig, dataset_ja_lines, phrase_file
 from .paths import data_dir
 from .recipes import RECIPES, Pools, build_pools, missing_source
 from .windows import covers, kind_of, window
@@ -446,6 +446,8 @@ def _windows(rc: RunConfig, pools: Pools, out: Path, weights: dict) -> dict:
     run's letter singles, with the context chain's trained ones beside them
     (``context_singles``), over the dialogue lines, the read strings held out
     by trigram, every window routed to its glyphs' single rows or dropped.
+    The lines are the dialogue pool plus the training set's own JA text
+    (``dataset_ja_lines``, plan_retrain § 2b).
     Keys are the run's glyphs only (a draw picks one of them, weighted by
     ``weights`` on ``pools.window_keys``, then one of its windows); a
     context glyph rides frozen at its context row. Writes ``windows.json``;
@@ -458,7 +460,8 @@ def _windows(rc: RunConfig, pools: Pools, out: Path, weights: dict) -> dict:
         ln.split("\t")[0]
         for ln in Path(phrase_file()).read_text(encoding="utf-8").splitlines()
     ]
-    ws = window_pool(glyphs | ctx, lines, rc.read, WINDOW_LEN)
+    ds = dataset_ja_lines()
+    ws = window_pool(glyphs | ctx, lines + ds, rc.read, WINDOW_LEN)
     ws = [w for w in ws if any(c in glyphs for c in w)]
     ok, _ids = routed_windows(ws, glyphs | ctx)
     pools.windows = {g: [w for w in ok if g in w] for g in sorted(glyphs)}
@@ -469,6 +472,7 @@ def _windows(rc: RunConfig, pools: Pools, out: Path, weights: dict) -> dict:
         "length": list(WINDOW_LEN),
         "held": list(rc.read),
         "context_glyphs": len(ctx),
+        "lines": {"dialogue": len(lines), "dataset": len(ds)},
         "n": len(ok),
         "dropped_by_encoding": len(ws) - len(ok),
         "glyphs": len(pools.windows),

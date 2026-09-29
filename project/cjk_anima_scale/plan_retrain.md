@@ -10,9 +10,9 @@ word pool, checks C0–C3, `retrain_kana` and its read, the code that landed
 Where it stands: routing holds and pieces stay out (C0 / C2); the in-word
 tier is load-bearing (C1); windows compose kanji (C3); `retrain_kana`
 (174 cold kana rows) composes like `p1_mix` and holds the singles, so its
-rows are the kana half of the new seed. `retrain_kanji_b1` and `_b2` are
-trained (2026-09-28 / 29, unread), b3 is training; left: b4 (§ 2b, after
-its word pool) and the bake.
+rows are the kana half of the new seed. `retrain_kanji_b1` – `_b3` are
+trained (2026-09-28 – 30, unread), b4 is training (§ 2b, folded — § 2c);
+left: the bake.
 
 ## 1. The kanji budget — set 2026-09-28
 
@@ -69,7 +69,7 @@ equal steps (user: three, not four):
 |---|---|---|---|---|---|---|---|
 | `retrain_kanji_b1` | 329 (count 1 171 → 45) | 91 | 181 | 90.7 k | ≈ 10.9 h | ≈ 3.6 h | **trained** 2026-09-28 on a G4: 90 749 steps in 225.3 min (6.7 it/s); `trained.pt` pulled (md5 `db05c109…`), unread |
 | `retrain_kanji_b2` | 307 (45 → 18) | 22 | 119 | 90.3 k | ≈ 10.9 h | ≈ 3.6 h | **trained** 2026-09-29 locally: 90 319 steps, job 677 min (≈ 38 min of it TE + VAE caches), 2.35 it/s; unread |
-| `retrain_kanji_b3` | 305 (18 → 0) | 45 | 113 | 90.3 k | ≈ 10.9 h | ≈ 3.6 h | training locally since 2026-09-29 13:35 (ETA ≈ 00:30) |
+| `retrain_kanji_b3` | 305 (18 → 0) | 45 | 113 | 90.3 k | ≈ 10.9 h | ≈ 3.6 h | **trained** 2026-09-30 locally: 90 321 steps in 639.5 min (job 679 min), 2.35 it/s; unread; its data caches (img, TE, latents: 96 GB) deleted |
 
 Vocabs: `assets/vocabs/ja_retrain_kanji_b{1,2,3}.txt` (glyph, count, ink,
 seed row). Read: C3's six kanji-bearing words (held out of every batch's
@@ -112,23 +112,33 @@ Chinese — 9 strings, 45 kanji only they carry (吞 吃 說 …), dropped with
 14) 々 〇 (+ × ¥). ≈ 76 k steps at b2's 294 / row, ≈ 9 h local / ≈ 3 h G4;
 context b3. All 615 JA captions fully covered after it.
 
-`『』【】` take no row: they fold to `「」` (§ 2c). `× ¥` (and `※ ω`)
-are T5 `<unk>` today, not routed: they get a row only if `route.chars`
-takes them first.
+`『』【】` take no trained row: they fold to `「」` (§ 2c).
 
-**Before b4: the word pool.** 119 of the 252 kanji occur in `dialogue_2_10`
-at all, none in ≥ 20 lines, so the in-word tier (load-bearing, C1) has
-nothing to draw for most of b4. The pool's source has to widen first —
-Manga109-s `annotations/` re-extracted without the charset rule, or the
-JA OCR text (with the read words held out). Which one is open.
+**The word pool: the dialogue lines + the training set's JA text** (user
+2026-09-30, over Manga109-s re-extracted). `config.dataset_ja_lines` reads the
+text clauses live (`parse_caption`, `.variants.txt` excluded, JA by
+`config.is_ja_text`: 2 158 strings); `builder._windows` draws from both, the
+read held out by trigram as before. Over b4's 245 letter glyphs + the chain's
+singles: dialogue alone 118 glyphs with a window, the JA text alone 244, both
+245 — 10 408 windows, per glyph min 1, median 29.
 
-## 2c. The encode fold — after b3, before b4 (set 2026-09-29)
+**As built (2026-09-30): 247 rows**, `ja_retrain_kanji_b4.txt` — 244 kanji
+(189 ink ≥ 10) + `゙ 々 〇`, ≈ 76.8 k steps; ink of the new kanji pinned in
+`glyph_ink.json`. The count differs from the 252 above: the Chinese rule
+also needs ー out of the kana test (two Chinese lines end in ー) and
+`得 些 讓 點` as markers; 牬 镬 悅 are OCR misreads the rule keeps. `× ¥`
+do route (`route.chars`, sym rows 59023 / 59248 — so does `~`, row 58974,
+not T5 `<unk>`), but a sym row is not a single to `_resolve_singles`
+(`src/`, byte-faithful), so they are left out. Job: `data`
+`20260930-003547-c93123`.
+
+## 2c. The encode fold — after b3, before b4 (set 2026-09-29, landed 2026-09-30)
 
 The training set's text (OCR, `anime_tools` normalized) writes `! ? ~ …`
 half-width; the word pool and `retrain_kana` wrote `！ ？ ～ 〜`. Today
 `！ ？` route to their trained rows while `! ?` take the base's T5 rows,
-and half-width `~` is T5 `<unk>` (the one row every unknown char shares;
-Qwen still sees `~`, the adapter's query slot does not). The fold unifies
+and half-width `~` routes to an untrained sym row (58974; `～` is 87,
+trained). The fold unifies
 them **at encode**, on the T5 side only (Qwen reads the text as typed),
 before routing — so `routes()` sees the folded text too:
 
@@ -136,7 +146,7 @@ before routing — so `routes()` sees the folded text too:
 |---|---|---|
 | `！ ？` | `! ?` (base T5 rows) | the house text is half-width; the base knows them |
 | `~` (U+007E) | `～` (U+FF5E, trained) | half-width `~` has no row; `～` was trained in `retrain_kana` (not by design) |
-| `『 【` / `』 】` | `「` / `」` (trained) | no rows of their own |
+| `『 【` / `』 】` | `「` / `」` (trained) | their rows (386, 14, …) are the seed's, never retrained |
 
 `〜` (U+301C, trained) stays as it is.
 
@@ -146,6 +156,13 @@ ComfyUI node's vendored `ext_vocab` needs the same code (`make vendor-sync`,
 node release) — a node without it ignores the key and encodes unfolded, as
 3.11.0 did with `glyph_route`. The pack json changes, so every TE cache keyed
 on it (`_te_key`) re-encodes; b1–b3 were trained unfolded, b4 trains folded.
+Landed: `HybridT5Encoder.fold` (`folded()` in `routes()` and
+`encode_aligned()`; one char → one char, so offsets index the typed text),
+`fold` in `_DIGEST_KEYS`, `tests/test_ext_vocab_fold.py`; the key is in
+`models/vocab_packs/anima_cjk_vocab_pack.json` (digest `757f6a07a901…`).
+`train.py`'s raw-pack guard reads the digest with `fold` left out
+(`7b9fce0bb57b…`, unchanged). A Colab VM needs the new pack json. The node's
+vendored copy is not synced yet.
 Their `！ ？` rows stay in the pack, reached by nothing once the fold is on.
 
 **Later (not before b4): the canonical forms.** All tildes (`～ 〜 ~`) → `~`;

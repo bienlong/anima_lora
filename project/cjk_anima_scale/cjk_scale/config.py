@@ -44,6 +44,15 @@ SEED = 0  # the data draw and the trainer seed (every run of record used 0)
 # vocabs only); MANGA109S comes from the repo's .env, the path never enters the repo
 PHRASE_FILE = "$MANGA109S/derived/dialogue_2_10.tsv"
 
+# the training set's own text (plan_retrain § 2b, user 2026-09-30): the text
+# clauses of the revised captions, JA only — the window pool's second source
+# beside the dialogue lines (dialogue_2_10 is charset-filtered: 顔 姉 満 … occur
+# 0 times in it). Read live; the dataset never enters the repo.
+DATASET_CAPTIONS = "post_image_dataset/resized"
+# a kana-less string with one of these is Chinese (你 是 很 …, plus the
+# traditional forms the OCR text carries)
+ZH_MARKERS = frozenset("你是很呢啊的了吗么这那们她他说吃吞得些讓點")
+
 DATA = {
     "scenes": "s1,s1w,sl1w,ja_comic",
     "scene_one_bubble": "ja_comic",
@@ -133,6 +142,53 @@ def phrase_file() -> str:
     if "$" in p:
         raise SystemExit(f"{PHRASE_FILE}: env var unset — put MANGA109S=<root> in .env")
     return os.path.expanduser(p)
+
+
+def is_ja_text(s: str) -> bool:
+    """plan_retrain § 2b's rule: a string with a kana (ー aside) is Japanese;
+    a kana-less one is not if it holds hangul, a glyph outside JIS X 0208,
+    or a Chinese function word (``ZH_MARKERS``)."""
+    import unicodedata
+
+    def kana(c):
+        return c != "ー" and "぀" <= c <= "ヿ"
+
+    def jis(c):
+        try:
+            c.encode("iso2022_jp")
+            return True
+        except UnicodeEncodeError:
+            return False
+
+    if any(kana(c) for c in s):
+        return True
+    return not any(
+        "가" <= c <= "힯"
+        or c in ZH_MARKERS
+        or (unicodedata.category(c) == "Lo" and not jis(c))
+        for c in s
+    )
+
+
+def dataset_ja_lines() -> list[str]:
+    """The JA strings of the training set's text clauses (``Japanese text /
+    SFX reads as``), ``.variants.txt`` excluded, sorted and deduplicated."""
+    from anime_tools.captions.position_clauses import TEXT_PREFIXES, parse_caption
+
+    from library.env import resolve_under_home
+
+    out: set = set()
+    for f in resolve_under_home(DATASET_CAPTIONS).rglob("*.txt"):
+        if f.name.endswith(".variants.txt"):
+            continue
+        for cl in parse_caption(f.read_text(encoding="utf-8")).clauses:
+            if cl.prefix not in TEXT_PREFIXES:
+                continue
+            for t in cl.tags:
+                s = t.strip().rstrip(".").strip('"')
+                if s and is_ja_text(s):
+                    out.add(s)
+    return sorted(out)
 
 
 def load_run(run: str) -> RunConfig:
