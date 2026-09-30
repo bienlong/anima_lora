@@ -71,8 +71,9 @@ G4, b2 and b3 locally (all unread); b4 (the training set's JA tail, the
 first under the encode fold) trained 2026-09-30 and its rows are the new
 seed, `output/cjk_anima_scale/seed_retrain_0930/` (`paths.SEED_ROWS`; the
 old one is `SEED_ROWS_0921`). Its floor is in `floor_score.md` (acceptance
-8 → 37 / 80) and it is baked with routing on
-(`models/vocab_packs/anima_cjk_vocab_pack_seed_retrain_0930/`). Details and numbers: `plan_retrain.md`, `retrain_experiments.md`.
+8 → 37 / 80), and it is baked with routing on and published as
+`anima_cjk_vocab_pack_preview4` (Hub `sorryhyun/anima-vocab-pack-cjk`,
+ComfyUI Adapter node ≥ 3.13.0). Details and numbers: `plan_retrain.md`, `retrain_experiments.md`.
 
 ## Running a run
 

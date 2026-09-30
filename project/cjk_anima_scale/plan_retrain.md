@@ -12,8 +12,8 @@ tier is load-bearing (C1); windows compose kanji (C3); `retrain_kana`
 (174 cold kana rows) composes like `p1_mix` and holds the singles, so its
 rows are the kana half of the new seed. `retrain_kanji_b1` – `_b3` are
 trained (2026-09-28 – 30, unread), b4 trained 2026-09-30 (§ 2b, folded —
-§ 2c) and is the new seed (§ 3), floored and baked 2026-09-30; left: the
-node's `fold` sync and a publish.
+§ 2c) and is the new seed (§ 3), floored, baked and published as
+`preview4` 2026-09-30 (node 3.13.0).
 
 ## 1. The kanji budget — set 2026-09-28
 
@@ -162,8 +162,9 @@ Landed: `HybridT5Encoder.fold` (`folded()` in `routes()` and
 `fold` in `_DIGEST_KEYS`, `tests/test_ext_vocab_fold.py`; the key is in
 `models/vocab_packs/anima_cjk_vocab_pack.json` (digest `757f6a07a901…`).
 `train.py`'s raw-pack guard reads the digest with `fold` left out
-(`7b9fce0bb57b…`, unchanged). A Colab VM needs the new pack json. The node's
-vendored copy is not synced yet.
+(`7b9fce0bb57b…`, unchanged). A Colab VM needs the new pack json. The node
+carries it from 3.13.0 (2026-09-30: vendored, and its own t5 loop folds
+each weighted segment — its stream matches `encode_aligned` on `！？~『』【】`).
 Their `！ ？` rows stay in the pack, reached by nothing once the fold is on.
 
 **Later (not before b4): the canonical forms.** All tildes (`～ 〜 ~`) → `~`;
@@ -200,8 +201,11 @@ before `～ 〜` can fold onto it.
    `models/vocab_packs/anima_cjk_vocab_pack_seed_retrain_0930/`
    (`bake_vocab_pack.py --glyph_route`, base = the raw pack with `fold`;
    baked sha `eee7fec51835…`; the 2 683 rows = raw + Δ exactly, every other
-   row byte-identical). Not published; the node's vendored `ext_vocab`
-   still lacks `fold` (§ 2c).
+   row byte-identical). **Published 2026-09-30** as
+   `anima_cjk_vocab_pack_preview4` on `sorryhyun/anima-vocab-pack-cjk`
+   (Hub commit `2225d806`, same sha; `_trained.json` lists the 1 362
+   trained singles; README points at it), with the ComfyUI Adapter node
+   **3.13.0** (the `fold`; 3.12.0, routing, was already on the registry).
 
 ## 4. Open
 
