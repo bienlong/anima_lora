@@ -16,7 +16,7 @@ Beside the runs: the scene pools (``scenes_<tag>``), the EN reference cache
 (``native_enref``), the seed rows (``seed_retrain_0930`` — the floor arm:
 every run's floor reads are cached flat in it; ``rows_step1_0921_merged`` the
 old seed's) and the old stage-layout records
-(``{data,rows}_<stage>_<tag>``, readable through ``legacy_*``).
+(``{data,rows}_<stage>_<tag>``, read-only).
 
 The stage packages (``common`` / ``data`` / ``train`` / ``eval`` /
 ``scenes``, ``cli``, ``stages``) are this line's own ``src/`` — top-level
@@ -107,13 +107,16 @@ def floor_dir(seed: Path | None = None) -> Path:
     return OUT / (seed or SEED_ROWS).parent.name
 
 
-# ---------------------------------------------------------------------------
-# the stage layout before 2026-09-25 — records only (experiments/ read them)
+def load_experiment(name: str):
+    """``experiments/<name>/run_exp.py`` as a module (``<name>_exp``), for an
+    experiment that builds on another's builders or reads. Executed fresh on
+    every call, never cached in ``sys.modules`` — its import-time side
+    effects (``pin_old_seed``) run again, as each experiment's own copy did."""
+    import importlib.util
 
-
-def legacy_data_dir(stage: str, tag: str) -> Path:
-    return OUT / f"data_{stage}_{tag}"
-
-
-def legacy_arm_dir(stage: str, tag: str) -> Path:
-    return OUT / f"rows_{stage}_{tag}"
+    spec = importlib.util.spec_from_file_location(
+        f"{name}_exp", LINE / "experiments" / name / "run_exp.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod

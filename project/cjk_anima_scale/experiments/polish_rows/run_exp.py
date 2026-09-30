@@ -47,7 +47,6 @@ EN px per scene and the plan, writes nothing.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
 import statistics
@@ -60,20 +59,14 @@ os.environ.setdefault("ANIMA_VOCAB_PACK", "models/vocab_packs/anima_cjk_vocab_pa
 
 LINE = Path(__file__).resolve().parents[2]  # project/cjk_anima_scale
 sys.path.insert(0, str(LINE))
-from cjk_scale.paths import OUT, bootstrap  # noqa: E402
+from cjk_scale.paths import OUT, bootstrap, load_experiment  # noqa: E402
 
 bootstrap()
 from bench._common import make_run_dir, write_result  # noqa: E402
+from cjk_scale import reads as scoring  # noqa: E402
 
 
-def _load(name: str, rel: str):
-    spec = importlib.util.spec_from_file_location(name, LINE / "experiments" / rel)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-RK = _load("real_kana_exp", "real_kana/run_exp.py")
+RK = load_experiment("real_kana")
 
 EXP = OUT / "experiments"
 NAME = "polish_t4k"
@@ -232,12 +225,12 @@ def main():
         rc = rc_of(NAME)
         arm, base = EXP / NAME, OUT / BASE
         words, singles = list(rc.read), list(RK.RR.HIRA + RK.RR.KATA)
-        SB, RR = RK.SB, RK.RR
+        RR = RK.RR
         out = metrics.setdefault("reads", {})
         h = {
             "target": (
                 RK.read_target(rc, arm, data),
-                SB.hits(base / "target" / "native_reads.json", ["はい", "こんにちは"], "verbatim"),
+                scoring.hits(base / "target" / "native_reads.json", ["はい", "こんにちは"], "verbatim"),
             ),
             "words": (
                 RR.grid_hits(RR.ensure(rc, arm, words, "en"), words, "en"),
@@ -250,10 +243,10 @@ def main():
         }
         for grp, (mine, ref) in h.items():
             print(f"{NAME} · {grp}:", flush=True)
-            out.setdefault(NAME, {})[grp] = SB.tally(mine)
+            out.setdefault(NAME, {})[grp] = scoring.tally(mine)
             print(f"{BASE} · {grp}:", flush=True)
-            out.setdefault(BASE, {})[grp] = SB.tally(ref)
-            pr = SB.paired(mine, ref)
+            out.setdefault(BASE, {})[grp] = scoring.tally(ref)
+            pr = scoring.paired(mine, ref)
             out[NAME][f"{grp}_paired_vs_{BASE}"] = pr
             print(f"  {grp} {NAME} vs {BASE} {pr}", flush=True)
     write_result(

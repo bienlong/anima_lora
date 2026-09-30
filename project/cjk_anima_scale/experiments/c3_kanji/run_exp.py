@@ -48,7 +48,6 @@ value but 225 trains into ``c3_kanji_<steps>`` and reads the 225 arm
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
 import re
@@ -60,23 +59,17 @@ os.environ["ANIMA_VOCAB_GLYPH_ROUTE"] = "1"  # every leg is routed (docstring)
 
 LINE = Path(__file__).resolve().parents[2]  # project/cjk_anima_scale
 sys.path.insert(0, str(LINE))
-from cjk_scale.paths import OUT, bootstrap, pin_old_seed, floor_dir  # noqa: E402
+from cjk_scale.paths import OUT, bootstrap, pin_old_seed, floor_dir, load_experiment  # noqa: E402
 
 bootstrap()
 pin_old_seed()  # the retrain reads against the old seed's floor of record
 from bench._common import make_run_dir, write_result  # noqa: E402
+from cjk_scale import reads as scoring  # noqa: E402
 
 
-def _load(name: str, rel: str):
-    spec = importlib.util.spec_from_file_location(name, LINE / "experiments" / rel)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-SB = _load("stage_b_exp", "stage_b/run_exp.py")
-P1 = _load("p1_cap_exp", "p1_cap/run_exp.py")
-P2 = _load("p2_route_exp", "p2_route/run_exp.py")
+SB = load_experiment("stage_b")
+P1 = load_experiment("p1_cap")
+P2 = load_experiment("p2_route")
 
 EXP = OUT / "experiments"
 NAME = "c3_kanji"
@@ -265,9 +258,9 @@ def read_singles(arm: Path | None) -> dict:
         h = {}
         for tag, chars in FLOOR_SINGLES.items():
             f = floor_dir() / f"native_{tag}" / "native_reads.json"
-            h.update(SB.hits(f, list(chars), "en"))
+            h.update(scoring.hits(f, list(chars), "en"))
         return h
-    return SB.hits(P2.ensure_reads(arm, TAG, keys), keys, "en")
+    return scoring.hits(P2.ensure_reads(arm, TAG, keys), keys, "en")
 
 
 def read_words(arm: Path | None) -> dict:
@@ -276,7 +269,7 @@ def read_words(arm: Path | None) -> dict:
     for m in json.loads(rp.read_text("utf-8")):
         if m["text"] in words:
             assert m["ext_rows"] == len(m["text"]), (m["file"], m["ext_rows"])
-    return SB.hits(rp, words, "en")
+    return scoring.hits(rp, words, "en")
 
 
 # ----------------------------------------------------------------------------
@@ -355,30 +348,30 @@ def main():
         out = metrics.setdefault("reads", {})
         for a, h in sh.items():
             print(f"{a} · singles:", flush=True)
-            out.setdefault(a, {})["singles"] = SB.tally(h)
-        pr = SB.paired(sh[name], sh["floor"])
+            out.setdefault(a, {})["singles"] = scoring.tally(h)
+        pr = scoring.paired(sh[name], sh["floor"])
         out[name]["singles_paired_vs_floor"] = pr
         print(f"  singles {name} vs floor {pr}", flush=True)
         for grp, chars in (("stagei", SI), ("densea0", DA)):
             sub = {k: v for k, v in sh[name].items() if k[0] in chars}
             fsub = {k: v for k, v in sh["floor"].items() if k[0] in chars}
-            pr = SB.paired(sub, fsub)
+            pr = scoring.paired(sub, fsub)
             out[name][f"singles_{grp}_paired_vs_floor"] = pr
             print(f"  singles ({grp}) {name} vs floor {pr}", flush=True)
         for a, h in wh.items():
             print(f"{a} · words (routed):", flush=True)
-            out.setdefault(a, {})["words"] = SB.tally(h)
+            out.setdefault(a, {})["words"] = scoring.tally(h)
         pairs = [(name, "floor"), (name, "p1_mix"), ("p1_mix", "floor")]
         if name != NAME:
             pairs.append((name, NAME))
             for grp, chars in (("stagei", SI), ("densea0", DA)):
                 sub = {k: v for k, v in sh[name].items() if k[0] in chars}
                 rsub = {k: v for k, v in sh[NAME].items() if k[0] in chars}
-                pr = SB.paired(sub, rsub)
+                pr = scoring.paired(sub, rsub)
                 out[name][f"singles_{grp}_paired_vs_{NAME}"] = pr
                 print(f"  singles ({grp}) {name} vs {NAME} {pr}", flush=True)
         for a, ref in pairs:
-            pr = SB.paired(wh[a], wh[ref])
+            pr = scoring.paired(wh[a], wh[ref])
             out[a][f"words_paired_vs_{ref}"] = pr
             print(f"  words {a} vs {ref} {pr}", flush=True)
     write_result(

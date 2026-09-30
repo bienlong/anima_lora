@@ -23,7 +23,6 @@ run's kanji, paired with the run itself as well.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
 import shutil
@@ -37,21 +36,14 @@ os.environ.setdefault("ANIMA_VOCAB_PACK", "models/vocab_packs/anima_cjk_vocab_pa
 
 LINE = Path(__file__).resolve().parents[2]  # project/cjk_anima_scale
 sys.path.insert(0, str(LINE))
-from cjk_scale.paths import OUT, bootstrap, pin_old_seed, floor_dir  # noqa: E402
+from cjk_scale.paths import OUT, bootstrap, pin_old_seed, floor_dir, load_experiment  # noqa: E402
 
 bootstrap()
 pin_old_seed()  # the retrain reads against the old seed's floor of record
 from bench._common import make_run_dir, write_result  # noqa: E402
+from cjk_scale import reads as scoring  # noqa: E402
 
 
-def _load(name: str, rel: str):
-    spec = importlib.util.spec_from_file_location(name, LINE / "experiments" / rel)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-SB = _load("stage_b_exp", "stage_b/run_exp.py")
 
 N_PROMPTS = 2
 SEEDS = 2
@@ -83,7 +75,7 @@ def words_read(args, rc, name: str, arm: Path) -> None:
     """``--words``: C3's six kanji-bearing words (routed, en, C3's 8 × 2 grid)
     on the arm, paired with the floor's, ``c3_kanji_450``'s and (an
     experiment arm) the run's reads."""
-    C3 = _load("c3_kanji_exp", "c3_kanji/run_exp.py")
+    C3 = load_experiment("c3_kanji")
     arms = {"floor": None, "c3_kanji_450": C3.EXP / "c3_kanji_450"}
     if name != rc.name:
         arms[rc.name] = OUT / rc.name
@@ -104,9 +96,9 @@ def words_read(args, rc, name: str, arm: Path) -> None:
     metrics: dict = {"words": list(C3.READ_WORDS), "reads": {}}
     for a, h in wh.items():
         print(f"{a} · words (routed):", flush=True)
-        metrics["reads"][a] = SB.tally(h)
+        metrics["reads"][a] = scoring.tally(h)
     for ref in [a for a in arms if a != name]:
-        pr = SB.paired(wh[name], wh[ref])
+        pr = scoring.paired(wh[name], wh[ref])
         metrics["reads"][name][f"paired_vs_{ref}"] = pr
         print(f"  words {name} vs {ref} {pr}", flush=True)
     write_result(
@@ -194,27 +186,27 @@ def main():
 
     ffile = run_dir / "floor_reads.json"
     ffile.write_text(json.dumps(frecs, ensure_ascii=False), encoding="utf-8")
-    mine = grid(SB.hits(dst, chars, CLAUSE))
-    ref = grid(SB.hits(ffile, chars, CLAUSE))
+    mine = grid(scoring.hits(dst, chars, CLAUSE))
+    ref = grid(scoring.hits(ffile, chars, CLAUSE))
     print(f"{name} · singles ({CLAUSE}, {N_PROMPTS}×{SEEDS}):", flush=True)
-    t_mine = SB.tally(mine)
+    t_mine = scoring.tally(mine)
     print("floor:", flush=True)
-    t_ref = SB.tally(ref)
+    t_ref = scoring.tally(ref)
     by_cache = {
-        c: SB.paired(
+        c: scoring.paired(
             {k: v for k, v in mine.items() if src[k[0]] == c},
             {k: v for k, v in ref.items() if src[k[0]] == c},
         )
         for c in FLOOR_CACHES
     }
-    pr = SB.paired(mine, ref)
+    pr = scoring.paired(mine, ref)
     print(f"  paired {name} vs floor {pr}", flush=True)
     for c, v in by_cache.items():
         print(f"    {c}: {v}", flush=True)
     vs_run = None
     if name != rc.name:  # the run's own renders of the same grid
         rf = OUT / rc.name / f"native_{SUB}" / "native_reads.json"
-        vs_run = SB.paired(mine, grid(SB.hits(rf, chars, CLAUSE)))
+        vs_run = scoring.paired(mine, grid(scoring.hits(rf, chars, CLAUSE)))
         print(f"  paired {name} vs {rc.name} {vs_run}", flush=True)
     write_result(
         run_dir,

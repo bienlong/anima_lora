@@ -12,7 +12,7 @@ one loss, one trainer, σ per item from the band law (``../plan.md``).
     eval       floor + trained arms on the automatic rulers → sheet.png + reads.json
     conflict   do the run's band groups pull a row the same way (no training)
     ledger     runs/ledger.jsonl
-    legacy     the pre-2026-09-25 stage configs, for the experiments that read old dirs
+    reads      the experiments' per-render scoring + McNemar pairing (Stage B's)
 
 The stage packages (``common`` / ``data`` / ``train`` / ``eval`` /
 ``scenes``, ``cli``, ``stages``) are the line's own ``../src/`` — vendored

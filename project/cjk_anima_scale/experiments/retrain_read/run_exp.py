@@ -25,7 +25,6 @@ Scoring is Stage B's per render, paired (McNemar) on shared prompt × seed.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import os
 import sys
 from pathlib import Path
@@ -34,22 +33,15 @@ os.environ["ANIMA_VOCAB_GLYPH_ROUTE"] = "1"  # every render is routed (docstring
 
 LINE = Path(__file__).resolve().parents[2]  # project/cjk_anima_scale
 sys.path.insert(0, str(LINE))
-from cjk_scale.paths import OUT, bootstrap, pin_old_seed, floor_dir  # noqa: E402
+from cjk_scale.paths import OUT, bootstrap, pin_old_seed, floor_dir, load_experiment  # noqa: E402
 
 bootstrap()
 pin_old_seed()  # the retrain reads against the old seed's floor of record
 from bench._common import make_run_dir, write_result  # noqa: E402
+from cjk_scale import reads as scoring  # noqa: E402
 
 
-def _load(name: str, rel: str):
-    spec = importlib.util.spec_from_file_location(name, LINE / "experiments" / rel)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-SB = _load("stage_b_exp", "stage_b/run_exp.py")
-P2 = _load("p2_route_exp", "p2_route/run_exp.py")
+P2 = load_experiment("p2_route")
 
 N_PROMPTS = 4
 SEEDS = 2
@@ -114,7 +106,7 @@ def grid_hits(path: Path, keys: list[str], clause: str) -> dict:
     for m in json.loads(path.read_text("utf-8")):
         if m["text"] in keys and len(m["text"]) > 1 and m["clause"] == clause:
             assert m["ext_rows"] == len(m["text"]), (m["file"], m["ext_rows"])
-    h = SB.hits(path, keys, clause)
+    h = scoring.hits(path, keys, clause)
     h = {k: v for k, v in h.items() if k[2] < N_PROMPTS and k[3] < SEEDS}
     for t in keys:
         n = sum(k[0] == t for k in h)
@@ -180,7 +172,7 @@ def main():
 
     def show(tag: str, h: dict) -> dict:
         print(f"{tag}:", flush=True)
-        return SB.tally(h)
+        return scoring.tally(h)
 
     hira_w = [w for w in words if all("ぁ" <= c <= "ゖ" for c in w)]
     kata_w = [w for w in words if w not in hira_w]
@@ -216,11 +208,11 @@ def main():
     )
     c2_run = {k: v for k, v in run_w.items() if k[0] in c2}
     for a, h in cached.items():
-        pr = SB.paired(c2_run, h)
+        pr = scoring.paired(c2_run, h)
         R[rc.name][f"words_c2_paired_vs_{a}"] = pr
         print(f"  C2 words {rc.name} vs {a} {pr}", flush=True)
     for grp, chars in (("hira", HIRA), ("kata", KATA)):
-        pr = SB.paired(
+        pr = scoring.paired(
             {k: v for k, v in run_s.items() if k[0] in chars},
             {k: v for k, v in fl_s.items() if k[0] in chars},
         )

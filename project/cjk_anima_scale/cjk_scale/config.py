@@ -20,8 +20,7 @@ context); a vocab the seed lacks starts cold.
 The pre-collapse configs are records: the stage-shaped run files stay in
 ``configs/runs/`` as they ran, and the stage / joint configs live split under
 ``configs/data_build/`` (the data recipe: band + pools + mix) and
-``configs/train/`` (the trainer values) — ``legacy.py`` reads the split for
-``experiments/``.
+``configs/train/`` (the trainer values); nothing reads them.
 
 The constants below are the data pools every recipe shares — the old stage
 files' ``[data]`` blocks, which were identical across the four stages.

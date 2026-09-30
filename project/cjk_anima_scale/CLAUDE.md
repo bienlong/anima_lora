@@ -4,7 +4,7 @@ Production line for the JA vocab pack: a run is its vocabs + what to read;
 one loss, one trainer, σ per item from the band law (`plan.md`). `README.md`
 = state, `plan_retrain.md` = the live plan, `band_experiment_results.md` = the
 vocab band law. The line is self-contained: its stage code is its own `src/`, and
-nothing here imports, paths into or configures from `../cjk_renderable_anima/`
+nothing here imports, paths into or configures from `../finished/cjk_renderable_anima/`
 (the independent research line) — `tests/test_line.py` asserts it.
 
 ## Layout
@@ -30,12 +30,14 @@ nothing here imports, paths into or configures from `../cjk_renderable_anima/`
   configs, **split** (2026-09-25) into their data-generation half (band +
   pools + `[[mix]]` recipes) and their trainer half (`warm_from` + the train
   values), `[eval]` blocks dropped. Records, restored so they stay tracked;
-  read only by `cjk_scale/legacy.py` (for the archived influence experiments).
+  nothing reads them (their reader `cjk_scale/legacy.py`, for the archived
+  influence experiments, was removed 2026-09-30).
 - `cjk_scale/` the line's code (`windows` = the law, `config` = the run file +
   data pools, `recipes` + `builder` = data, `rows` + `train`, `eval`,
   `conflict`, `ledger`, `budget` = steps / items per vocab by kind × glyphs ×
-  warm, `merge`; `legacy` reads the split pre-collapse configs for
-  `experiments/`). Baking a run's rows into a pack is one command, not a
+  warm, `merge`; `reads` = the experiments' per-render scoring and McNemar
+  pairing, `paths.load_experiment` = one experiment importing another's
+  `run_exp.py`). Baking a run's rows into a pack is one command, not a
   module:
   `.venv/bin/python scripts/toolkits/bake_vocab_pack.py output/cjk_anima_scale/<run> --out models/vocab_packs/anima_cjk_vocab_pack_<run>` (`--glyph_route` ships routing on, as a routed run's rows need).
 - `src/` — **the stage packages, vendored 2026-09-25** (top-level `common` /
@@ -76,7 +78,7 @@ nothing here imports, paths into or configures from `../cjk_renderable_anima/`
   seed-side reads of record (`cf_sense_*`, the floor of `floor_score.md`)
   live flat inside it, and it is **every run's floor arm**: one read cache,
   a run renders only the keys it lacks (`eval.ensure_floor`) — and the pre-collapse stage records
-  `{data,rows}_<stage>_<tag>/` (read-only, `paths.legacy_*`).
+  `{data,rows}_<stage>_<tag>/` (read-only).
 
 ## Invariants
 

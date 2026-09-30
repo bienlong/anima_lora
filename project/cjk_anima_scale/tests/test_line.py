@@ -21,8 +21,6 @@ from cjk_scale.paths import (
     SRC,
     data_dir,
     floor_dir,
-    legacy_arm_dir,
-    legacy_data_dir,
     run_dir,
     trained_path,
 )
@@ -39,9 +37,9 @@ MODULES = [
     "eval",
     "conflict",
     "ledger",
-    "legacy",
     "budget",
     "merge",
+    "reads",
 ]
 
 
@@ -145,9 +143,6 @@ def test_run_layout():
     assert floor_dir(SEED_ROWS_0921) == OUT / "rows_step1_0921_merged"
     with pytest.raises(AssertionError):
         run_dir("a b")
-    # the stage-layout records, prefix-less since 2026-09-25
-    assert legacy_data_dir("stage0507", "t").name == "data_stage0507_t"
-    assert legacy_arm_dir("stage0507", "t").name == "rows_stage0507_t"
 
 
 def test_stage_paths_take_the_run_dirs():

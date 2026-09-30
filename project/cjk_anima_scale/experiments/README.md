@@ -11,7 +11,10 @@ their reads are in `../_archive/reports/` and `../hypothesis.md`.
 ## Contract
 
 - `<exp>/run_exp.py` — the entry point, a thin argparse script. `--dry_run`
-  must plan (sample, count, print) without touching a model.
+  must plan (sample, count, print) without touching a model. An experiment
+  that builds on another's loads it with `cjk_scale.paths.load_experiment`
+  (fresh each call — its import-time `pin_old_seed()` runs again); scoring
+  comes from `cjk_scale.reads`, not from another experiment.
 - Results: `<exp>/results/<YYYYMMDD-HHMM>[-<label>]/` with the standard
   `result.json` envelope (`bench/_common.py::write_result`) + `report.md`.
   Always pass `--label` — same-minute runs overwrite the dir
@@ -34,8 +37,10 @@ their reads are in `../_archive/reports/` and `../hypothesis.md`.
 
 ## Experiments
 
-- `stage_b/` — kept as the module the retrain experiments import (its
-  item builders and read helpers); the proposal's Stage B: 36 donor kana trained on 568
+- `stage_b/` — kept as the module `p1_cap` / `p2_route` / `c3_kanji` import
+  (its item builders, donor sets and native reads); its per-render scoring
+  moved to `cjk_scale/reads.py` (2026-09-30), which every experiment reads
+  arms with. The proposal's Stage B: 36 donor kana trained on 568
   manga109s lines (`scene_spelled`, glyph-balanced draw, no repeated glyph)
   plus a count tier (`scene_single_small`: one glyph at 24–40 px in a bubble
   it fills 0.2–0.4 of, 0.3 of b0507). `u_S` = the donors' mean tangential Δ,

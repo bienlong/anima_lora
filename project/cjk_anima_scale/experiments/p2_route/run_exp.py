@@ -50,7 +50,6 @@ Legs:
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
 import sys
@@ -58,17 +57,14 @@ from pathlib import Path
 
 LINE = Path(__file__).resolve().parents[2]  # project/cjk_anima_scale
 sys.path.insert(0, str(LINE))
-from cjk_scale.paths import OUT, bootstrap, pin_old_seed, floor_dir  # noqa: E402
+from cjk_scale.paths import OUT, bootstrap, pin_old_seed, floor_dir, load_experiment  # noqa: E402
 
 bootstrap()
 pin_old_seed()  # the retrain reads against the old seed's floor of record
 from bench._common import make_run_dir, write_result  # noqa: E402
+from cjk_scale import reads as scoring  # noqa: E402
 
-_spec = importlib.util.spec_from_file_location(
-    "stage_b_exp", LINE / "experiments" / "stage_b" / "run_exp.py"
-)
-SB = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(SB)
+SB = load_experiment("stage_b")
 
 EXP = OUT / "experiments"
 ENV = "ANIMA_VOCAB_GLYPH_ROUTE"
@@ -253,7 +249,7 @@ def keyed(h: dict) -> dict:
 
 def read(path: Path, spaced: bool, words=WORDS) -> dict:
     keys = [SB.spell(w) if spaced else w for w in words]
-    return keyed(SB.hits(path, keys, CLAUSE))
+    return keyed(scoring.hits(path, keys, CLAUSE))
 
 
 def c2(metrics: dict) -> None:
@@ -275,15 +271,15 @@ def c2(metrics: dict) -> None:
         out[arm] = {}
         for cond, h in cs.items():
             print(f"{arm} · {cond}:", flush=True)
-            out[arm][cond] = SB.tally(h)
-        pr = SB.paired(cs["routed"], cs["spelled"])
+            out[arm][cond] = scoring.tally(h)
+        pr = scoring.paired(cs["routed"], cs["spelled"])
         out[arm]["paired_routed_vs_spelled"] = pr
         print(f"  {arm} routed vs spelled {pr}", flush=True)
         for ref in ("floor", "p1_mix"):
             if arm == ref:
                 continue
             for cond in ("routed", "spelled"):
-                pr = SB.paired(cs[cond], conds[ref][cond])
+                pr = scoring.paired(cs[cond], conds[ref][cond])
                 out[arm][f"paired_{cond}_vs_{ref}"] = pr
                 print(f"  {arm} {cond} vs {ref} {pr}", flush=True)
 
@@ -329,16 +325,16 @@ def main():
             out[arm] = {}
             for cond, h in cs.items():
                 print(f"{arm} · {cond}:", flush=True)
-                out[arm][cond] = SB.tally(h)
+                out[arm][cond] = scoring.tally(h)
             for a, b in (
                 ("routed", "spelled"),
                 ("routed", "unrouted"),
                 ("spelled", "unrouted"),
             ):
-                pr = SB.paired(cs[a], cs[b])
+                pr = scoring.paired(cs[a], cs[b])
                 out[arm][f"paired_{a}_vs_{b}"] = pr
                 print(f"  {arm} {a} vs {b} {pr}", flush=True)
-        pr = SB.paired(conds["p1_mix"]["routed"], conds["floor"]["routed"])
+        pr = scoring.paired(conds["p1_mix"]["routed"], conds["floor"]["routed"])
         out["p1_mix_routed_vs_floor_routed"] = pr
         print(f"  p1_mix routed vs floor routed {pr}", flush=True)
     write_result(

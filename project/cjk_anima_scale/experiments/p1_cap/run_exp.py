@@ -47,22 +47,18 @@ Legs:
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import sys
 from pathlib import Path
 
 LINE = Path(__file__).resolve().parents[2]  # project/cjk_anima_scale
 sys.path.insert(0, str(LINE))
-from cjk_scale.paths import OUT, bootstrap  # noqa: E402
+from cjk_scale.paths import OUT, bootstrap, load_experiment  # noqa: E402
 
 bootstrap()
 from bench._common import make_run_dir, write_result  # noqa: E402
+from cjk_scale import reads as scoring  # noqa: E402
 
-_spec = importlib.util.spec_from_file_location(
-    "stage_b_exp", LINE / "experiments" / "stage_b" / "run_exp.py"
-)
-SB = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(SB)
+SB = load_experiment("stage_b")
 
 EXP = OUT / "experiments"
 SB_DIR = OUT / SB.NAME  # the Stage B donor: its data dir, its native_spell/ reads
@@ -181,24 +177,24 @@ def main():
             )
     if "read" in args.legs:
         chars = SB.donor_keys()
-        fh = SB.hits(SB.check_floor(chars, "en"), chars, "en")
+        fh = scoring.hits(SB.check_floor(chars, "en"), chars, "en")
         print("floor (seed), donor keys:", flush=True)
-        metrics["floor"] = SB.tally(fh)
+        metrics["floor"] = scoring.tally(fh)
         sb_reads = SB_DIR / f"native_{SB.TAG}" / "native_reads.json"
-        bh = SB.hits(sb_reads, chars, "en")
+        bh = scoring.hits(sb_reads, chars, "en")
         print("stage_b (warm, uncapped), donor keys:", flush=True)
-        metrics["stage_b"] = SB.tally(bh)
+        metrics["stage_b"] = scoring.tally(bh)
         reads = metrics.setdefault("reads", {})
         for name in args.arms:
             print(f"{name}:", flush=True)
-            h = SB.hits(
+            h = scoring.hits(
                 SB.native_read(EXP / name, EXP / name / "data", chars, "en"),
                 chars,
                 "en",
             )
-            reads[name] = SB.tally(h)
-            reads[name]["paired_vs_floor"] = SB.paired(h, fh)
-            reads[name]["paired_vs_stage_b"] = SB.paired(h, bh)
+            reads[name] = scoring.tally(h)
+            reads[name]["paired_vs_floor"] = scoring.paired(h, fh)
+            reads[name]["paired_vs_stage_b"] = scoring.paired(h, bh)
             print(f"  paired vs floor {reads[name]['paired_vs_floor']}", flush=True)
             print(f"  paired vs stage_b {reads[name]['paired_vs_stage_b']}", flush=True)
     write_result(
