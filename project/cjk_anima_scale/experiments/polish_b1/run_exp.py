@@ -7,7 +7,7 @@ top (the chain's merged save) — so the trained rows are all 503 singles
 (174 kana + 329 kanji), warm, every other row frozen at b1's file. A side
 branch: b2 still chains on the unpolished b1.
 
-The model is ``step2_band2`` (``cjk_renderable_anima/reports/step2_band2_2026_09_22.md``):
+The model is ``step2_band2`` (the wake line's ``reports/step2_band2_2026_09_22.md``, ``project/finished/``):
 5 k steps, μ 0.3, the band keyed on the item. Data is ``builder.TABLE``'s
 singles groups with the grid dropped, plus whole dialogue lines (the
 sentence tier step 2 had; ``plan_retrain`` § 4 doubling asks windows 2–6 vs

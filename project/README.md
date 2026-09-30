@@ -42,23 +42,17 @@ Retired lines so far:
 Finished lines are listed in [`finished/README.md`](finished/README.md)
 (the ResShift SR sidecar, 2026-08-22; mod guidance, 2026-08-24; the
 encoder-side CJK line `cjk_aware_anima` and its DiT-side successor
-`cjk_aware_anima_dit`, both 2026-09-24).
+`cjk_aware_anima_dit`, both 2026-09-24; the wake line
+`cjk_renderable_anima`, 2026-09-30).
 
 Active projects:
 
-- [`cjk_renderable_anima/`](cjk_renderable_anima/) — promoted 2026-09-14 from
-  the wake line of `finished/cjk_aware_anima_dit`: a frozen DiT renders a requested JA
-  glyph, or a whole common word, from a delta on the vocab pack's ext rows
-  (all 92 kana 34/36; word rows are units, します/してる from one row), and a
-  static table trained on strings carries order and count through the frozen
-  adapter (unseen 3-kana 3/16, order read 28/48 vs 5/48) at the cost of a
-  unit-count prior in the rows (singles 34 → 5). Open phase: the mixed
-  distribution (P1), then the repeat mode. Home: `README.md`, `plan.md`,
-  `findings.md`.
-
 - [`cjk_anima_scale/`](cjk_anima_scale/) — opened 2026-09-23 out of
-  `cjk_renderable_anima`: the production line for the JA pack. Home:
-  `README.md`; its `band_experiment_results.md` is the **vocab band law**
+  `finished/cjk_renderable_anima`: the production line for the JA pack
+  (`preview3`, `preview4`). Home: `README.md` (state), `plan_retrain.md` (the
+  live plan); its `band_experiment_results.md` is the **vocab band law**
   (band keyed on glyph count, px sets the floor, nothing above 0.9 — all
-  measured, not theory). `design.md` is the stage-schedule sketch under
-  review; nothing has trained there yet.
+  measured, not theory).
+
+- [`qwen21_lora/`](qwen21_lora/) — the Qwen-Image-2.1 LoRA line (not Anima;
+  `library/qwen21/CLAUDE.md`).

@@ -1,6 +1,6 @@
 # cjk_anima_scale — the JA vocab pack at scale
 
-Opened 2026-09-23 out of [`../cjk_renderable_anima/`](../cjk_renderable_anima/).
+Opened 2026-09-23 out of [`../finished/cjk_renderable_anima/`](../finished/cjk_renderable_anima/).
 That line is the research surface (probe code, `reports/`, `findings.md`);
 this one is the production line that builds the pack on what it settled:
 one loss, one trainer, σ per item from the band law. Since 2026-09-28 the
@@ -33,7 +33,7 @@ The plans that produced it (`plan_band.md`, `plan_kanji.md`) closed on
 probe line's step 1a / 1b / merge / step 2 recipe (`recipe.md`) was retired
 the same day — `configs/stage*.toml` carry its settings, the band law § 3–4
 its reads (git `ff2f70f9` has the last copy). The
-reads themselves are the dated reports under `../cjk_renderable_anima/reports/`
+reads themselves are the dated reports under `../finished/cjk_renderable_anima/reports/`
 (`cf_rebin_gate0`, `cf_band_a1`, `band_b1`, `cf_kanji_c1`, `band_c2_kanji`).
 A new read that changes a row of the law goes into
 `band_experiment_results.md`, with its report there.

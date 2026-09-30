@@ -44,7 +44,7 @@ Finished lines:
   never compose under any lever, coverage / geometry refinements are inert,
   content-free tables tie the trained pack for unmask training; the DiT-side
   question continued in [`cjk_aware_anima_dit/`](cjk_aware_anima_dit/) →
-  `../cjk_renderable_anima/`.
+  [`cjk_renderable_anima/`](cjk_renderable_anima/).
   The pack recipe stays operational in `scripts/distill_cjk/` (corpus builders
   under `corpus/`; `docs/methods/cjk_vocab_pack.md` § Rebuilding a pack).
   Verdicts: [`cjk_aware_anima/findings.md`](cjk_aware_anima/findings.md);
@@ -58,8 +58,20 @@ Finished lines:
   — five arms decoupled in-domain COO from the doujin gate, so the headroom is
   ♡ / small-kana labels. The DiT goals were **handed off, not measured**
   (G-A read on one 351-image shard only, G-B never run); the question lives on
-  in `../cjk_renderable_anima/` and `../cjk_anima_scale/`. Code runnable by
+  in [`cjk_renderable_anima/`](cjk_renderable_anima/) and `../cjk_anima_scale/`. Code runnable by
   path; the `render_*` EasyControl descriptors in `scripts/tasks/training.py`
   still call its `render/` scripts. Verdicts:
   [`cjk_aware_anima_dit/findings.md`](cjk_aware_anima_dit/findings.md);
   digest: [`cjk_aware_anima_dit/README.md`](cjk_aware_anima_dit/README.md).
+- [`cjk_renderable_anima/`](cjk_renderable_anima/) — the wake line: a frozen
+  DiT renders a requested JA glyph or a whole common word from a delta on the
+  vocab pack's ext rows (promoted 2026-09-14, moved here 2026-09-30).
+  Shipped: the rows recipe and `anima_cjk_vocab_pack_preview2` (the merged
+  `step1_0921` + `step1_0921z` table after the band2 sentence run,
+  2026-09-23). Settled: trained addresses are hash-like (held-out anything is
+  0, the cost is exposure per row), a static row table can carry order and
+  count at the price of a unit-count prior. Production continued in
+  `../cjk_anima_scale/` (vendored its own `src/`, imports nothing from here).
+  Code runnable by path. Verdicts:
+  [`cjk_renderable_anima/findings.md`](cjk_renderable_anima/findings.md);
+  digest: [`cjk_renderable_anima/README.md`](cjk_renderable_anima/README.md).

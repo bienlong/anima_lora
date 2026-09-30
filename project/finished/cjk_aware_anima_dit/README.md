@@ -22,7 +22,7 @@ first). Premise: ext rows are content-free addresses; what a CJK address
   corpus scale) was read only on one 351-image shard, where the caption
   clauses tie; G-B (a LoRA learning CJK tag meaning) was never run. The
   DiT question continues as the wake line
-  [`../../cjk_renderable_anima/`](../../cjk_renderable_anima/README.md) and the
+  [`../cjk_renderable_anima/`](../cjk_renderable_anima/README.md) and the
   production line [`../../cjk_anima_scale/`](../../cjk_anima_scale/README.md);
   neither is a verdict on G-A / G-B.
 - **Open remainder** — the reader label pass, R3 / R4.4, heart positives, a
@@ -37,7 +37,7 @@ first). Premise: ext rows are content-free addresses; what a CJK address
   reader ledger, ext rows / pack / DiT, captions, the SFX reader, detection,
   gotchas, the do-not-re-propose list, and the open items outside the wake
   line.
-- [`../../cjk_renderable_anima/reports/`](../../cjk_renderable_anima/reports/README.md) — moved with the wake line (2026-09-14; the frozen copy here is archived). Was the live plan (W2d encoder → W3 strings →
+- [`../cjk_renderable_anima/reports/`](../cjk_renderable_anima/reports/README.md) — moved with the wake line (2026-09-14; the frozen copy here is archived). Was the live plan (W2d encoder → W3 strings →
   W4 kanji), gates and kill criteria.
 - [`history.md`](history.md) — the dated per-phase record (D0 … the wake
   probes) with every evidence pointer, verbatim as it was written. Go here
@@ -52,7 +52,7 @@ first). Premise: ext rows are content-free addresses; what a CJK address
   **`probes/wake_probe.py` (+ `wake_geometry.py`) here is frozen** — the
   single-file ancestor of the wake instrument, last touched 2026-09-14 when
   the line moved. The live instrument is the split package
-  [`../../cjk_renderable_anima/src/`](../../cjk_renderable_anima/src/)
+  [`../cjk_renderable_anima/src/`](../cjk_renderable_anima/src/)
   (`wake_probe.py` entry point + `stages.py` + role packages); every run since is
   there. Read this copy only for how a pre-split run was invoked.
 - `reports/` — dated reports, gitignored (private mirror); the wake report

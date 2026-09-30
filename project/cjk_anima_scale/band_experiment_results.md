@@ -5,7 +5,7 @@ Not a theory: every row below is a measured read, and it holds over the
 sizes, layouts and units those reads covered.
 
 The verdict of `plan_band.md` (closed and deleted 2026-09-23; git `f5cd4c0c`).
-Every number here is in `project/cjk_renderable_anima/reports/`
+Every number here is in `project/finished/cjk_renderable_anima/reports/`
 (`cf_rebin_gate0_2026_09_23.md`, `cf_band_a1_2026_09_23.md` with its A.2
 section, `band_b1_2026_09_23.md`).
 

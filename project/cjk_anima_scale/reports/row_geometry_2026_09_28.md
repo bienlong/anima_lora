@@ -151,7 +151,7 @@ less). Rows are judged by render, as before (`spell_2026_09_26.md`).
 ## 6. What it settles
 
 - **Shared-direction init: no.** The direction is what `--pin_dir` pinned
-  (`../cjk_renderable_anima/reports/transplant_2026_09_16.md`: curves
+  (`../finished/cjk_renderable_anima/reports/transplant_2026_09_16.md`: curves
   overlap scratch, 54 = 54 at 2 k, `swap` hurt at convergence). A free row
   builds it while learning identity. It is ≤ 40 % of a row's energy, and a
   run rebuilds it rotated even from a seed that has it.
