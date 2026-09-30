@@ -100,8 +100,8 @@ polish; a 1024-tier one only if the 4 k step goes ahead.
   COO text frequencies (Manga109 strings never enter the repo), kept when
   every glyph is a trained single (routed, as `scene_line` does), the read
   words held out by trigram.
-- Render: the SFX faces of `assets/fonts/` (TanukiMagic, 破線G, 源真ゴシック
-  Bold, Corporate Logo); a thick contrasting stroke (white fill / black
+- Render: the SFX faces of `assets/fonts/` (TanukiMagic, 源真ゴシック Bold,
+  Corporate Logo; 破線G out 2026-09-30); a thick contrasting stroke (white fill / black
   stroke, or a colour fill / white stroke — `flat.py`'s jitter inks, stroke
   2–6 scaled by px); tilt up to ± 20°, per-glyph scale and offset jitter,
   diagonal runs; anywhere on the canvas.

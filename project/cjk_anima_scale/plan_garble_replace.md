@@ -63,8 +63,11 @@ Per kept region:
   interior) and draw, with **px fixed to the measured px** (no bubble fit)
   and the measured orientation and line count. Fonts: the render set's
   regular faces.
-- **Caption**: the canvas prompt verbatim + one ` Japanese text reads as "X".`
-  per replaced region; nothing else in the prompt changes.
+- **Caption** (the first run's; `run_exp.py` now writes the quoted form —
+  `She is saying "X" "Y".` / one `Japanese text reads as "X" "Y".` clause,
+  `reports/garble_replace_2026_09_30.md` § Follow-ups): the canvas prompt
+  verbatim + one ` Japanese text reads as "X".` per replaced region; nothing
+  else in the prompt changes.
   - `ja_garble_tag` (no clause): the tags, a `.`, then the clauses.
   - `ja_garble_saying`: `She / He is saying something.` stays, the clauses
     follow it.

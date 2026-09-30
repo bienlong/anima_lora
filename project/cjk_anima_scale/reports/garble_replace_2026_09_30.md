@@ -185,3 +185,62 @@ build), `…/20260930-1745-warm/`, `…/20260930-1821-cold/` (training),
 `…/20260930-1857-read-warm/`, `…/20260930-1907-read-cold/`. Rows:
 `output/cjk_anima_scale/experiments/garble_replace_{warm,cold}/trained.pt`.
 Pool: `output/cjk_anima_scale/scenes_garble/`.
+
+## Follow-ups (2026-09-30 – 10-01)
+
+Four more arms, all at 5 130 steps (90 / row × 57 rows, batch 4), read on the
+same `sent` grid against the same floor. Each varies one thing against a run
+above.
+
+- **quoted:** captions only; images, boxes and lines are those of `data`.
+  - `ja_garble_saying` items: `… is saying something.` becomes
+    `She is saying "X" "Y".`, with no `reads as` clause (the `ja_saying` form).
+  - Other items: one clause, `Japanese text reads as "X" "Y".`
+  - 200 of 248 captions change. A single-region tag item reads the same
+    either way.
+- **grid20 / grid50:** the quoted items plus 3×3 `grid_single` items over the
+  same 57 singles (the b0709 tier's params: fill 0.3–0.8 of the cell, half in
+  bubbles), 20 % (62) / 50 % (248) of the items. The grids train at σ 0.7–0.9
+  and the garble items keep 0.6–0.85.
+- **warm μ 0.02:** the `data` items (old captions, no grid), warm from the
+  seed rows, anchor μ 0.02 instead of 0.1.
+
+Data is rebuilt from `data`, not redrawn. With 破線G out of `assets/fonts/`,
+a fresh `--legs data` deals other fonts and lines: only 19 of 248 items keep
+their lines.
+
+| arm | official | contained | ≤ 1 edit | ≤ 2 edit | dup | kana |
+|---|---|---|---|---|---|---|
+| floor | 29 | 64 | 92 | 129 | 100 | 169 |
+| cold (above) | 0 | 0 | 0 | 1 | 114 | 184 |
+| cold, quoted | 0 | 1 | 0 | 0 | 115 | 183 |
+| cold, quoted + grid20 | 0 | 0 | 0 | 5 | 79 (+38 / −59 vs floor, p 0.04) | 175 |
+| cold, quoted + grid50 | 1 | 3 | 3 (+2 / −91, p 9e-25) | 11 | 87 | 178 |
+| warm μ 0.1 (above) | 5 | 23 | 29 | 60 | 137 | 171 |
+| warm μ 0.02 | 3 | 27 | 24 (+6 / −74, p 5e-16) | 50 | 144 (+65 / −21, p 2e-6) | 168 |
+
+| arm | box | box h | flat white | box IoU vs EN ref |
+|---|---|---|---|---|
+| floor | 0.156 | 0.180 | 0.132 | 0.198 |
+| cold (above) | 0.065 | 0.197 | 0.129 | 0.243 |
+| cold, quoted | 0.078 | 0.219 | 0.132 | 0.236 |
+| cold, quoted + grid20 | 0.115 | 0.197 | 0.095 | 0.250 |
+| cold, quoted + grid50 | 0.130 | 0.177 | 0.071 | 0.290 |
+| warm μ 0.02 | 0.102 | 0.189 | 0.109 | 0.217 |
+
+- **Captions:** no effect. The quoted cold arm matches the old cold on every
+  count.
+- **Grids:** the box grows toward the floor's (0.078 → 0.115 → 0.130) and dup
+  drops. The ≤ 2-edit count goes 0 → 5 → 11, far below the floor's 129.
+- **Sheets (`かなしい`):** every cold arm still draws the canvas's vertical
+  bubbles, filled with long unrelated lines. No render gets the large centred
+  word the floor draws.
+- **μ:** 0.02 is not better than 0.1. The differences are inside noise at
+  184 renders.
+
+Results: `experiments/garble_replace/results/20260930-2217-cold-quoted/`,
+`…/20260930-2316-mix-grid20/`, `…/20260930-2316-cold-grid20/`,
+`…/20261001-0059-mix-grid50/`, `…/20261001-0059-cold-grid50/`,
+`…/20261001-0008-warm-mu002/`. Data:
+`output/cjk_anima_scale/run0930_garble_replace/data_{quoted,grid20,grid50}/`.
+Rows: `output/cjk_anima_scale/experiments/garble_replace_{cold_quoted,cold_grid20,cold_grid50,warm_mu002}/`.

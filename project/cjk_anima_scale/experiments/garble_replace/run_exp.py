@@ -21,16 +21,22 @@ is drawn ``VARIANTS`` times with different lines (same canvas, same layout,
 the string alone changes); lines are dealt greedily so each of the 57
 trained singles appears.
 
-Caption: the canvas prompt + `` Japanese text reads as "X".`` per region,
-right-to-left (manga order). Band 0.6–0.85 on every item. The loss boxes
+Caption: the canvas prompt with every region's line quoted, right-to-left
+(manga order), in one clause — ``She is saying "X" "Y".`` in place of the
+saying frame's ``… is saying something.``, else `` Japanese text reads as
+"X" "Y".`` (``caption()``). Band 0.6–0.85 on every item. The loss boxes
 are the drawn glyph boxes (``layout: grid`` + ``boxes``: ``loss.item_boxes``
 masks each region; ``box`` is their union, for ``BoxSplit`` logging only).
 
 Legs:
 - ``data`` (CPU) → ``OUT/run0930_garble_replace/data`` + ``sheet_*.png``;
+- ``mix --tag T`` (CPU) → ``data_T``: ``data_<--mix_from>``'s items plus
+  3×3 ``grid_single`` items over the same singles (``--grid_frac`` of the
+  items) at ``--band``, the source items at their own;
 - ``read --arm warm|cold`` (GPU): the ``sent`` ruler vs the seed's routed
   floor (``read``'s docstring);
-- ``train --arm warm|cold`` (GPU) → ``OUT/experiments/garble_replace_<arm>``:
+- ``train --arm warm|cold`` (GPU) → ``OUT/experiments/garble_replace_<arm>``
+  (``--tag T``: data in ``data_T``, arm ``garble_replace_<arm>_T``):
   the 57 singles of the ``sent`` strings, 90 steps / row, every other row
   frozen at the seed; warm starts from the seed rows (μ ``--mu``, default
   0.1 as polish_seed), cold from the pack rows (μ 0, the retrain's singles).
@@ -345,6 +351,21 @@ class Dealer:
         return out
 
 
+def caption(prompt: str, texts: list) -> str:
+    """One clause for all regions, each quoted: a ``japanese text`` prompt
+    with the saying frame's ``… is saying something.`` gets the lines as
+    the speech (``She is saying "A" "B".``, the ``ja_saying`` form), any
+    other gets ``Japanese text reads as "A" "B".``"""
+    quoted = " ".join(f'"{t}"' for t in texts)
+    head, dot, tail = prompt.partition(". ")
+    if "japanese text" in (g.strip() for g in head.split(",")) and tail.endswith(
+        " is saying something."
+    ):
+        return f"{head}{dot}{tail[: -len('something.')]}{quoted}."
+    p = prompt if prompt.endswith(".") else prompt + "."
+    return f"{p} Japanese text reads as {quoted}."
+
+
 def build(sing: list, lines: list, held=(), seed: int = 0) -> tuple[list, dict]:
     import numpy as np
     from PIL import Image
@@ -404,8 +425,7 @@ def build(sing: list, lines: list, held=(), seed: int = 0) -> tuple[list, dict]:
                 continue
             f = DATA / "img" / f"garble_{sc['i']:05d}_{v}.png"
             im.save(f)
-            p = sc["prompt"] if sc["prompt"].endswith(".") else sc["prompt"] + "."
-            cap = p + "".join(f' Japanese text reads as "{t}".' for t in texts)
+            cap = caption(sc["prompt"], texts)
             recs.append(
                 {
                     "file": str(f),
@@ -503,7 +523,7 @@ def canvases_sheet(path: Path):
     contact_sheet(rows, path, thumb=256, cols=8)
 
 
-def read(arm: str) -> dict:
+def read(arm: str, name: str) -> dict:
     """The ``read`` leg: the arm's rows on the ``sent`` ruler (the retrain_read
     grid: first 4 prompts × 2 seeds × 23 strings, ``en`` clause, 512²,
     routed), paired per render against the seed's routed floor cache —
@@ -518,7 +538,6 @@ def read(arm: str) -> dict:
 
     SS = load_experiment("sigma_split")
     held, _sing, _S = held_and_singles()
-    name = f"{NAME}_{arm}"
     arm_path = EXP / name
     assert (arm_path / "trained.pt").exists(), f"{arm_path}: not trained yet"
     rc = rc_of(name, _sing, held)
@@ -563,6 +582,93 @@ def read(arm: str) -> dict:
     return out
 
 
+def mix(src: Path, sing: list, frac: float, band: tuple, seed: int = 0) -> dict:
+    """The ``mix`` leg: ``src``'s items (images reused, captions as built)
+    plus 3×3 ``grid_single`` items over the same singles — the b0709 tier's
+    params (fill 0.3–0.8 of the cell, half in bubbles, line cells marked) —
+    so they are ``frac`` of the items. The grids train at ``band``; ``src``'s
+    items keep their own (the control's)."""
+    import shutil
+    from types import SimpleNamespace
+
+    from cjk_scale.recipes import grid_single
+
+    from common.render.flat import find_fonts
+
+    rng = random.Random(seed)
+    recs = [
+        json.loads(ln) for ln in (src / "train.jsonl").read_text("utf-8").splitlines() if ln
+    ]
+    n = round(frac / (1 - frac) * len(recs))
+    pools = SimpleNamespace(
+        singles=list(sing), decks={}, fonts=find_fonts(), shapes=None, horizontal_frac=0.3
+    )
+    params = {
+        "grids": "3x3",
+        "fill": [0.3, 0.8],
+        "bubble_frac": 0.5,
+        "mark_horizontal": True,
+    }
+    (DATA / "img").mkdir(parents=True, exist_ok=True)
+    grids = []
+    for i in range(n):
+        item = grid_single(pools, rng, params)
+        f = DATA / "img" / f"grid3x3_{i:05d}.png"
+        item.image.save(f)
+        grids.append(
+            {
+                "file": str(f),
+                "text": item.text,
+                "caption": item.caption,
+                "src": item.src,
+                "kind": "grid_single",
+                "recipe": "grid_single",
+                "group": "b0709",
+                "layout": item.layout,
+                "units": item.vocabs,
+                "shape": list(item.shape),
+                "px": round(item.px(), 1),
+                "boxes": item.boxes,
+                "band": list(band),
+                "window": list(band),
+                **item.extra,
+            }
+        )
+    out = recs + grids
+    (DATA / "train.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in out), encoding="utf-8"
+    )
+    for f in ("vocabs.json", "eval.json"):
+        shutil.copy2(src / f, DATA / f)
+    bj = json.loads((src / "build.json").read_text())
+    (DATA / "build.json").write_text(
+        json.dumps(bj | {"grid_band": list(band), "mix_from": str(src), "grid_frac": frac})
+    )
+    from PIL import Image
+
+    from common.readers import contact_sheet
+
+    contact_sheet(
+        [
+            (Image.open(g["file"]).convert("RGB"), ["".join(g["units"]), f"{g['px']:.0f}px", "", ""])
+            for g in grids[:16]
+        ],
+        DATA / "sheet_grids.png",
+        thumb=256,
+        cols=8,
+    )
+    units = Counter(u for g in grids for u in g["units"])
+    return {
+        "from": str(src),
+        "items": len(out),
+        "garble": len(recs),
+        "grid3x3": n,
+        "grid_frac": round(n / len(out), 3),
+        "grid_units": {"min": min(units.values()), "max": max(units.values()), "n": len(units)},
+        "px": sorted(g["px"] for g in grids),
+    }
+
+
 def rc_of(name: str, sing: list, held: tuple):
     from cjk_scale.config import RunConfig
 
@@ -574,11 +680,33 @@ def rc_of(name: str, sing: list, held: tuple):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--label", required=True)
-    p.add_argument("--legs", nargs="+", default=["data"], choices=["data", "train", "read"])
+    p.add_argument(
+        "--legs", nargs="+", default=["data"], choices=["data", "mix", "train", "read"]
+    )
     p.add_argument("--arm", choices=["warm", "cold"])
     p.add_argument("--mu", type=float, default=MU_WARM, help="warm arm's anchor μ")
+    p.add_argument(
+        "--tag",
+        default="",
+        help="suffix for the data dir (data_<tag>) and the arm (<arm>_<tag>), "
+        "so a variant run leaves the untagged data and rows in place",
+    )
+    p.add_argument(
+        "--data_tag",
+        default=None,
+        help="the data dir's tag when it differs from --tag ('' = the untagged data)",
+    )
+    p.add_argument("--mix_from", default="quoted", help="mix: the source data tag")
+    p.add_argument("--grid_frac", type=float, default=0.2, help="mix: 3×3 grid share of the items")
+    p.add_argument("--band", type=float, nargs=2, default=list(BAND), help="mix: the grids' σ band")
     args = p.parse_args()
     assert not {"train", "read"} & set(args.legs) or args.arm, "--legs train / read need --arm"
+    global DATA
+    dtag = args.tag if args.data_tag is None else args.data_tag
+    if dtag:
+        DATA = DATA.parent / f"data_{dtag}"
+    DATA.mkdir(parents=True, exist_ok=True)
+    name = f"{NAME}_{args.arm}" + (f"_{args.tag}" if args.tag else "")
 
     held, sing, S = held_and_singles()
     metrics: dict = {"held": list(held), "singles": "".join(sing), "band": list(BAND)}
@@ -616,10 +744,15 @@ def main():
         print(json.dumps({k: v for k, v in stats.items() if k != "px"}, ensure_ascii=False), flush=True)
         px = stats["px"]
         print(f"px: min {px[0]} p25 {px[len(px) // 4]} median {px[len(px) // 2]} max {px[-1]}", flush=True)
+    if "mix" in args.legs:
+        assert args.tag and args.tag != args.mix_from, "--legs mix needs its own --tag"
+        src = DATA.parent / (f"data_{args.mix_from}" if args.mix_from else "data")
+        metrics["mix"] = mix(src, sing, args.grid_frac, tuple(args.band))
+        metrics["grid_band"] = list(args.band)
+        print(json.dumps({k: v for k, v in metrics["mix"].items() if k != "px"}, ensure_ascii=False), flush=True)
     if "train" in args.legs:
         from cjk_scale import train as T
 
-        name = f"{NAME}_{args.arm}"
         rc = rc_of(name, sing, held)
         T.INIT_ANCHOR = args.mu if args.arm == "warm" else 0.0
         metrics.update(arm=args.arm, mu=T.INIT_ANCHOR, steps_per_row=STEPS_PER_ROW)
@@ -632,7 +765,7 @@ def main():
             context=SEED_ROWS,
         )
     if "read" in args.legs:
-        metrics["read"] = read(args.arm)
+        metrics["read"] = read(args.arm, name)
     write_result(
         run_dir,
         script=__file__,
