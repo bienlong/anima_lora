@@ -47,10 +47,11 @@ A new read that changes a row of the law goes into
 | [`hypothesis.md`](hypothesis.md) | why a JA row does not compose (2026-09-27) — the P0 / P1 / P2 reads the retrain is built on |
 | [`band_experiment_results.md`](band_experiment_results.md) | **the vocab band law** — the verdict, the per-px window table, the training reads, what is left unrun |
 | [`plan.md`](plan.md) | the collapse spec the code implements: a run is one file, everything else is a rule |
-| [`floor_score.md`](floor_score.md) | the old seed's floor of record on sent / target / word / en — the retrain is read against it |
+| [`floor_score.md`](floor_score.md) | the floors on sent / target / word / en: the new seed's (`seed_retrain_0930`, what runs read against) and the old seed's (what the retrain was read against) |
 | [`product_criteria.md`](product_criteria.md) | what a pack has to do to ship: the text axis and the page axis, dev set vs acceptance set |
 | [`colab.md`](colab.md) | running `data` / `train` on a Colab VM (G4 = the kanji batches) |
 | [`future.md`](future.md) | not planned: real images do not train rows, an OCR-reward update, token scaling as the last stage |
+| [`idea.md`](idea.md) | not planned (2026-09-29): layout from the base's own text, identity at 0.3–0.5; the paste read (lone data teaches size) that motivated it |
 | [`plan_polish.md`](plan_polish.md) | pilot only: `future.md` § 3 at 4 k tokens on a self-generated EN-anchor canvas; planned: SFX / small text on a text-free canvas in the post-b3 polish |
 | `reports/` | the reads the live code cites: [`conflict_joint_2026_09_25.md`](reports/conflict_joint_2026_09_25.md) + [`grid_box_2026_09_25.md`](reports/grid_box_2026_09_25.md) (the trainer constants), [`piece_2026_09_25.md`](reports/piece_2026_09_25.md) (the piece ruler), [`long_b0_2026_09_27.md`](reports/long_b0_2026_09_27.md) (the long-piece budget row), [`stage_i_2026_09_26.md`](reports/stage_i_2026_09_26.md) (`b0709`, the cold-kanji budget), [`row_geometry_2026_09_28.md`](reports/row_geometry_2026_09_28.md) (the retrain rows in row space) |
 | `configs/runs/*.toml` | the runs — `{vocabs, read[, context]}`: `retrain_kana`, `retrain_kanji_b1..b4`; `run0923_micro` / `run0925_300f` stay for the tests |
@@ -61,14 +62,17 @@ A new read that changes a row of the law goes into
 | `_archive/` | gitignored: the retired stage code, and the pre-retrain docs / reports / experiments / run files (see its README) |
 | `runs/` | `ledger.jsonl` — every submitted job |
 
-## Where it stands (2026-09-28)
+## Where it stands (2026-09-30)
 
 `retrain_kana` (174 cold kana rows, routed) composes like `p1_mix` and holds
 the singles; its rows are the kana half of the new seed.
 `retrain_kanji_b1` (329 kanji on `retrain_kana`'s rows) trained on a Colab
 G4, b2 and b3 locally (all unread); b4 (the training set's JA tail, the
-first under the encode fold) is training; then the new seed, the floor
-re-render and the bake. Details and numbers: `plan_retrain.md`, `retrain_experiments.md`.
+first under the encode fold) trained 2026-09-30 and its rows are the new
+seed, `output/cjk_anima_scale/seed_retrain_0930/` (`paths.SEED_ROWS`; the
+old one is `SEED_ROWS_0921`). Its floor is in `floor_score.md` (acceptance
+8 → 37 / 80) and it is baked with routing on
+(`models/vocab_packs/anima_cjk_vocab_pack_seed_retrain_0930/`). Details and numbers: `plan_retrain.md`, `retrain_experiments.md`.
 
 ## Running a run
 

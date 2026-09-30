@@ -14,6 +14,10 @@ renders of the same prompt × seed (Stage B's scoring, McNemar).
       make daemon-run ARGS="--label kanji-read-b1 \\
       project/cjk_anima_scale/experiments/kanji_read/run_exp.py \\
       --label b1 --run retrain_kanji_b1"
+
+``--words`` reads C3's six words instead; ``--arm <name>`` reads an
+experiment's rows (``OUT/experiments/<name>``, e.g. ``polish_b1``) on the
+run's kanji, paired with the run itself as well.
 """
 
 from __future__ import annotations
@@ -26,14 +30,17 @@ import shutil
 import sys
 from pathlib import Path
 
-os.environ["ANIMA_VOCAB_GLYPH_ROUTE"] = "1"  # the run's own encoding (singles: same either way)
+os.environ["ANIMA_VOCAB_GLYPH_ROUTE"] = (
+    "1"  # the run's own encoding (singles: same either way)
+)
 os.environ.setdefault("ANIMA_VOCAB_PACK", "models/vocab_packs/anima_cjk_vocab_pack")
 
 LINE = Path(__file__).resolve().parents[2]  # project/cjk_anima_scale
 sys.path.insert(0, str(LINE))
-from cjk_scale.paths import OUT, bootstrap, floor_dir  # noqa: E402
+from cjk_scale.paths import OUT, bootstrap, pin_old_seed, floor_dir  # noqa: E402
 
 bootstrap()
+pin_old_seed()  # the retrain reads against the old seed's floor of record
 from bench._common import make_run_dir, write_result  # noqa: E402
 
 
@@ -72,10 +79,55 @@ def grid(h: dict) -> dict:
     return {k: v for k, v in h.items() if int(k[2]) < N_PROMPTS and int(k[3]) < SEEDS}
 
 
+def words_read(args, rc, name: str, arm: Path) -> None:
+    """``--words``: C3's six kanji-bearing words (routed, en, C3's 8 × 2 grid)
+    on the arm, paired with the floor's, ``c3_kanji_450``'s and (an
+    experiment arm) the run's reads."""
+    C3 = _load("c3_kanji_exp", "c3_kanji/run_exp.py")
+    arms = {"floor": None, "c3_kanji_450": C3.EXP / "c3_kanji_450"}
+    if name != rc.name:
+        arms[rc.name] = OUT / rc.name
+    arms[name] = arm
+    print(
+        f"{name}: words {' '.join(C3.READ_WORDS)} → "
+        f"{len(C3.READ_WORDS) * 16} renders on the run (floor / c3_kanji_450 cached)",
+        flush=True,
+    )
+    if args.dry_run:
+        return
+    run_dir = make_run_dir(
+        "kanji_read",
+        label=args.label,
+        root=LINE / "experiments" / "kanji_read" / "results",
+    )
+    wh = {a: C3.read_words(p) for a, p in arms.items()}
+    metrics: dict = {"words": list(C3.READ_WORDS), "reads": {}}
+    for a, h in wh.items():
+        print(f"{a} · words (routed):", flush=True)
+        metrics["reads"][a] = SB.tally(h)
+    for ref in [a for a in arms if a != name]:
+        pr = SB.paired(wh[name], wh[ref])
+        metrics["reads"][name][f"paired_vs_{ref}"] = pr
+        print(f"  words {name} vs {ref} {pr}", flush=True)
+    write_result(
+        run_dir,
+        script=__file__,
+        args=args,
+        label=args.label,
+        metrics=metrics,
+        artifacts=[str(arm / f"native_{C3.TAG}")],
+    )
+    print(f"→ {run_dir / 'result.json'}", flush=True)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--label", required=True)
     p.add_argument("--run", required=True)
+    p.add_argument("--words", action="store_true", help="C3's six words only")
+    p.add_argument(
+        "--arm", help="an experiment's rows under OUT/experiments/ (default: the run)"
+    )
     p.add_argument("--dry_run", action="store_true")
     args = p.parse_args()
 
@@ -84,19 +136,27 @@ def main():
     from stages import run as run_stage
 
     rc = load_run(args.run)
-    arm = OUT / rc.name
-    vocabs = set(json.loads((arm / "data" / "vocabs.json").read_text("utf-8")))
+    name = args.arm or rc.name
+    arm = OUT / "experiments" / args.arm if args.arm else OUT / rc.name
+    assert (arm / "trained.pt").exists(), arm
+    if args.words:
+        return words_read(args, rc, name, arm)
+    vocabs = set(
+        json.loads((OUT / rc.name / "data" / "vocabs.json").read_text("utf-8"))
+    )
     frecs, src = floor_reads(vocabs)
     chars = sorted(src)
     print(
-        f"{rc.name}: {len(chars)} kanji with a floor ({''.join(chars)}), "
+        f"{name}: {len(chars)} kanji with a floor ({''.join(chars)}), "
         f"{N_PROMPTS} prompts × {SEEDS} seeds → {len(chars) * N_PROMPTS * SEEDS} renders",
         flush=True,
     )
     if args.dry_run:
         return
     run_dir = make_run_dir(
-        "kanji_read", label=args.label, root=LINE / "experiments" / "kanji_read" / "results"
+        "kanji_read",
+        label=args.label,
+        root=LINE / "experiments" / "kanji_read" / "results",
     )
     dst = arm / f"native_{SUB}" / "native_reads.json"
     held = {m["text"] for m in _load_reads(dst)}
@@ -107,11 +167,16 @@ def main():
             TRAINED_ARM,
             ["native"],
             [
-                "--eval_tag", f"add_{SUB}",
-                "--native_chars", ",".join(miss),
-                "--native_clauses", CLAUSE,
-                "--native_limit", str(N_PROMPTS),
-                "--seeds", str(SEEDS),
+                "--eval_tag",
+                f"add_{SUB}",
+                "--native_chars",
+                ",".join(miss),
+                "--native_clauses",
+                CLAUSE,
+                "--native_limit",
+                str(N_PROMPTS),
+                "--seeds",
+                str(SEEDS),
             ],
         )
         a.arm_path = str(arm)
@@ -131,7 +196,7 @@ def main():
     ffile.write_text(json.dumps(frecs, ensure_ascii=False), encoding="utf-8")
     mine = grid(SB.hits(dst, chars, CLAUSE))
     ref = grid(SB.hits(ffile, chars, CLAUSE))
-    print(f"{rc.name} · singles ({CLAUSE}, {N_PROMPTS}×{SEEDS}):", flush=True)
+    print(f"{name} · singles ({CLAUSE}, {N_PROMPTS}×{SEEDS}):", flush=True)
     t_mine = SB.tally(mine)
     print("floor:", flush=True)
     t_ref = SB.tally(ref)
@@ -143,9 +208,14 @@ def main():
         for c in FLOOR_CACHES
     }
     pr = SB.paired(mine, ref)
-    print(f"  paired {rc.name} vs floor {pr}", flush=True)
+    print(f"  paired {name} vs floor {pr}", flush=True)
     for c, v in by_cache.items():
         print(f"    {c}: {v}", flush=True)
+    vs_run = None
+    if name != rc.name:  # the run's own renders of the same grid
+        rf = OUT / rc.name / f"native_{SUB}" / "native_reads.json"
+        vs_run = SB.paired(mine, grid(SB.hits(rf, chars, CLAUSE)))
+        print(f"  paired {name} vs {rc.name} {vs_run}", flush=True)
     write_result(
         run_dir,
         script=__file__,
@@ -159,6 +229,8 @@ def main():
             "floor": t_ref,
             "paired": pr,
             "paired_by_cache": by_cache,
+            "arm": str(arm),
+            f"paired_vs_{rc.name}": vs_run,
         },
         artifacts=[str(dst)],
     )

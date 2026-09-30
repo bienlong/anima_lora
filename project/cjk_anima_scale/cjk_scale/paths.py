@@ -13,8 +13,9 @@ A run lands in one dir, ``output/cjk_anima_scale/<run>/``:
     conflict/      ``scale.py <run> conflict``
 
 Beside the runs: the scene pools (``scenes_<tag>``), the EN reference cache
-(``native_enref``), the seed rows (``rows_step1_0921_merged`` — the floor
-arm: every run's floor reads are cached flat in it) and the old stage-layout records
+(``native_enref``), the seed rows (``seed_retrain_0930`` — the floor arm:
+every run's floor reads are cached flat in it; ``rows_step1_0921_merged`` the
+old seed's) and the old stage-layout records
 (``{data,rows}_<stage>_<tag>``, readable through ``legacy_*``).
 
 The stage packages (``common`` / ``data`` / ``train`` / ``eval`` /
@@ -38,10 +39,16 @@ RUNS = LINE / "runs"
 LEDGER = RUNS / "ledger.jsonl"
 OUT = REPO / "output" / "cjk_anima_scale"
 VOCABS_DIR = LINE / "assets" / "vocabs"
-# the seed rows (one constant, plan.md § 2): the probe line's step1_0921 +
-# step1_0921z merge, 2 274 rows. Every run's vocabs train from it, every other
-# row rides frozen at it, and the floor arm is it whole.
-SEED_ROWS = OUT / "rows_step1_0921_merged" / "trained.pt"
+# the seed rows (one constant, plan.md § 2): since 2026-09-30 the singles retrain
+# (plan_retrain § 3) — ``retrain_kanji_b4``'s merged rows (the old seed + retrain_kana
+# + kanji b1–b4, 2 683 rows) copied whole into their own dir (``seed.json`` there),
+# so the floor cache is not a run's dir. Every run's vocabs train from it, every
+# other row rides frozen at it, and the floor arm is it whole.
+SEED_ROWS = OUT / "seed_retrain_0930" / "trained.pt"
+# the old seed: the probe line's step1_0921 + step1_0921z merge, 2 274 rows — the
+# floor of record the retrain itself is read against (``floor_score.md``); the
+# retrain's experiments read their floor from it
+SEED_ROWS_0921 = OUT / "rows_step1_0921_merged" / "trained.pt"
 # the raw pack's digest (``VocabPack.digest`` with the encode fold left out — the
 # load log said ``sha 7b9fce0bb57b…`` before the pack json took ``fold``):
 # the seed rows are deltas over it and a cold row starts at its rows, so the
@@ -64,6 +71,14 @@ def bootstrap() -> None:
     stage_paths.OUT = OUT
 
 
+def pin_old_seed() -> None:
+    """Point this process's seed rows, and so its floor cache, at the old seed:
+    the retrain's experiments (``experiments/``) read against the floor of
+    record, not the seed they produced."""
+    global SEED_ROWS
+    SEED_ROWS = SEED_ROWS_0921
+
+
 def _check(run: str) -> str:
     assert run and "/" not in run and " " not in run, f"bad run name {run!r}"
     return run
@@ -83,12 +98,13 @@ def trained_path(run: str) -> Path:
     return run_dir(run) / "trained.pt"
 
 
-def floor_dir() -> Path:
+def floor_dir(seed: Path | None = None) -> Path:
     """The floor arm: the seed rows' own dir (its ``trained.pt`` is the seed,
     whole). One read cache for every run — a ruler renders only the strings
     no earlier run read (``eval.ensure_floor``); since 2026-09-26, before
-    which each run carried a ``<run>/floor/`` copy."""
-    return OUT / SEED_ROWS.parent.name
+    which each run carried a ``<run>/floor/`` copy. ``seed``: another seed's
+    rows (``SEED_ROWS_0921`` = the old floor of record)."""
+    return OUT / (seed or SEED_ROWS).parent.name
 
 
 # ---------------------------------------------------------------------------

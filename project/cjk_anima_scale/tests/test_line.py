@@ -17,6 +17,7 @@ from cjk_scale.paths import (
     OUT,
     REPO,
     SEED_ROWS,
+    SEED_ROWS_0921,
     SRC,
     data_dir,
     floor_dir,
@@ -139,8 +140,9 @@ def test_run_layout():
     assert run_dir("r1") == OUT / "r1"
     assert data_dir("r1") == OUT / "r1" / "data"
     assert trained_path("r1") == OUT / "r1" / "trained.pt"
-    assert SEED_ROWS == OUT / "rows_step1_0921_merged" / "trained.pt"
+    assert SEED_ROWS == OUT / "seed_retrain_0930" / "trained.pt"
     assert floor_dir() == SEED_ROWS.parent  # the shared floor cache
+    assert floor_dir(SEED_ROWS_0921) == OUT / "rows_step1_0921_merged"
     with pytest.raises(AssertionError):
         run_dir("a b")
     # the stage-layout records, prefix-less since 2026-09-25
@@ -613,7 +615,7 @@ def test_floor_cache_and_merged_guard(tmp_path, monkeypatch):
 
     monkeypatch.setattr(paths, "OUT", tmp_path)
     rc = _rc()
-    assert ev.arm_out(rc, ev.FLOOR_ARM) == tmp_path / "rows_step1_0921_merged"
+    assert ev.arm_out(rc, ev.FLOOR_ARM) == tmp_path / "seed_retrain_0930"
     assert ev.arm_out(rc, ev.TRAINED_ARM) == tmp_path / "t1"
 
     def rec(text, clause, d):

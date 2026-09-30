@@ -30,9 +30,10 @@ from pathlib import Path
 
 LINE = Path(__file__).resolve().parents[2]  # project/cjk_anima_scale
 sys.path.insert(0, str(LINE))
-from cjk_scale.paths import OUT, SEED_ROWS, bootstrap  # noqa: E402
+from cjk_scale.paths import OUT, SEED_ROWS_0921, bootstrap, pin_old_seed  # noqa: E402
 
 bootstrap()
+pin_old_seed()  # the retrain reads against the old seed's floor of record
 from bench._common import make_run_dir, write_result  # noqa: E402
 
 PACK = "models/vocab_packs/anima_cjk_vocab_pack"
@@ -192,7 +193,7 @@ def _rotation(A0, B0, g):
 def main():
     args = _args()
     if args.dry_run:
-        for name, p in {**RUNS, **P1, "seed": SEED_ROWS, "u_twin": U_TWIN}.items():
+        for name, p in {**RUNS, **P1, "seed": SEED_ROWS_0921, "u_twin": U_TWIN}.items():
             print(f"{name:<9} {p} {'ok' if Path(p).exists() else 'MISSING'}")
         print(f"read {C3_READ} {'ok' if C3_READ.exists() else 'MISSING'}")
         return
@@ -212,7 +213,7 @@ def main():
     table = pack.table.float()
     with safe_open(ck.dit, "pt") as f:
         t5 = f.get_tensor("net.llm_adapter.embed.weight").float()
-    seed = _rows(SEED_ROWS)
+    seed = _rows(SEED_ROWS_0921)
     u_twin = torch.load(U_TWIN, map_location="cpu", weights_only=False)[
         "u_twin"
     ].float()

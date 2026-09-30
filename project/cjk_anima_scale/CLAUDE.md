@@ -37,7 +37,7 @@ nothing here imports, paths into or configures from `../cjk_renderable_anima/`
   warm, `merge`; `legacy` reads the split pre-collapse configs for
   `experiments/`). Baking a run's rows into a pack is one command, not a
   module:
-  `.venv/bin/python scripts/toolkits/bake_vocab_pack.py output/cjk_anima_scale/<run> --out models/vocab_packs/anima_cjk_vocab_pack_<run>`.
+  `.venv/bin/python scripts/toolkits/bake_vocab_pack.py output/cjk_anima_scale/<run> --out models/vocab_packs/anima_cjk_vocab_pack_<run>` (`--glyph_route` ships routing on, as a routed run's rows need).
 - `src/` — **the stage packages, vendored 2026-09-25** (top-level `common` /
   `data` / `train` / `eval` / `scenes` / `probe`, `cli`, `stages`,
   `run_stage.py`) and **pruned the same day to the code the line runs**: the

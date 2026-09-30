@@ -34,9 +34,10 @@ os.environ["ANIMA_VOCAB_GLYPH_ROUTE"] = "1"  # every render is routed (docstring
 
 LINE = Path(__file__).resolve().parents[2]  # project/cjk_anima_scale
 sys.path.insert(0, str(LINE))
-from cjk_scale.paths import OUT, bootstrap, floor_dir  # noqa: E402
+from cjk_scale.paths import OUT, bootstrap, pin_old_seed, floor_dir  # noqa: E402
 
 bootstrap()
+pin_old_seed()  # the retrain reads against the old seed's floor of record
 from bench._common import make_run_dir, write_result  # noqa: E402
 
 

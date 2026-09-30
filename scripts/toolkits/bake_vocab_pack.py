@@ -268,6 +268,11 @@ def main() -> None:
         default=None,
         help="also symlink the pair into this ComfyUI vocab_packs folder",
     )
+    p.add_argument(
+        "--glyph_route",
+        action="store_true",
+        help="ship per-glyph routing as the pack's default (json ``glyph_route``)",
+    )
     p.add_argument("--overwrite", action="store_true")
     a = p.parse_args()
 
@@ -295,6 +300,8 @@ def main() -> None:
         ext_ids=delta["ext_ids"],
         row_text={str(k): v for k, v in row_text.items()},
     )
+    if a.glyph_route:
+        m["glyph_route"] = True
 
     out = resolve_under_home(a.out)
     if out.suffix in (".safetensors", ".json"):

@@ -85,6 +85,9 @@ SINGLE_CLAUSES = "en"
 SENT_CLAUSES = "en"
 SEEDS = 2
 GEN_STEPS, GEN_CFG, SEED = 28, 4.0, 0
+# product_criteria.md's acceptance strings (Axis 1): ``floor`` reads them on
+# every seed, beside the run's own ``read``
+ACCEPT_READ = ("はい", "おしい", "やったネ", "ちょっと来い", "こんにちは")
 # where each ruler writes its reads, under the arm dir
 READ_FILES = {
     "eval": "eval_reads.json",
@@ -360,6 +363,55 @@ def run(rc: RunConfig) -> Path:
             a = ruler_args(rc, arm, ruler)
             run_stage("native" if ruler in ("piece", "single", "sent") else ruler, a)
     return compose(rc)
+
+
+def floor(rc: RunConfig) -> Path:
+    """``floor``: the floor arm alone, for a new seed (plan_retrain § 3) — the
+    run's rulers plus ``ACCEPT_READ`` on ``sent``, rendered into the seed's
+    cache where it lacks a key (``ensure_floor``), then the totals over those
+    keys printed and written to ``<floor arm>/floor_<run>.json``. No trained
+    arm, no sheet. A routed run reads routed, as ``run``."""
+    import dataclasses
+    import os
+
+    if routed(rc):
+        os.environ["ANIMA_VOCAB_GLYPH_ROUTE"] = "1"
+    rc = dataclasses.replace(rc, read=tuple(dict.fromkeys((*rc.read, *ACCEPT_READ))))
+    arm = floor_arm_dir(rc)
+    print(f"===== {rc.name}: floor only ({arm})", flush=True)
+    out: dict = {"run": rc.name, "floor": str(arm), "rulers": {}}
+    for ruler in rulers(rc):
+        if (ruler == "piece" and not piece_vocabs(rc)) or (
+            ruler == "single" and not single_vocabs(rc)
+        ):
+            continue
+        n = ensure_floor(rc, ruler)
+        print(f"===== {rc.name} floor: {ruler} — {n} key(s) rendered", flush=True)
+        per: dict = defaultdict(list)
+        for m in _reads(rc, FLOOR_ARM, ruler):
+            per[_key(ruler, m)].append(m)
+        totals: dict = defaultdict(list)
+        for key, ms in per.items():
+            totals[key.split("|")[0] if ruler == "eval" else ruler] += ms
+        out["rulers"][ruler] = {
+            "totals": {g: _metrics(ruler, ms) for g, ms in totals.items()},
+            "strings": {k: _metrics(ruler, ms) for k, ms in per.items()},
+        }
+        for g, ms in totals.items():
+            t = _metrics(ruler, ms)
+            print(
+                f"{ruler:<7} {g:<14} {t['official']}/{t['n']} "
+                f"(loose {t['loose']}, contained {t['contained']})",
+                flush=True,
+            )
+        if ruler in ("sent", "target"):
+            for k, ms in per.items():
+                t = _metrics(ruler, ms)
+                print(f"  {k:<20} {t['official']}/{t['n']}", flush=True)
+    f = arm / f"floor_{rc.name}.json"
+    f.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"→ {f}", flush=True)
+    return f
 
 
 # ---------------------------------------------------------------------------

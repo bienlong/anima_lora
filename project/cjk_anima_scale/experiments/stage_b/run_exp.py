@@ -55,9 +55,10 @@ from pathlib import Path
 
 LINE = Path(__file__).resolve().parents[2]  # project/cjk_anima_scale
 sys.path.insert(0, str(LINE))
-from cjk_scale.paths import OUT, SEED_ROWS, bootstrap, floor_dir  # noqa: E402
+from cjk_scale.paths import OUT, SEED_ROWS_0921, bootstrap, pin_old_seed, floor_dir  # noqa: E402
 
 bootstrap()
+pin_old_seed()  # the retrain reads against the old seed's floor of record
 EXP = OUT / "experiments"  # the row arms (a trained.pt each)
 
 from bench._common import make_run_dir, write_result  # noqa: E402
@@ -308,7 +309,7 @@ def direction(ids: dict) -> dict:
     import torch
     import torch.nn.functional as F
 
-    seed, _ = rows(SEED_ROWS)
+    seed, _ = rows(SEED_ROWS_0921)
     donor, _ = rows(OUT / NAME / "trained.pt")
     d_ids = [ids[c] for c in DONOR]
     T = tangential(donor, seed, d_ids)
@@ -355,7 +356,7 @@ def build_arm(name: str, vec, step: float, tgt_ids: list[int]) -> dict:
     """The seed's trained.pt with ``step · vec`` added to the held-out rows."""
     import torch
 
-    sd = torch.load(SEED_ROWS, map_location="cpu", weights_only=False)
+    sd = torch.load(SEED_ROWS_0921, map_location="cpu", weights_only=False)
     d = sd["delta"]
     s = float(d["row_scale"])
     idx = {int(e): i for i, e in enumerate(d["ext_ids"])}
@@ -374,7 +375,7 @@ def build_arm(name: str, vec, step: float, tgt_ids: list[int]) -> dict:
         **sd,
         "delta": {**d, "raw": raw},
         "arm": "rows",
-        "seed_merged": str(SEED_ROWS),
+        "seed_merged": str(SEED_ROWS_0921),
         "transplant": {"step": step, "rows": tgt_ids, "moved": moved, "src": NAME},
     }
     dst = EXP / name

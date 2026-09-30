@@ -11,8 +11,9 @@ Where it stands: routing holds and pieces stay out (C0 / C2); the in-word
 tier is load-bearing (C1); windows compose kanji (C3); `retrain_kana`
 (174 cold kana rows) composes like `p1_mix` and holds the singles, so its
 rows are the kana half of the new seed. `retrain_kanji_b1` – `_b3` are
-trained (2026-09-28 – 30, unread), b4 is training (§ 2b, folded — § 2c);
-left: the bake.
+trained (2026-09-28 – 30, unread), b4 trained 2026-09-30 (§ 2b, folded —
+§ 2c) and is the new seed (§ 3), floored and baked 2026-09-30; left: the
+node's `fold` sync and a publish.
 
 ## 1. The kanji budget — set 2026-09-28
 
@@ -173,15 +174,34 @@ before `～ 〜` can fold onto it.
 
 ## 3. The new seed and the bake
 
-1. New seed = `retrain_kanji_b3`'s `trained.pt` (the chain holds
-   `retrain_kana` + b1–b3; no merge; b4's once it runs). The old seed's
-   piece rows ride along unused.
+1. New seed = `retrain_kanji_b4`'s `trained.pt` (the chain holds
+   `retrain_kana` + b1–b4; no merge). The old seed's piece rows ride along
+   unused. **Done 2026-09-30**: b4 trained 76 662 steps in 524 min (job
+   `20260930-004621-fb81e9`); its `trained.pt` (md5 `af99aa93…`, 2 683
+   rows) copied whole into `output/cjk_anima_scale/seed_retrain_0930/`
+   (`seed.json` there), so the floor cache is not the run's dir.
 2. `paths.SEED_ROWS` moves, and the floor is re-rendered once on the new
    seed (every later run reads against it). The old seed's floor stays as
-   the record the retrain itself is read against.
+   the record the retrain itself is read against. **Moved 2026-09-30**:
+   `SEED_ROWS` = `seed_retrain_0930/trained.pt`, the old one is
+   `SEED_ROWS_0921`; the retrain's experiments (`stage_b`, `p2_route`,
+   `c3_kanji`, `retrain_read`, `kanji_read`, `row_geometry`) call
+   `paths.pin_old_seed()` and keep reading the floor of record. The floor
+   renders through `scale.py <run> floor` (the floor arm alone, routed, the
+   run's rulers + `eval.ACCEPT_READ` on `sent` → `<floor>/floor_<run>.json`):
+   `retrain_kana` (`20260930-100904-25d9af`) and `retrain_kanji_b4`
+   (`…-100905-b7c3c6`), read in `floor_score.md` § New seed: acceptance
+   8 → 37 / 80, C3 words ≤ 1 edit 3 → 45 / 96, lone あ down (native
+   46 → 33 / 64). b4 itself has no `kanji_read`: none of its kanji has an
+   old-floor cache.
 3. The pack json carries § 2c's `fold` map.
 4. Bake with routing on: the pack ships the flag as its default, which is
-   a pack-format decision.
+   a pack-format decision. **Baked 2026-09-30**:
+   `models/vocab_packs/anima_cjk_vocab_pack_seed_retrain_0930/`
+   (`bake_vocab_pack.py --glyph_route`, base = the raw pack with `fold`;
+   baked sha `eee7fec51835…`; the 2 683 rows = raw + Δ exactly, every other
+   row byte-identical). Not published; the node's vendored `ext_vocab`
+   still lacks `fold` (§ 2c).
 
 ## 4. Open
 

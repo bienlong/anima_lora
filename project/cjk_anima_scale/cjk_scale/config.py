@@ -34,7 +34,8 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from .paths import RUN_CONFIGS, SEED_ROWS, VOCABS_DIR, trained_path
+from . import paths
+from .paths import RUN_CONFIGS, VOCABS_DIR, trained_path
 
 RUN_KEYS = ("vocabs", "read", "context")
 
@@ -103,7 +104,7 @@ class RunConfig:
         """The rows this run sits on: the ``context`` run's merged
         ``trained.pt`` (finished, not a partial), else ``paths.SEED_ROWS``."""
         if not self.context:
-            return SEED_ROWS
+            return paths.SEED_ROWS
         p = trained_path(self.context)
         assert p.is_file(), (
             f"{self.name}: context {self.context} has no rows at {p} — train it first"

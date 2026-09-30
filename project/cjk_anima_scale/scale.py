@@ -4,6 +4,7 @@
     scale.py <run> data        # CPU: vocabs → items (recipe table by kind, σ band stamped per item)
     scale.py <run> train       # GPU: the vocabs' rows, everything else frozen at the seed
     scale.py <run> eval        # GPU: floor + trained on the rulers → <run>/sheet.png + reads.json
+    scale.py <run> floor       # GPU: the floor arm alone (+ the acceptance strings) → <floor>/floor_<run>.json
     scale.py <run> conflict    # GPU: do the run's band groups pull a row the same way (no training)
     scale.py <out> merge <run> <run> …   # CPU: disjoint runs from the seed → <out>/trained.pt
     scale.py <out> merge … <run>@partial # that run's trained_partial.pt (step recorded)
@@ -31,7 +32,7 @@ from cjk_scale.paths import REPO, bootstrap  # noqa: E402
 
 bootstrap()
 
-VERBS = ("data", "train", "eval", "conflict", "merge")
+VERBS = ("data", "train", "eval", "floor", "conflict", "merge")
 COMMANDS = ("windows", "runs", "ledger")
 
 
@@ -91,6 +92,10 @@ def main(argv=None):
         from cjk_scale.eval import run
 
         run(rc)
+    elif a.verb == "floor":
+        from cjk_scale.eval import floor
+
+        floor(rc)
     elif a.verb == "conflict":
         from cjk_scale.conflict import probe
 
