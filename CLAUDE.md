@@ -98,7 +98,9 @@ Docs: shipped method deep-dives in `docs/methods/`, experimental in
 `_archive/`. Active lines with open phases live under `project/<line>/` (see
 `project/README.md`); completed lines move to `project/finished/<line>/` (e.g. the
 ResShift SR sidecar — no `make sr-*` targets, run its scripts directly); killed or
-superseded lines go to `_archive/`.
+superseded lines go to `_archive/`. Code search skips most of `project/finished/`
+(per-line `.ignore`; files live code still reads stay visible) — ask the
+**`archive-explorer`** agent about finished or archived lines instead of grepping.
 
 ## Programmatic API (embedders)
 

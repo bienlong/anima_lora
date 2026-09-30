@@ -1,3 +1,5 @@
 # Search-scope exclusions (ripgrep/fd honor this; git does NOT).
 # These trees stay tracked and committable — they are just noise in code search.
 assets/
+# project/finished/: per-line .ignore files inside it (root-anchored rules here
+# stop applying once a search starts below the repo root).
