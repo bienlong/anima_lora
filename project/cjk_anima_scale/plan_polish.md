@@ -61,6 +61,12 @@ transposes), where users render.
 
 Step 1 runs alone first; step 2 is sized on its keep count.
 
+**On the new seed (2026-09-30):** `polish_b1`'s table on `seed_retrain_0930`
+(1 362 singles, 4 steps / row, μ 0.1) cost identity: sent official 29 → 11 / 184,
+and dropping the monochrome scenes did not help (10). Warm polish in this shape
+stops. The SFX plan below waits on a cold micro arm (the report's § Verdict and
+next). Read: [`reports/polish_seed_2026_09_30.md`](reports/polish_seed_2026_09_30.md).
+
 ## SFX and small text: a text-free canvas in the post-b3 polish (planned 2026-09-29)
 
 Not run; it waits for `retrain_kanji_b3` (the polish follows the chain,

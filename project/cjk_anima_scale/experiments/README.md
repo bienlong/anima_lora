@@ -80,3 +80,14 @@ their reads are in `../_archive/reports/` and `../hypothesis.md`.
   **Ran 2026-09-28** (`native_sig12`, 291 images, 2 088 steps) → every read
   ≈ 0 vs `retrain_kana` (words official 16 → 0 / 104, singles contained
   73 → 14 / 112); plain MSE drifted further and was stopped (`../future.md` § 1).
+- `target4k/` — the seed's `target` ruler at 768×1344 (the user's ComfyUI shape,
+  4 032 tokens), beside the 512² cache. **Ran 2026-09-30** → 8 / 14 vs 5 / 14 at
+  512², but every render is a small scene on a black canvas with the string as a
+  subtitle under it. `--raw` (Δ 0) and `--base` (no pack: Japanese → `<unk>`)
+  draw the same composition, 0 / 14. The letterbox is the base's, and with no pack
+  the text sits in the bubbles (`../reports/polish_seed_2026_09_30.md`).
+- `polish_seed/` — `polish_b1` (loaded as a module, constants patched) on
+  `seed_retrain_0930`'s 1 362 singles, 4 steps / row, μ 0.1; `--read` = `sent`
+  (4 prompts × 2 seeds) + `target` 512² / 4 k against the seed's routed floor;
+  `--color` drops monochrome / line-art scenes. **Ran 2026-09-30** → sent official
+  29 → 11 / 184, ≤ 1 edit 95 → 60, targets held (`../reports/polish_seed_2026_09_30.md`).

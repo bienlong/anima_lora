@@ -174,6 +174,25 @@ Unread either way.
 4. A data micro-arm (GPU, ≈ 25 min): `p1_mix` without the 1×1 flat (one
    TABLE line), 36 donors.
 
+### 2c. A read for the premise (2026-09-30)
+
+The 14 `target` captions (hoshino ai at the bar, はい / こんにちは) at 768×1344, on
+Anima with **no vocab pack**. T5 sees one `<unk>` per quoted span, and Qwen3 reads
+the Japanese.
+
+- The base draws **Japanese-looking lines inside its own speech bubbles**, mostly
+  vertical (まだよ, えんよ, こげきたばいよ). It draws no subtitle or only a small
+  one, and 0 / 14 are correct.
+- With pack rows the text leaves the bubble for a subtitle band under the scene.
+  The seed's rows make that band large and correct (8 / 14).
+- So without a row the base already decides "a Japanese line, this size, in this
+  bubble". The rows add the string, and with it the lone data's size and paste
+  prior.
+- This supports § 2's premise, that the layout can be the base's and the row only
+  changes what the line says. It is a small read (7 prompts × 2 seeds, placement
+  judged by eye): `reports/polish_seed_2026_09_30.md` § The 4 k letterbox is the
+  base's.
+
 ## 3. The test (GPU, later)
 
 `src/eval/cf_sense.py` is a one-step x̂0 leverage read on a noised render,
