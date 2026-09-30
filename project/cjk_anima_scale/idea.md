@@ -1,5 +1,12 @@
 # idea — layout from the base, identity at low σ (2026-09-29)
 
+**Read 2026-09-30** (`reports/sigma_split_2026_09_30.md`): the band half is
+closed — below σ 0.5 neither the rows nor the caption move any text, and
+layout and string are both decided between 0.9 and 0.7. The data half goes on
+as [`plan_garble_replace.md`](plan_garble_replace.md). § 3's σ-split sampler
+exists (`generate_body`'s `context_alt` + `tag_drop_sigma`,
+`experiments/sigma_split`).
+
 Not planned, no run, no budget. **The plan stands**: `retrain_kanji_b1..b4`
 (`plan_retrain.md`), then the warm-started training after b4 as planned. If
 this idea is tried, it is tried on the rows after b4, not before and not

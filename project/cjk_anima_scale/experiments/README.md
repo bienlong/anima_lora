@@ -96,3 +96,11 @@ their reads are in `../_archive/reports/` and `../hypothesis.md`.
   (4 prompts × 2 seeds) + `target` 512² / 4 k against the seed's routed floor;
   `--color` drops monochrome / line-art scenes. **Ran 2026-09-30** → sent official
   29 → 11 / 184, ≤ 1 edit 95 → 60, targets held (`../reports/polish_seed_2026_09_30.md`).
+- `sigma_split/` — idea.md § 2b check 1 / § 3, no training: the seed's rows
+  gated by σ through the sampler's `context_alt` + `tag_drop_sigma` (Δ scale
+  1 vs 0 at encode; arms `lo` / `hi` / `garble`), read on the `sent` grid
+  against the routed floor cache; `--traj` decodes x̂0 per σ.
+  **Ran 2026-09-30** → below σ 0.5 nothing moves the text (`lo` 0 / 184,
+  `hi` = floor), text is decided at 0.9–0.7; switched at 0.8, `garble` keeps
+  the base's bubbles and reads 16 / 29 official, 61 / 92 ≤ 1 edit
+  (`../reports/sigma_split_2026_09_30.md`).
