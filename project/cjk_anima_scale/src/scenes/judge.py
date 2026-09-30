@@ -256,6 +256,29 @@ def _overlap(a, b) -> bool:
     return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
 
 
+def _merge_overlapping(boxes: list) -> list:
+    """Union overlapping boxes until none overlap."""
+    boxes = [list(b) for b in boxes]
+    merged = True
+    while merged:
+        merged = False
+        for i in range(len(boxes)):
+            for j in range(i + 1, len(boxes)):
+                if _overlap(boxes[i], boxes[j]):
+                    b, o = boxes[i], boxes.pop(j)
+                    boxes[i] = [
+                        min(b[0], o[0]),
+                        min(b[1], o[1]),
+                        max(b[2], o[2]),
+                        max(b[3], o[3]),
+                    ]
+                    merged = True
+                    break
+            if merged:
+                break
+    return boxes
+
+
 def judge(a, it: dict, reads: list, bgr) -> str:
     """Set ``boxes_anchor`` / ``regions`` / ``bubbles`` (one per anchor
     bubble; ``box`` / ``region`` / ``bubble`` = the largest) and ``read`` on
@@ -293,6 +316,13 @@ def judge(a, it: dict, reads: list, bgr) -> str:
                     max(box[3], o["box"][3]),
                 ]
         boxes.append(box)
+    if a.scene_max_regions:
+        # plan_garble_replace: hit boxes that overlap are one region, and a
+        # scene takes at most --scene_max_regions of them (off by default, so
+        # the other pools' rejudge is unchanged)
+        boxes = _merge_overlapping(boxes)
+        if len(boxes) > a.scene_max_regions:
+            return "multi_box"
     area = max(1, max((b[2] - b[0]) * (b[3] - b[1]) for b in boxes))
     others = [
         o

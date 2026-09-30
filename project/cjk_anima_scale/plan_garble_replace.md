@@ -63,8 +63,24 @@ Per kept region:
   interior) and draw, with **px fixed to the measured px** (no bubble fit)
   and the measured orientation and line count. Fonts: the render set's
   regular faces.
-- **Caption**: the canvas prompt + ` Japanese text reads as "X".`
-  (two regions: `… reads as "X". Japanese text reads as "Y".`).
+- **Caption**: the canvas prompt verbatim + one ` Japanese text reads as "X".`
+  per replaced region; nothing else in the prompt changes.
+  - `ja_garble_tag` (no clause): the tags, a `.`, then the clauses.
+  - `ja_garble_saying`: `She / He is saying something.` stays, the clauses
+    follow it.
+  - Two regions: two clauses in manga order, the right bubble first (top
+    first on a tie): `… reads as "X". Japanese text reads as "Y".`.
+
+  ```
+  canvas: …, solo, speech bubble, t-shirt. She is saying something.
+  train : …, solo, speech bubble, t-shirt. She is saying something. Japanese text reads as "中山田くんはストライカーとしては…".
+  canvas: …, speech bubble, standing, t-shirt
+  train : …, speech bubble, standing, t-shirt. Japanese text reads as "夫も幸せ者でございます". Japanese text reads as "いっつもこうだ".
+  ```
+
+  The target is the base's render of the no-quote caption with only the
+  glyphs replaced, so outside the glyph box the quote clause is asked to
+  change nothing.
 - **σ band: 0.6–0.85.** From `reports/sigma_split_2026_09_30.md`:
   - The text's place is set by σ ≈ 0.9 and its string between 0.9 and 0.7
     (traj).

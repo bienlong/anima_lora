@@ -143,3 +143,11 @@ def scene_args(g):
         default=0,
         help="scenes: keep images whose bubble fill runs to the border (open background)",
     )
+    g.add_argument(
+        "--scene_max_regions",
+        type=int,
+        default=0,
+        help="scenes: reject (multi_box) a scene with more than this many text "
+        "regions after overlapping boxes merge; 0 = no cap "
+        "(plan_garble_replace: 2)",
+    )

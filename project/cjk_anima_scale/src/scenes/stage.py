@@ -249,6 +249,11 @@ FRAMES = {
         'There is a speech bubble that reads "{a}".',
     ),
     "ja_saying": (["{bubble}", "japanese text"], '{pro} is saying "{a}".'),
+    # garble frames (plan_garble_replace): Japanese asked for without a quote,
+    # so the base lays out its own bubbles and lines (sigma_split's `garble`
+    # arm); the garble_replace data leg swaps in a real line at its px
+    "ja_garble_saying": (["{bubble}", "japanese text"], "{pro} is saying something."),
+    "ja_garble_tag": (["{bubble}", "japanese text"], ""),
 }
 JA_FRAMES = {f for f in FRAMES if f.startswith("ja_")}
 # short manga lines (3–8 glyphs) — long enough that the base draws a real
@@ -291,7 +296,12 @@ SFX_ANCHORS = [
     "WHOOSH",
     "SLAM",
 ]
-FRAME_ANCHORS = {"sfx": SFX_ANCHORS, **{f: JA_ANCHORS for f in JA_FRAMES}}
+GARBLE_FRAMES = {f for f in FRAMES if f.startswith("ja_garble")}
+FRAME_ANCHORS = {
+    "sfx": SFX_ANCHORS,
+    **{f: JA_ANCHORS for f in JA_FRAMES},
+    **{f: [""] for f in GARBLE_FRAMES},  # no quote, no anchor
+}
 FRAME_OPEN_OK = {"sfx"}  # no bubble expected: an open fill is not a reject
 PRONOUN = {"1girl": "She", "1boy": "He"}
 
@@ -334,7 +344,7 @@ def scene_items(a) -> list[dict]:
     frame_anchors = dict(FRAME_ANCHORS)
     ja_anchors = [x for x in a.scene_ja_anchors.split(",") if x]
     if ja_anchors:
-        frame_anchors.update({f: ja_anchors for f in JA_FRAMES})
+        frame_anchors.update({f: ja_anchors for f in JA_FRAMES - GARBLE_FRAMES})
     extra = [x.strip() for x in a.scene_extra_tags.split(",") if x.strip()]
     artists = artist_pool() if a.scene_artist_frac > 0 else []
     # curated well-known artists (user, 2026-09-14: sincos, hews) at 4× weight
@@ -399,7 +409,7 @@ def scene_items(a) -> list[dict]:
                 "anchor": anchor,
                 "frame": frame,
                 "clause_tpl": clause_tpl,
-                "prompt": f"{tags}. {clause}",
+                "prompt": f"{tags}. {clause}" if clause else tags,
                 "shape": list(pool.draw()),
                 "seed": a.seed * 100_000 + i,
             }
