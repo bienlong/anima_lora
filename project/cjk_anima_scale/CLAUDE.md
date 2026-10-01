@@ -55,6 +55,10 @@ nothing here imports, paths into or configures from `../finished/cjk_renderable_
   `--arm_path`, no tag fallback; `common/prompts.py` `TARGET_PROMPTS`), `data/inventory.py`'s opt-in
   `qwen_pieces(char_rows=True)` (byte-split glyphs → their `char` rows; every
   `cjk_scale` lookup passes it, the records ran without it),
+  `common/render/scene.py`'s opt-in `render_into_scene(tategaki=True)`
+  (columns top-aligned; a turned ー 〜 … placed by its ink on the column
+  axis — off, it sits up to 0.2 em left of it, as every data dir of record
+  was drawn),
   `train/stage.py`'s latent cache name hashed past 200 chars (a native-size
   dir has one shape per image), the
   trimmed `cli/` / `stages.py`, `probe/merge_tables.py` = just `row_text_map`

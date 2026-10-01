@@ -142,3 +142,18 @@ their reads are in `../_archive/reports/` and `../hypothesis.md`.
   re-rolls); at 0.9 A keeps the n-slot banner in half (official 29 / 60 vs
   B 5, dup 21 vs 48), 0.85 → 36, 0.8 → 39: the count commits between 0.95
   and 0.9, gradually (`../proposal_seed_synthesis.md` § 3).
+- `seed_synth/` — `proposal_seed_synthesis.md` step 1 at 300 renders, no
+  training: the seed rows on the scene pools' prompt stream with its text
+  frame kept (`s1w`'s bubble / saying / sign frames and six canvases, the
+  seed's training caption), a held-out kana window of 2–6 glyphs per render;
+  every render read, the near-misses redrawn in their own bubble by the
+  line's scene renderer (one line, or one column — two unequal top-aligned
+  columns from 5 glyphs; the ink kept inside the outline, the rest of the
+  bubble wiped) and read again. **Ran 2026-10-01** (render job
+  `20261001-220655-a4042f`, redraw `20261001-225714-ab075e`) → exact 97 /
+  300 (27 27 23 14 6 of 60 at 2–6 glyphs), near 175, a doubled glyph in the
+  main box 76; the text extent spreads (long side 127 / 185 / 283 px, 30 %
+  columns) where the `sent` floor's is one banner (354 / 401 / 457); 98
+  canvases, all read ≤ 1 edit (74 near-misses have no bubble, 3 do not fit).
+  The first look (the ruler's bare caption at 512²) drew the word over the
+  scene — `seed_synth_nobubble_partial/`.

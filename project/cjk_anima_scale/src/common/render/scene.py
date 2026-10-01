@@ -290,10 +290,13 @@ def anchor_residual(arr, tb, reg, tol: int = 24, open_ok: bool = False) -> float
     return float((ink & ~paint).sum()) / n if n else 0.0
 
 
-def _draw_vertical_glyph(layer, ld, ch, x, y, fs, font, color, kw):
+def _draw_vertical_glyph(layer, ld, ch, x, y, fs, font, color, kw, centre=False):
     """One glyph of a column at cell centre ``x``, cell top ``y``: the
     long-vowel bar / dashes a quarter turn clockwise, 、。 to the top-right
-    of the cell, everything else upright and centred."""
+    of the cell, everything else upright and centred. ``centre``: the turned
+    mark is placed by its ink, on the column axis and the cell's middle —
+    without it the bar sits where the font's ascent puts the horizontal
+    glyph, left of the axis by up to 0.2 em (Noto Serif CJK)."""
     from PIL import Image, ImageDraw
 
     w = ld.textlength(ch, font=font)
@@ -309,7 +312,12 @@ def _draw_vertical_glyph(layer, ld, ch, x, y, fs, font, color, kw):
             **kw,
         )
         tile = tile.rotate(-90, resample=Image.BICUBIC)
-        layer.alpha_composite(tile, (int(x - cell / 2), int(y + fs / 2 - cell / 2)))
+        bb = tile.getbbox() if centre else None
+        if bb is not None:
+            dest = (x - (bb[0] + bb[2]) / 2, y + fs / 2 - (bb[1] + bb[3]) / 2)
+        else:
+            dest = (x - cell / 2, y + fs / 2 - cell / 2)
+        layer.alpha_composite(tile, (int(dest[0]), int(dest[1])))
         return
     if ch in V_PUNCT:
         ld.text((x - w / 2 + fs * 0.4, y - fs * 0.4), ch, fill=color, font=font, **kw)
@@ -333,6 +341,7 @@ def render_into_scene(
     fewest_lines: bool = False,
     ref_text: str | None = None,
     horizontal: bool = False,
+    tategaki: bool = False,
 ):
     """Erase every anchor bubble's usable region (plus the text box padded by
     a quarter of its size — detector boxes run tight) with the bubble's
@@ -355,6 +364,11 @@ def render_into_scene(
     fit at ``min_glyph`` px per glyph (the caller draws a shorter text). Other anchor bubbles are left erased (empty bubble).
     ``stroke``: a thin outline in the fill colour around the glyphs (manga
     lettering over art).
+    ``tategaki`` (opt-in, seed_synth 2026-10-01; off = what every data dir of
+    record was drawn with): every column starts at the block's top — a column
+    break keeps the first glyphs level — instead of each column centred on
+    its own height, and a turned mark (ー 〜 …) sits on the column axis
+    (``_draw_vertical_glyph``'s ``centre``).
 
     ``ref_text`` (ΔFM, plan_synth2): a sibling of the same glyph count drawn
     by the *same* fit — same erase, font, size, line lengths, positions,
@@ -459,9 +473,11 @@ def render_into_scene(
             # the region, every column centred on its own height
             x = cx + tw / 2 - fs / 2  # centre of the first (rightmost) column
             for ln in text_lines:
-                y = cy - len(ln) * fs * V_PITCH / 2
+                y = cy - (th if tategaki else len(ln) * fs * V_PITCH) / 2
                 for ch in ln:
-                    _draw_vertical_glyph(layer, ld, ch, x, y, fs, font, color, kw)
+                    _draw_vertical_glyph(
+                        layer, ld, ch, x, y, fs, font, color, kw, centre=tategaki
+                    )
                     y += fs * V_PITCH
                 x -= fs * V_GAP
         else:
