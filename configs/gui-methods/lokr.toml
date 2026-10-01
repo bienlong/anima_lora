@@ -1,0 +1,28 @@
+network_dim = 32
+network_alpha = 32
+learning_rate = 2e-5
+max_train_epochs = 4
+save_every_n_epochs = 2
+checkpointing_epochs = 2
+use_shuffled_caption_variants = true
+cache_llm_adapter_outputs = true
+caption_dropout_rate = 0.1
+output_name = "anima_lokr"
+blocks_to_swap = 0
+use_cmmd = false
+
+# LoKr: Kronecker-product delta (w1 full x w2 full-or-lowrank). More
+# expressive per parameter than a rank-r LoRA; w2 falls back to a full
+# matrix (scale=1) when the rank is large relative to the layer dims.
+# lokr_factor: -1 = balanced split (LyCORIS default); a positive divisor
+# pins the w1 axis. Checkpoint loads in-repo only (not the ComfyUI stock
+# LoRA path).
+use_lokr = true
+lokr_factor = -1
+
+[variant]
+family = "lora"
+label = "LoKr"
+description = "LoRA + Kronecker product — more expressive per parameter; loads in-repo only."
+order = 40
+target_res = [ 896, 1024,]

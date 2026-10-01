@@ -1,0 +1,25 @@
+network_dim = 32
+network_alpha = 32
+learning_rate = 2e-5
+max_train_epochs = 4
+save_every_n_epochs = 2
+checkpointing_epochs = 2
+use_shuffled_caption_variants = true
+cache_llm_adapter_outputs = true
+caption_dropout_rate = 0.1
+output_name = "anima_rs_lora"
+blocks_to_swap = 0
+use_cmmd = false
+
+# rs-LoRA: effective scale = alpha / sqrt(r) instead of alpha / r — keeps the
+# update magnitude sane at high rank (>32). sqrt(r) is folded into the saved
+# alpha, so every kohya-format loader applies the trained scale directly.
+use_dora = false
+rs_lora = true
+
+[variant]
+family = "lora"
+label = "rs-LoRA"
+description = "LoRA with rs scaling (alpha / sqrt(r)) — more stable at high rank (>32)."
+order = 30
+target_res = [ 896, 1024,]
