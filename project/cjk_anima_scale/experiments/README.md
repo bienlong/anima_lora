@@ -124,4 +124,21 @@ their reads are in `../_archive/reports/` and `../hypothesis.md`.
   `sent` ruler at every σ or only below 0.8 (the seed rows above). **Ran
   2026-10-01** on `b0305_reband` (seed 0, 92 keys) → the layout break is in
   the residual and acts above 0.8; the mean keeps the layout and adds
-  glyphs (dup 40 → 54) (`../hypothesis.md` § Result).
+  glyphs (dup 40 → 54) (`../hypothesis.md` § Result). `full_s` (the arm's
+  rows above the switch, the seed's below) added 10-01 for `span_reband`:
+  = `full`, the arm's effect is all above 0.8.
+- `span_reband/` — `proposal_length.md` step 1: the seed's b0507
+  `scene_window` items filtered to a bubble of ≤ 2 columns / lines, no sign
+  / open region / second bubble (2 589 of 4 060), moved to σ 0.85–0.95 and
+  repeated × 4 inside the seed's mix (41 % of 25 167 records), warm μ 0.02,
+  174 kana rows × 23 steps. **Ran 2026-10-01** → the banner stays, its
+  glyphs get smaller and more: dup 100 → 113, official 29 → 16, ≤ 1 edit
+  92 → 70; box 0.156 → 0.132, box_h 0.180 → 0.211 (`../proposal_seed_synthesis.md`).
+- `inject_count/` — no training: 60 floor `sent` renders with a leftover
+  slot, the banner redrawn with the word filling its extent (`A`) or the
+  render itself (`B`), put on the sampler as `(1 − σ)·z + σ·ε` at
+  σ 0.95 / 0.9 / 0.85 / 0.8 and run out under the floor's rows and caption.
+  **Ran 2026-10-01** → at 0.95 A = B (the state is overwritten, the scene
+  re-rolls); at 0.9 A keeps the n-slot banner in half (official 29 / 60 vs
+  B 5, dup 21 vs 48), 0.85 → 36, 0.8 → 39: the count commits between 0.95
+  and 0.9, gradually (`../proposal_seed_synthesis.md` § 3).

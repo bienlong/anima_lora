@@ -86,3 +86,12 @@ items — a source-path knob the leg lacks today; past `windows.SIGMA_MAX`
 0.9, as `short50hb` was). Read on `sent` (dup, glyphs per read) and the traj
 leg (`sigma_split --traj --rows`): span at σ 0.95 and glyph count at 0.9
 against the seed's.
+
+## Result (2026-10-01): step 1 ran, the span lever is closed
+
+`experiments/span_reband` (the b0507 windows at 0.85–0.95, filtered to
+bubbles of ≤ 2 columns, warm): the banner's span does not shorten; the rows
+refill it with smaller glyphs (dup 100 → 113, official 29 → 16). The
+`inject_count` read put the count's commit between σ 0.95 and 0.9 without
+`cf_sense`. Both in `proposal_seed_synthesis.md`, which takes over the
+question.

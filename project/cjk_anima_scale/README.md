@@ -8,7 +8,8 @@ one loss, one trainer, σ per item from the band law. The **singles retrain**
 it (`plan.md`, `plan_retrain.md`, `plan_polish.md`, `hypothesis.md`,
 `idea.md`, `plan_garble_replace.md`) are under `_archive/` with what came
 before — the stage chain, the 300-piece runs, line mode, plan_2900 (see its
-README). The open question is [`proposal_length.md`](proposal_length.md).
+README). The open question is [`proposal_seed_synthesis.md`](proposal_seed_synthesis.md)
+(`proposal_length.md` ran its step 1 and is superseded).
 
 ## The vocab band law
 
@@ -44,7 +45,8 @@ A new read that changes a row of the law goes into
 
 | file | what |
 |---|---|
-| [`proposal_length.md`](proposal_length.md) | **the open question** (2026-10-01): the repeats are leftover slots — the concept so far (attack the base's own confused text region), what the garble arms closed, and the two levers that follow (span at σ ≥ 0.9 first — the seed's word items rebanded — count-CF at 0.8–0.9 second), with a no-training traj read first |
+| [`proposal_seed_synthesis.md`](proposal_seed_synthesis.md) | **the open question** (2026-10-01, evening): the rows decide what fills the text region, the base decides the region — `span_reband` (the word-length windows at 0.85–0.95 refill the banner with smaller glyphs), `shared_dir` on it (all of it above 0.8), `inject_count` (the slot count commits between σ 0.95 and 0.9, no `cf_sense`); the size-bias objection and the answer to it (no common size in the item set); the proposal: the seed's own renders with the word redrawn to fill the base's region, at 0.85–0.95 |
+| [`proposal_length.md`](proposal_length.md) | superseded (2026-10-01): the repeats are leftover slots — the concept so far (attack the base's own confused text region), what the garble arms closed, and the two levers that follow (span at σ ≥ 0.9 first — the seed's word items rebanded — count-CF at 0.8–0.9 second), with a no-training traj read first |
 | [`hypothesis.md`](hypothesis.md) | (2026-10-01) a row is one vector at every σ: an item trained above where its glyphs resolve teaches only its layout, which then overrides every caption's — band and px are one choice; three predictions |
 | [`findings.md`](findings.md) | (2026-10-01) where the text is decided on the trajectory: identity at σ 0.85–0.7 when the model knows the glyphs (small EN on the base), the base banner's ≈ 6 slots, the `japanese text` tag's text area, ！ in the leftover slot, 3 × 3 EN / kana / kanji grids, the seed's b0305 captions with uncond below 0.8 — against b0305 / b0507 |
 | [`retrain_experiments.md`](retrain_experiments.md) | the retrain's record (2026-09-28): why the singles re-seed cold (P1 / P1b), per-glyph routing (P2), the windowed word pool, checks C0–C3, `retrain_kana` trained and read, the code that landed |
@@ -78,7 +80,9 @@ ComfyUI Adapter node ≥ 3.13.0). Details and numbers: `retrain_experiments.md`,
 
 2026-10-01: the polish passes on the seed (`polish_seed`, `garble_replace`)
 moved layout but not strings; the repeats are slots the word leaves over
-(`proposal_length.md`).
+(`proposal_length.md`). Evening: `span_reband` + `inject_count` — the rows
+fill the base's region, they do not resize it; the count commits between
+σ 0.95 and 0.9 (`proposal_seed_synthesis.md`).
 
 ## Running a run
 

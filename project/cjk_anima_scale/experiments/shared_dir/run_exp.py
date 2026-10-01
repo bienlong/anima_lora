@@ -59,6 +59,7 @@ ARMS = {
     "mean": ("mean", "mean"),
     "nomean": ("nomean", "nomean"),
     "full": ("full", "full"),
+    "full_s": ("full", "seed"),  # the arm's rows above the switch, the seed's below
 }
 
 

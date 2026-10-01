@@ -113,3 +113,16 @@ the claim is wrong: layout leaks in whatever band the item trains at.
 - The kanji-only strings (山田太郎, 日本人, 大丈夫, 何時間) read the same in
   every arm: the arm moved kana rows only.
 
+
+## Result — predictions 1–2 (`experiments/span_reband` + `shared_dir`, 2026-10-01)
+
+Prediction 2 ran as `span_reband` (the seed's b0507 windows, ≈ 34 px, at
+0.85–0.95, warm μ 0.02; `proposal_seed_synthesis.md` § 1): the floor's
+layout holds (the banner stays) and identity does not move — it falls
+(official 29 → 16, ≤ 1 edit 92 → 70) while the banner's glyphs get smaller
+and more (dup 100 → 113). Prediction 1 on that arm (`shared_dir`, seed 0):
+`full_s` (arm above 0.8 / seed below) = `full` on every count, `s_full`
+(seed above / arm below) = the floor. The arm's whole effect is above 0.8;
+the gate has nothing to restore. H1 holds a third time; what the band
+teaches is the item's glyph size relative to its region, and the region
+itself stays the base's (`proposal_seed_synthesis.md` § Reading).
