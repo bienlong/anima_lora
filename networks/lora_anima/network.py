@@ -2032,6 +2032,17 @@ class LoRANetwork(_NetworkMetricsMixin, torch.nn.Module):
                 upkeys.append(key.replace("lora_down", "lora_up"))
                 alphakeys.append(key.replace("lora_down.weight", "alpha"))
 
+        if not downkeys:
+            # Kronecker-family networks (LoKr/DoKr) carry no lora_down keys —
+            # there is nothing the up/down max-norm clamp applies to. Return
+            # zeros instead of dividing by an empty list (used to raise
+            # ZeroDivisionError at the end of the first step).
+            logger.warning(
+                "scale_weight_norms: no lora_down/up pairs in this network "
+                "(LoKr/DoKr have none) — the regularizer is a no-op for it."
+            )
+            return 0, 0.0, 0.0
+
         for i in range(len(downkeys)):
             down = state_dict[downkeys[i]].to(device)
             up = state_dict[upkeys[i]].to(device)

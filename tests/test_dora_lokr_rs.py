@@ -434,3 +434,23 @@ def test_defuse_carries_dora_scale_chunks():
         ds = sd[f"lora_unet_blocks_0_self_attn_{letter}_proj.dora_scale"]
         assert torch.equal(ds, chunks[i])
     assert not any("qkv_proj" in k for k in sd)
+
+
+def test_max_norm_regularization_noops_on_kron_networks():
+    # Regression: scale_weight_norms on an all-LoKr network used to raise
+    # ZeroDivisionError (no lora_down keys → empty norms list).
+    import types
+
+    from networks.lora_anima.network import LoRANetwork
+
+    fake = types.SimpleNamespace(
+        state_dict=lambda: {
+            "lora_unet_blocks_0_self_attn_qkv_proj.lokr_w1.weight": torch.randn(4, 4),
+            "lora_unet_blocks_0_self_attn_qkv_proj.lokr_w2_b.weight": torch.randn(4, 4),
+            "lora_unet_blocks_0_self_attn_qkv_proj.alpha": torch.tensor(4.0),
+        }
+    )
+    keys_scaled, mean_norm, max_norm = LoRANetwork.apply_max_norm_regularization(
+        fake, 5.0, torch.device("cpu")
+    )
+    assert keys_scaled == 0 and mean_norm == 0.0 and max_norm == 0.0
