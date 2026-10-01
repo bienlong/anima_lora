@@ -939,7 +939,13 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         if sel is None:
             return
         tiers, weights = sel
+        # Source dir follows the tab's configured source_image_dir (the task
+        # also falls back to the config chain, but passing it explicitly keeps
+        # the job log unambiguous).
+        src = str(self.values().get("source_image_dir") or "").strip()
         argv = ["tasks.py", "multires", "--tiers", ",".join(str(x) for x in tiers)]
+        if src:
+            argv += ["--src", src]
         if weights:
             argv += ["--weights", weights]
         self._submit(

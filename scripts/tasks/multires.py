@@ -89,7 +89,21 @@ def cmd_multires(args: list[str]) -> None:
         )
         raise SystemExit(1)
 
-    src = src or "image_dataset"
+    # Source + output roots follow the config chain (preprocess.toml →
+    # base.toml → preset), same as every other preprocess task — a user with
+    # a customized source_image_dir must not silently preprocess nothing.
+    try:
+        from library.config.io import load_path_overrides
+
+        overrides = load_path_overrides()
+    except (
+        Exception
+    ) as e:  # config chain broken → hard defaults + let resize fail loudly
+        print(f"[multires] could not read config chain ({e}); using defaults")
+        overrides = {}
+    src = src or str(overrides.get("source_image_dir") or "image_dataset")
+    resized_root = str(overrides.get("resized_image_dir") or DEFAULT_RESIZED_ROOT)
+    lora_root = str(overrides.get("lora_cache_dir") or DEFAULT_LORA_ROOT)
     weights = parse_weights(weights_raw, tiers)
     repeats = weights_to_repeats(weights)
 
@@ -97,8 +111,28 @@ def cmd_multires(args: list[str]) -> None:
     # Absolute dirs for the subprocess passes; the final blueprint keeps
     # repo-relative paths (matching base.toml's convention) so it stays
     # portable across checkouts.
-    abs_resized_root = str(root / DEFAULT_RESIZED_ROOT)
-    abs_lora_root = str(root / DEFAULT_LORA_ROOT)
+    abs_resized_root = str(root / resized_root)
+    abs_lora_root = str(root / lora_root)
+
+    src_path = Path(src)
+    if not skip_preprocess and not src_path.is_absolute():
+        src_path = root / src
+    if not skip_preprocess:
+        n_src = sum(
+            1
+            for p in src_path.rglob("*")
+            if p.is_file()
+            and p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+        )
+        if n_src == 0:
+            raise SystemExit(
+                f"[multires] source dir {src_path} contains no images — "
+                "check the source dir (Preprocess 页的 source_image_dir) and "
+                "retry. Refusing to continue: the per-tier preprocess would "
+                "produce empty dirs and training would later fail with "
+                "'No data found'."
+            )
+        print(f"[multires] source: {src_path} ({n_src} images)")
 
     if not skip_preprocess:
         for tier in tiers:
@@ -120,7 +154,7 @@ def cmd_multires(args: list[str]) -> None:
                     "--dataset_config",
                     tmp_name,
                     "--src",
-                    str(Path(src).resolve()),
+                    str(src_path.resolve()),
                     "--target_res",
                     str(tier),
                 ]
@@ -139,6 +173,16 @@ def cmd_multires(args: list[str]) -> None:
                         f"[multires] preprocess failed for tier {tier} "
                         f"(exit {result.returncode})"
                     )
+                # Fail fast on an empty tier: training on a blueprint whose
+                # subsets hold 0 images ends in the cryptic "No data found".
+                n_png = sum(1 for p in Path(image_dir).rglob("*.png") if p.is_file())
+                if n_png == 0:
+                    raise SystemExit(
+                        f"[multires] tier {tier}: resize produced 0 images in "
+                        f"{image_dir} (source {src_path} had {n_src}). Nothing "
+                        "was trained-on-able — check the source dir and rerun."
+                    )
+                print(f"[multires] tier {tier}: {n_png} images resized")
             finally:
                 try:
                     os.unlink(tmp_name)
@@ -147,8 +191,9 @@ def cmd_multires(args: list[str]) -> None:
     else:
         print("[multires] --skip-preprocess: writing blueprint only")
 
+    # Blueprint paths stay repo-relative (and POSIX) for portability.
     config = multires_dataset_config(
-        tiers, repeats, resized_root=DEFAULT_RESIZED_ROOT, lora_root=DEFAULT_LORA_ROOT
+        tiers, repeats, resized_root=resized_root, lora_root=lora_root
     )
     out_path = Path(dataset_out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
