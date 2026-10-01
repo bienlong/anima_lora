@@ -196,10 +196,13 @@ class Splitter:
                 return step(latents, noise_pred, sigmas, i)
 
             S.step = rec
+        a2 = self._args(it["caption"], it["seed"])
+        if "shape" in it:  # an item's own (W, H)
+            a2.image_size = (it["shape"][1], it["shape"][0])
         try:
             with self.torch.no_grad():
                 lat = G.generate(
-                    self._args(it["caption"], it["seed"]),
+                    a2,
                     self.gen,
                     self.shared,
                     precomputed_text_data={"context": hi, "context_null": null},
@@ -953,6 +956,420 @@ def en_small(label: str, sigmas: tuple = EN_SMALL_SIGMAS) -> None:
     print(f"→ {run_dir / 'result.json'}", flush=True)
 
 
+# --en_grid: the base alone (row Δ 0) writing nine EN words in the 3 × 3 flat
+# grid (the grid items' frame + one position clause per cell, the caption the
+# base binds clause → cell on). x̂0 per σ down to 0.5: is the word decided at
+# 0.85–0.7 here too, with the cells laid out by the caption?
+EN_GRID_POOL = (
+    "HELLO STOP YES WAIT SORRY WHAT OK RUN HELP GO HEY CAT DOG MOON STAR FIRE "
+    "RAIN BLUE BOOK CAKE TREE FISH LOVE HOME SNOW KING GOLD BIRD MILK DOOR "
+    "NIGHT APPLE WATER HAPPY MUSIC DREAM"
+).split()
+EN_GRID_SETS, EN_GRID_SEEDS = 8, (0, 1)
+EN_GRID_SIGMAS = (1.0, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5, 0.0)
+
+
+def en_grid_items() -> list[dict]:
+    import random
+
+    from common.prompts import grid_caption
+
+    rng = random.Random(0)
+    items = []
+    for gi in range(EN_GRID_SETS):
+        words = rng.sample(EN_GRID_POOL, 9)
+        cap = grid_caption("flat", 3, 3, words, lang="english")
+        for seed in EN_GRID_SEEDS:
+            items.append({"gi": gi, "seed": seed, "words": words, "caption": cap})
+    return items
+
+
+def en_grid(label: str, sigmas: tuple = EN_GRID_SIGMAS) -> None:
+    import statistics as st
+
+    from PIL import Image
+
+    from common.readers import Readers, contact_sheet, read_scored
+
+    root = OUT / "experiments" / "sigma_split_en_grid"
+    sp = Splitter()
+    manifest = []
+    for it in en_grid_items():
+        d = root / f"g{it['gi']}_s{it['seed']}"
+        d.mkdir(parents=True, exist_ok=True)
+        x0s: dict = {}
+        sp.render(d / "sig0.00.png", it, "raw", "raw", 1.0, x0s)
+        steps = sorted(x0s)
+        for target in sigmas:
+            fn = d / f"sig{target:.2f}.png"
+            if target == 0.0:
+                sig = 0.0
+            else:
+                i = min(steps, key=lambda j: abs(x0s[j][0] - target))
+                sig = x0s[i][0]
+                sp.decode(x0s[i][1], fn)
+            manifest.append(
+                {
+                    "file": str(fn),
+                    "gi": it["gi"],
+                    "seed": it["seed"],
+                    "words": it["words"],
+                    "text": " ".join(it["words"]),
+                    "caption": it["caption"],
+                    "sigma_target": target,
+                    "sigma": sig,
+                }
+            )
+        print(f"  en_grid g{it['gi']} s{it['seed']}", flush=True)
+    device = sp.device
+    sp.free()
+    rd = Readers(device)
+    for m in manifest:
+        reads = read_scored(rd, m)
+        got = set()
+        for r in reads:
+            got.update(_words(r.get("vl") or ""))
+        want = [w.casefold() for w in m["words"]]
+        m["hits"] = [w in got for w in want]
+        m["recall"] = sum(m["hits"]) / len(want)
+    (root / "en_grid_reads.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    per = {}
+    for target in sigmas:
+        ms = [m for m in manifest if m["sigma_target"] == target]
+        per[f"{target:g}"] = {
+            "n": len(ms),
+            "sigma": round(ms[0]["sigma"], 3),
+            "recall": round(st.mean(m["recall"] for m in ms), 3),
+            "all9": sum(m["recall"] == 1.0 for m in ms),
+        }
+    print("===== en_grid: 3×3 flat, 9 EN words", flush=True)
+    for k, v in per.items():
+        print(
+            f"  σ {k:>4} (step σ {v['sigma']}): recall {v['recall']:.2f}  "
+            f"all 9 {v['all9']}/{v['n']}",
+            flush=True,
+        )
+    half = EN_GRID_SETS // 2
+    for part, gis in (("a", range(half)), ("b", range(half, EN_GRID_SETS))):
+        rows = []
+        for m in (m for m in manifest if m["gi"] in gis):
+            missed = [w for w, h in zip(m["words"], m["hits"]) if not h]
+            rows.append(
+                (
+                    Image.open(m["file"]).convert("RGB"),
+                    [
+                        f"g{m['gi']} s{m['seed']} σ {m['sigma']:.2f}",
+                        f"recall {m['recall']:.2f}",
+                        f"miss {' '.join(missed)[:22]}",
+                    ],
+                )
+            )
+        contact_sheet(rows, root / f"sheet_{part}.png", thumb=200, cols=len(sigmas))
+    run_dir = make_run_dir(
+        "sigma_split",
+        label=label,
+        root=LINE / "experiments" / "sigma_split" / "results",
+    )
+    write_result(
+        run_dir,
+        script=__file__,
+        args=argparse.Namespace(label=label, en_grid=True, pool=EN_GRID_POOL),
+        label=label,
+        metrics={"sigmas": sigmas, "per_sigma": per},
+        artifacts=[str(root)],
+    )
+    print(f"→ {run_dir / 'result.json'}", flush=True)
+
+
+# --ja_grid: the seed rows on grid_single's own caption (b0709: 3 × 3, flat or
+# bubble frame, one trained single per cell, 512²) — kana sets and kanji sets
+# (retrain_kanji_b1's, the most frequent). Read per cell (the final image cut
+# into its 3 × 3) and x̂0 per σ, as --en_grid.
+JA_GRID_KANA = (
+    "あいうえおかがきぎくぐけげこごさざしじすずせぜそぞただちぢつづてでとどなにぬねのはばぱ"
+    "ひびぴふぶぷへべぺほぼぽまみむめもやゆよらりるれろわをん"
+    "アイウエオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂツヅテデトドナニヌネノハバパ"
+    "ヒビピフブプヘベペホボポマミムメモヤユヨラリルレロワヲン"
+)
+JA_GRID_SEED = 0
+JA_GRID_SIGMAS = EN_GRID_SIGMAS
+
+
+def ja_grid_items() -> list[dict]:
+    import random
+
+    from common.prompts import grid_caption
+
+    kanji = [
+        ln.split("\t")[0]
+        for ln in (LINE / "assets/vocabs/ja_retrain_kanji_b1.txt")
+        .read_text("utf-8")
+        .splitlines()
+        if ln and not ln.startswith("#")
+    ]
+    rng = random.Random(0)
+    items = []
+    for kind, pool in (("kana", list(JA_GRID_KANA)), ("kanji", kanji)):
+        for gi in range(8):
+            frame = ("flat", "bubble")[gi % 2]
+            glyphs = rng.sample(pool, 9)
+            items.append(
+                {
+                    "kind": kind,
+                    "gi": gi,
+                    "frame": frame,
+                    "seed": JA_GRID_SEED,
+                    "glyphs": glyphs,
+                    "caption": grid_caption(frame, 3, 3, glyphs),
+                }
+            )
+    return items
+
+
+def ja_grid(
+    label: str, below: str = "seed", switch: float = 1.0, sigmas=JA_GRID_SIGMAS
+) -> None:
+    """``below`` / ``switch``: the conditional below σ ``switch`` (``uncond`` =
+    the negative embedding, as § 5's arm); the seed rows above it."""
+    import numpy as np
+    from PIL import Image
+
+    from common.readers import Readers, contact_sheet, load_bgr
+
+    base = OUT / "experiments" / "sigma_split_ja_grid"
+    root = base if below == "seed" else base.with_name(f"{base.name}_{below}{switch:g}")
+    sp = Splitter()
+    manifest = []
+    for it in ja_grid_items():
+        d = root / f"{it['kind']}{it['gi']}_{it['frame']}"
+        d.mkdir(parents=True, exist_ok=True)
+        x0s: dict = {}
+        sp.render(d / "sig0.00.png", it, "seed", below, switch, x0s)
+        steps = sorted(x0s)
+        for target in sigmas:
+            fn = d / f"sig{target:.2f}.png"
+            if target == 0.0:
+                sig = 0.0
+            else:
+                i = min(steps, key=lambda j: abs(x0s[j][0] - target))
+                sig = x0s[i][0]
+                sp.decode(x0s[i][1], fn)
+            manifest.append(
+                {k: it[k] for k in ("kind", "gi", "frame", "seed", "glyphs", "caption")}
+                | {"file": str(fn), "sigma_target": target, "sigma": sig}
+            )
+        print(f"  ja_grid {it['kind']}{it['gi']} {it['frame']}", flush=True)
+    device = sp.device
+    sp.free()
+    rd = Readers(device)
+    for m in manifest:
+        bgr = load_bgr(Path(m["file"]))
+        H, W = bgr.shape[:2]
+        whole = rd.read_image(bgr, whole=True)
+        text = "".join((r.get("sfx") or "") + (r.get("vl") or "") for r in whole)
+        m["anywhere"] = [g in text for g in m["glyphs"]]
+        cells = []
+        for k, g in enumerate(m["glyphs"]):
+            r, c = divmod(k, 3)
+            crop = np.ascontiguousarray(
+                bgr[r * H // 3 : (r + 1) * H // 3, c * W // 3 : (c + 1) * W // 3]
+            )
+            reads = rd.read_image(crop, whole=True)
+            cells.append(
+                {
+                    "glyph": g,
+                    "hit": any(
+                        g in (x.get("sfx") or "") + (x.get("vl") or "") for x in reads
+                    ),
+                    "reads": [[x.get("sfx"), x.get("vl")] for x in reads],
+                }
+            )
+        m["cells"] = cells
+        m["cell_hits"] = sum(c["hit"] for c in cells)
+        m["any_hits"] = sum(m["anywhere"])
+    (root / "ja_grid_reads.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    per = {}
+    for kind in ("kana", "kanji"):
+        for target in sigmas:
+            ms = [
+                m for m in manifest if m["kind"] == kind and m["sigma_target"] == target
+            ]
+            per[f"{kind} {target:g}"] = {
+                "n": len(ms),
+                "sigma": round(ms[0]["sigma"], 3),
+                "cell": sum(m["cell_hits"] for m in ms),
+                "anywhere": sum(m["any_hits"] for m in ms),
+                "of": 9 * len(ms),
+            }
+    print("===== ja_grid: 3×3, one trained single per cell, seed rows", flush=True)
+    for k, v in per.items():
+        print(
+            f"  {k:>11} (step σ {v['sigma']}): in cell {v['cell']}/{v['of']}  "
+            f"anywhere {v['anywhere']}/{v['of']}",
+            flush=True,
+        )
+    finals = []
+    for kind in ("kana", "kanji"):
+        rows = []
+        for m in (m for m in manifest if m["kind"] == kind):
+            rows.append(
+                (
+                    Image.open(m["file"]).convert("RGB"),
+                    [
+                        f"{kind}{m['gi']} {m['frame']} σ {m['sigma']:.2f}",
+                        f"cell {m['cell_hits']}/9 any {m['any_hits']}/9",
+                        "".join(m["glyphs"]),
+                    ],
+                )
+            )
+            if m["sigma_target"] == 0.0:
+                finals.append(rows[-1])
+        contact_sheet(rows, root / f"sheet_{kind}.png", thumb=200, cols=len(sigmas))
+    contact_sheet(finals, root / "sheet_final.png", thumb=384, cols=4)
+    if below != "seed":  # each final beside the seed-only render (same noise)
+        pairs = []
+        for m in (m for m in manifest if m["sigma_target"] == 0.0):
+            ref = base / Path(m["file"]).parent.name / "sig0.00.png"
+            name = f"{m['kind']}{m['gi']} {m['frame']}"
+            if ref.exists():
+                pairs.append((Image.open(ref).convert("RGB"), [f"{name} seed only"]))
+            pairs.append(
+                (
+                    Image.open(m["file"]).convert("RGB"),
+                    [f"{name} {below} < {switch:g}", f"cell {m['cell_hits']}/9"],
+                )
+            )
+        contact_sheet(pairs, root / "sheet_vs_seed.png", thumb=300, cols=4)
+    run_dir = make_run_dir(
+        "sigma_split",
+        label=label,
+        root=LINE / "experiments" / "sigma_split" / "results",
+    )
+    write_result(
+        run_dir,
+        script=__file__,
+        args=argparse.Namespace(label=label, ja_grid=True, below=below, switch=switch),
+        label=label,
+        metrics={"sigmas": sigmas, "per": per},
+        artifacts=[str(root)],
+    )
+    print(f"→ {run_dir / 'result.json'}", flush=True)
+
+
+# --b0305: the seed's own b0305 training items (scene_window, 12–24 px dialogue
+# windows at 0.3–0.5) as prompts — 4 from retrain_kana, 4 from
+# retrain_kanji_b4, each at its own shape × 2 seeds; seed rows throughout vs
+# seed rows above 0.8 and the negative embedding below (§ 5's `uncond`).
+B0305_RUNS = ("retrain_kana", "retrain_kanji_b4")
+B0305_ARMS = {"seed": ("seed", 1.0), "uncond0.8": ("uncond", 0.8)}
+
+
+def b0305_items() -> list[dict]:
+    import random
+
+    items = []
+    for run in B0305_RUNS:
+        recs = [
+            json.loads(ln)
+            for ln in (OUT / run / "data" / "train.jsonl").open(encoding="utf-8")
+        ]
+        recs = [r for r in recs if r["group"] == "b0305"]
+        for k, r in enumerate(random.Random(0).sample(recs, 4)):
+            for seed in (0, 1):
+                items.append(
+                    {
+                        "key": f"{run.split('_')[-1]}{k}",
+                        "seed": seed,
+                        "text": r["text"],
+                        "caption": r["caption"],
+                        "shape": r["shape"],
+                        "px": r["px"],
+                        "train_file": r["file"],
+                    }
+                )
+    return items
+
+
+def b0305(label: str) -> None:
+    from PIL import Image
+
+    from common.readers import Readers, contact_sheet, hit, read_scored
+
+    root = OUT / "experiments" / "sigma_split_b0305"
+    items = b0305_items()
+    sp = Splitter()
+    manifest = []
+    for it in items:
+        for arm, (below, switch) in B0305_ARMS.items():
+            fn = root / arm / f"{it['key']}_s{it['seed']}.png"
+            sp.render(fn, it, "seed", below, switch)
+            manifest.append(it | {"arm": arm, "file": str(fn)})
+        print(f"  b0305 {it['key']} s{it['seed']} {it['text']}", flush=True)
+    device = sp.device
+    sp.free()
+    rd = Readers(device)
+    for m in manifest:
+        reads = read_scored(rd, m)
+        m["official"] = hit(reads, m["text"], "sfx") and hit(reads, m["text"], "vl")
+        m["any_exact"] = hit(reads, m["text"], "sfx") or hit(reads, m["text"], "vl")
+        m["vl"] = [r.get("vl") for r in reads if not r.get("whole")]
+    (root / "b0305_reads.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    metrics = {}
+    for arm in B0305_ARMS:
+        ms = [m for m in manifest if m["arm"] == arm]
+        metrics[arm] = {
+            "n": len(ms),
+            "official": sum(m["official"] for m in ms),
+            "any_exact": sum(m["any_exact"] for m in ms),
+            "cer_vl": round(sum(m["cer_vl"] for m in ms) / len(ms), 3),
+        }
+        print(f"===== b0305 {arm}: {metrics[arm]}", flush=True)
+    rows = []
+    by = {(m["key"], m["seed"], m["arm"]): m for m in manifest}
+    for it in items:
+        if it["seed"] == 0 and Path(it["train_file"]).exists():  # img/ may be pruned
+            rows.append(
+                (
+                    Image.open(it["train_file"]).convert("RGB"),
+                    [f"{it['key']} train item", it["text"], f"px {it['px']}"],
+                )
+            )
+        for arm in B0305_ARMS:
+            m = by[(it["key"], it["seed"], arm)]
+            vl = max(m["vl"] or [""], key=lambda v: len(v or ""))
+            rows.append(
+                (
+                    Image.open(m["file"]).convert("RGB"),
+                    [
+                        f"{it['key']} s{it['seed']} {arm}",
+                        f"off {int(m['official'])} cer {m['cer_vl']:.2f}",
+                        f"vl {(vl or '')[:20]}",
+                    ],
+                )
+            )
+    contact_sheet(rows, root / "sheet.png", thumb=300, cols=4)
+    run_dir = make_run_dir(
+        "sigma_split",
+        label=label,
+        root=LINE / "experiments" / "sigma_split" / "results",
+    )
+    write_result(
+        run_dir,
+        script=__file__,
+        args=argparse.Namespace(label=label, b0305=True, arms=B0305_ARMS),
+        label=label,
+        metrics=metrics,
+        artifacts=[str(root)],
+    )
+    print(f"→ {run_dir / 'result.json'}", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--label", required=True)
@@ -974,7 +1391,49 @@ def main():
     ap.add_argument(
         "--en_small", action="store_true", help="base EN text by length, x̂0 per σ"
     )
+    ap.add_argument(
+        "--en_grid", action="store_true", help="base EN 3×3 word grid, x̂0 per σ"
+    )
+    ap.add_argument(
+        "--ja_grid", action="store_true", help="seed rows, 3×3 kana / kanji grid"
+    )
+    ap.add_argument(
+        "--ja_below",
+        default="seed",
+        choices=("seed", "uncond", "raw", "unk"),
+        help="ja_grid: the conditional below --switch",
+    )
+    ap.add_argument(
+        "--b0305", action="store_true", help="b0305 training items: seed vs uncond<0.8"
+    )
     args = ap.parse_args()
+    if args.b0305:
+        items = b0305_items()
+        print(f"b0305: {len(items)} renders × {len(B0305_ARMS)} arms", flush=True)
+        for it in items[::2]:
+            print(f"  {it['key']} {it['shape']} px {it['px']}: {it['caption'][-90:]}")
+        if not args.dry_run:
+            b0305(args.label)
+        return
+    if args.ja_grid:
+        items = ja_grid_items()
+        print(f"ja_grid: {len(items)} renders × {len(JA_GRID_SIGMAS)} σ", flush=True)
+        for it in (items[0], items[9]):
+            print(f"  {it['caption']}", flush=True)
+        if not args.dry_run:
+            ja_grid(
+                args.label,
+                args.ja_below,
+                args.switch if args.ja_below != "seed" else 1.0,
+            )
+        return
+    if args.en_grid:
+        items = en_grid_items()
+        print(f"en_grid: {len(items)} renders × {len(EN_GRID_SIGMAS)} σ", flush=True)
+        print(f"  {items[0]['caption']}", flush=True)
+        if not args.dry_run:
+            en_grid(args.label)
+        return
     if args.en_small:
         print(
             f"en_small: {len(EN_SMALL)} × 8 renders × {len(EN_SMALL_SIGMAS)} σ",

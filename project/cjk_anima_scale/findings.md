@@ -21,7 +21,8 @@ was trained on (`builder.TABLE` b0507 / b0305, `windows.py`'s 12–24 px rows).
   12–24 px row is ceiling-only (`cf_band_a1`, teacher-forced on a noised clean
   render), and b0507 for words was borrowed from the piece read
   (`micro_cf_0922`), which per-glyph routing no longer uses (こんにちは encodes
-  to five single rows).
+  to five single rows). § 8 qualifies this for the seed's small JA: with the
+  conditional dropped at 0.8, its b0305 strings do not survive.
 - **The `japanese text` tag sets a text area beyond the quoted word.** With it,
   a 2-glyph word gets the long banner or a second garble line; without it, the
   line shrinks to the word (§ 3). It does not set the one leftover slot of a
@@ -33,6 +34,13 @@ was trained on (`builder.TABLE` b0507 / b0305, `windows.py`'s 12–24 px rows).
 - **The repeats are the base banner's ≈ 6 slots minus the word.** A caption
   that fills them reads better: こんにちはは 4 / 8 vs こんにちは 2 / 8, and
   こんにちは！ (！ folds to base T5) 5 / 8 with 7 / 8 free of repeats (§ 1–2).
+
+- **The σ that sets a glyph follows its rendered size, not the script.** EN
+  words in a 3 × 3 grid read by 0.85–0.75 on the base (§ 6); the seed's
+  trained singles in the same grid (≈ 100 px) are set by 0.9 and survive the
+  conditional dropped at 0.8, bar dakuten / handakuten (§ 7); the seed's own
+  b0305 captions lose every string when it is dropped at 0.8 (§ 8). Slot count
+  and layout are set at σ ≥ 0.9 in all three.
 
 Not yet a band change: the rows are one vector at every σ, so what a low band
 teaches still acts at high σ. Which band to train in is a training read; these
@@ -174,6 +182,89 @@ Matches § 4: identity forms over 0.85–0.7, large glyphs first, so 0.8 cuts
 through it. The rows have to act across 0.9–0.7, the smaller the glyph the
 lower; 0.8–0.95 alone cannot carry it.
 
+## 6. A 3 × 3 EN word grid on the base (`--en_grid`)
+
+The base alone (row Δ 0) on grid_single's own flat caption (`white
+background, …, english text. On the top left, English text reads as "SNOW".
+…`, nine distinct 3–5-letter words from a 36-word pool), 8 word sets × 2
+seeds, 512², x̂0 per σ, VL word recall (whole image). Job
+`20261001-172804-a5096f`, `results/20261001-1731-en_grid/`.
+
+| σ | 1.0 | 0.95 | 0.9 | 0.85 | 0.8 | 0.75 | 0.7 | 0.6 | 0.5 | 0 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| recall | 0.00 | 0.00 | 0.16 | 0.60 | 0.76 | 0.84 | 0.84 | 0.84 | 0.84 | 0.84 |
+| all 9 words | 0 | 0 | 0 | 0 | 3 | 7 | 7 | 7 | 7 | 7 / 16 |
+
+- The rows are placed at σ 1.0 (ink blobs in the cell rows), the slots at
+  0.95. Letters form at 0.9, most words read at 0.85, the misspellings are
+  fixed by 0.8–0.75; below 0.75 only colour and stroke weight change. Every
+  final misspelling (`FLUE`, `FOG`, `TREY`, `APLE`) has its shape at ≈ 0.8.
+- Seed 0: recall 0.99, a clean 3 × 3. Seed 1: 0.69, every miss a layout miss —
+  the middle row empty or one word, the top / bottom rows 4-slot bands
+  filled with a repeat (`SNOW GOLD GOLD YES`, `RAIN MUSIC MUSIC GO`,
+  `FISH NIGHT NIGHT OK`), the slot count already visible at 0.95. The base's
+  own EN shows § 2's leftover-slot repeat.
+
+## 7. The seed rows on grid_single's caption (`--ja_grid [--ja_below uncond --switch 0.8]`)
+
+The seed rows on b0709's grid_single caption, 3 × 3, flat / `multiple
+speech bubbles` frame alternating, one trained single per cell: 8 kana
+grids (random hiragana / katakana, no small kana or punctuation) and 8 kanji
+grids (`ja_retrain_kanji_b1`, the most frequent), one seed, 512². Read per
+cell (the image cut into its 3 × 3) and anywhere (whole-image reads). Jobs
+`20261001-173914-2a059b` (seed rows throughout), `20261001-175750-da0707`
+(seed rows above 0.8, the negative embedding below — § 5's `uncond`), same
+noise.
+
+| cell hits / 72 | 0.95 | 0.9 | 0.85 | 0.8 | 0.75 | 0.6 | final | final, uncond < 0.8 |
+|---|---|---|---|---|---|---|---|---|
+| kana | 37 | 55 | 61 | 63 | 68 | 67 | 64 | 61 |
+| kanji | 27 | 49 | 56 | 52 | 49 | 48 | 45 | 47 |
+
+- The grid renders as the training grids do: font-like glyphs on white, one
+  per cell. The bubble frame draws no bubbles (8 / 8 a flat grid).
+- Kana: 68 / 72 right by eye; the misses are shape neighbours (ガ → が,
+  ク → タ, グ → ダ) and one glyph of the grid repeated (ロ → ヲ). Kanji: the
+  low-stroke frequent ones are clean (力 本 水 先 火 犬 社 手 少 体); the misses
+  are a similar kanji (忘 → 志, 貴 → 責 / 賁, 安 → 友, 完 → 売) or a plausible
+  non-kanji of the right radicals (勝, 場, 羅, 嫌), one a seal-like box.
+- A step above EN: layout and colour at σ 1.0, the glyph outline at 0.95, its
+  identity by 0.9 — a wrong kanji is wrong from 0.95 and never corrected. The
+  kanji read falls 56 → 45 after 0.85 with the shapes unchanged on the sheet:
+  outlines and gradients added late (kanji4) cost the reader, not the glyph.
+- With the conditional dropped at 0.8 the grid comes out the same — layout,
+  colour, size, weight and most identities. What changes is dakuten /
+  handakuten (が ↔ ガ, ペ → ベ, じ → し, ハ → パ, ダ → グ, ポ → ボ) and a few shape
+  neighbours (ウ → ツ, タ → ク); as many of these flips fix a miss as make
+  one, so the totals hold. The diacritic is decided below 0.8 even on a
+  ≈ 100 px glyph.
+
+## 8. The seed's b0305 items as prompts, uncond below 0.8 (`--b0305`)
+
+Eight b0305 `scene_window` training items (12–24 px dialogue windows) —
+4 from `retrain_kana`, 4 from `retrain_kanji_b4` — each at its own caption and
+shape × 2 seeds: seed rows throughout vs seed rows above 0.8 and the negative
+embedding below. Job `20261001-180228-5c1091` (rendered and read; it crashed
+at the sheet on the pruned training `img/`, so no `result.json` — the reads
+are `sigma_split_b0305/b0305_reads.json`, the sheet rebuilt on CPU).
+
+| | official | CER (VL) |
+|---|---|---|
+| seed rows throughout | 7 / 16 | 0.29 |
+| uncond below 0.8 | 0 / 16 | 0.80 |
+
+- Scene, bubble / sign placement and slot count are the same in both arms.
+- What is drawn large keeps most of its string: `っとおし` → `つどおし` (a
+  ≈ 100 px sign), `偉いさ` → `俥いさ` / `損いさ` (the kanji alone moves).
+  What is drawn small is rewritten in its slots: `んだよウチ` → `眞ようす`,
+  `なアロワナ` → garble, `虚をつい` → `国七11`.
+- The renders do not keep the item's px: the same caption gives a large sign
+  or bubble on one seed (kana0 s0, b42) and a small line on the other.
+- So for small text the seed's identity is written below 0.8 — the reading
+  "b0305 trains after the commit" (Verdict) holds for small EN on the base,
+  not for the seed's small JA. As in § 5, uncond drops the scene conditional
+  too; `hi` / `unk` there scored the same.
+
 ## Open
 
 - The JA counterpart of § 4: a long JA line in a bubble with the seed rows,
@@ -187,5 +278,6 @@ lower; 0.8–0.95 alone cannot carry it.
   `sent` singles.
 
 Code: `experiments/sigma_split/run_exp.py` (`--span [--span_caption notag]`,
-`--en_small`, arms `unk` / `uncond`). Renders under
-`output/cjk_anima_scale/experiments/sigma_split_{span,span_notag,en_small,s0.8}/`.
+`--en_small`, `--en_grid`, `--ja_grid [--ja_below … --switch …]`, `--b0305`,
+arms `unk` / `uncond`). Renders under
+`output/cjk_anima_scale/experiments/sigma_split_{span,span_notag,en_small,s0.8,en_grid,ja_grid,ja_grid_uncond0.8,b0305}/`.
