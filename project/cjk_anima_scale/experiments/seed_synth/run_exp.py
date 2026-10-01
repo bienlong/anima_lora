@@ -1,10 +1,15 @@
 #!/usr/bin/env python
-"""seed_synth — the seed's own renders as canvases, a first look (proposal_seed_synthesis step 1, small)
+"""seed_synth — the seed's own renders as canvases, and the arm trained on them (proposal_seed_synthesis)
 
-`proposal_seed_synthesis.md` § Proposal at ``--n`` (300) renders instead of
-3 000: what the seed rows draw for a held-out word on a scene prompt outside
-the ``sent`` grid, how many of those renders the selection keeps, and what a
-kept render looks like with its banner redrawn. No training.
+`proposal_seed_synthesis.md` § Proposal. The ``canvas`` leg (step 1) at
+``--n`` (300) + ``--grow`` renders instead of 3 000: what the seed rows draw
+for a held-out word on a scene prompt outside the ``sent`` grid, how many of
+those renders the selection keeps, and what a kept render looks like with
+its banner redrawn. ``--grow`` renders more after the first ``--n`` — the
+prompt stream grown, the words drawn from the pool minus the first block's —
+so the renders, reads and canvases on disk stay as they are. The ``data`` /
+``train`` / ``read`` legs (step 2) are ``span_reband``'s with the canvases
+in place of the rebanded windows.
 
 - **Canvas.** The seed rows (routed), 28 steps, cfg 4, on the scene pools'
   prompt stream (``scenes.stage.scene_items``: rating, count, character,
@@ -54,25 +59,53 @@ kept render looks like with its banner redrawn. No training.
   the first look's, erases only the new line's band: a two-line bubble kept
   its old text, 95 of 175 items.)
 
-Outputs under ``OUT/experiments/seed_synth/``: ``render/`` and ``canvas/``
-(``img/`` + ``native_reads.json``), ``items.jsonl``, ``sheet_all_<k>.png``
-(every render: X | class | the main read), ``sheet_items.png`` (``--sheet_n``
-items, render with its main box | canvas). Renders and reads are reused when
-present.
+- **Swap** (``--swap K``, user 2026-10-01). Each kept canvas is drawn ``K``
+  more times with **another pool word of the same glyph count** in place of
+  ``X`` — the same render, bubble, model text extent and redraw, the caption's
+  quote replaced; the string alone changes (``garble_replace``'s ``VARIANTS``).
+  The words are dealt in rounds over the canvases: a random unused
+  same-length word that does not open on a small kana / ー (``NO_HEAD``),
+  unless one of ``SWAP_TRIES`` candidates carries a glyph with fewer than
+  ``SWAP_FLOOR`` draws so far — the rows the canvases' own words miss get
+  items, and past the floor the pool's own frequencies stand (the first
+  rule, least-drawn glyphs first over 40 candidates, dealt the few lines
+  that hold ヴ / ヲ / ぢ over and over: 432 of 882 words shared a trigram
+  with another, 221 at a random draw, 232 under this rule). Read again;
+  ``kept`` as the canvases. The same length keeps the slot count the region
+  was redrawn for; the render was not selected on the swapped word.
+- **Arm** (``--legs data train read``, ``--tag``). ``data`` (CPU):
+  ``retrain_kana``'s records at their own bands + every kept canvas
+  (``items.jsonl`` + ``items_swap.jsonl``) at ``--band`` (0.85–0.95), the
+  loss box the drawn glyph box, repeated to ``--share`` (0.4) of the records
+  → ``OUT/run1001_seed_synth/data[_<tag>]``. ``train``: warm from the seed
+  rows (μ ``--mu`` 0.02), ``--steps_per_row`` (23) × the 174 kana rows →
+  ``OUT/experiments/seed_synth_warm[_<tag>]``. ``read``: the ``sent`` ruler
+  vs the seed's routed floor (``garble_replace``'s read leg).
+
+Outputs under ``OUT/experiments/seed_synth/``: ``render/``, ``canvas/`` and
+``swap/`` (``img/`` + ``native_reads.json``), ``items.jsonl``,
+``items_swap.jsonl``, ``sheet_all_<k>.png`` (every render: X | class | the
+main read), ``sheet_items.png`` (``--sheet_n`` items, render with its main
+box | canvas), ``sheet_swap.png`` (``--sheet_n`` canvases, each beside its
+swaps). Renders and reads are reused when present.
 
     ANIMA_VOCAB_PACK=models/vocab_packs/anima_cjk_vocab_pack \\
       make daemon-run ARGS="project/cjk_anima_scale/experiments/seed_synth/run_exp.py \\
       --label look0"
+    … --label grow1 --grow 360 --swap 9
+    … --label swap_r0 --tag swap --legs data train read
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import math
 import os
 import random
 import re
+import shutil
 import statistics as st
 import sys
 import time
@@ -85,7 +118,7 @@ os.environ.setdefault("ANIMA_VOCAB_PACK", "models/vocab_packs/anima_cjk_vocab_pa
 
 LINE = Path(__file__).resolve().parents[2]  # project/cjk_anima_scale
 sys.path.insert(0, str(LINE))
-from cjk_scale.paths import OUT, bootstrap, load_experiment  # noqa: E402
+from cjk_scale.paths import OUT, SEED_ROWS, bootstrap, load_experiment  # noqa: E402
 
 bootstrap()
 from bench._common import make_run_dir, write_result  # noqa: E402
@@ -112,6 +145,13 @@ TWO_COLS = 5  # glyphs from which a column may break into two (3 + 2, 4 + 2)
 SPLIT = 0.75  # … when one column's glyph is under this × the model's cell
 SHRINK = (1.0, 0.88, 0.76, 0.65)  # the fit region's fill, until the ink is inside
 MARGIN = 0.12  # of a glyph, kept clear between the ink and the bubble outline
+SWAP_TRIES = 8  # same-length pool words looked at per swap draw …
+SWAP_FLOOR = 6  # … the one with most glyphs under this many draws; else the first
+SRC = OUT / WORD_RUN / "data"  # the seed's kana mix (span_reband's source)
+BAND = (0.85, 0.95)
+MU = 0.02
+STEPS_PER_ROW = 23  # × 174 kana rows = 4 002 steps (span_reband, b0305_reband)
+SHARE = 0.4  # of the records: the canvases, repeated (span_reband's 41 %)
 CJK = re.compile(r"[ぁ-ヿ一-鿿]")
 
 
@@ -178,7 +218,11 @@ def scene_stream(n: int, seed: int) -> list[dict]:
     return scene_items(a)
 
 
-def plan(n: int, lens: list, seed: int) -> tuple[list, dict]:
+def plan(n: int, lens: list, seed: int, grow: int = 0) -> tuple[list, dict]:
+    """``n`` renders, and ``grow`` more after them: the prompt stream grown
+    (its first ``n`` scenes stay), the new words drawn from the pool minus
+    the first ``n``'s by a second rng — a render already on disk keeps its
+    scene, word, mark and seed."""
     pool, why = word_pool(lens)
     rng = random.Random(seed)
     words = []
@@ -186,11 +230,21 @@ def plan(n: int, lens: list, seed: int) -> tuple[list, dict]:
         words += rng.sample(pool[k], -(-n // len(lens)))
     rng.shuffle(words)
     words = words[:n]
+    marks = [rng.random() < HORIZONTAL for _ in words]
+    if grow:
+        rng = random.Random(f"{seed}:grow")
+        first, more = set(words), []
+        for k in lens:
+            more += rng.sample(
+                [w for w in pool[k] if w not in first], -(-grow // len(lens))
+            )
+        rng.shuffle(more)
+        words += more[:grow]
+        marks += [rng.random() < HORIZONTAL for _ in more[:grow]]
     from data.synth import scene_caption
 
     items = []
-    for i, (sc, w) in enumerate(zip(scene_stream(n, seed), words)):
-        hz = rng.random() < HORIZONTAL
+    for i, (sc, w, hz) in enumerate(zip(scene_stream(n + grow, seed), words, marks)):
         items.append(
             {
                 "pi": i,
@@ -236,31 +290,33 @@ def render(items: list) -> str:
 
 
 def read(manifest: list, out: Path, device: str, reuse: bool = True) -> list:
-    """``manifest`` with ``reads`` / ``hit_*``; the stored reads are reused
-    when they cover the same files (``reuse``: never for the canvases, whose
-    pixels change with the redraw)."""
+    """``manifest`` with ``reads`` / ``hit_*``; a file's stored read is
+    reused (``reuse``: never for the canvases, whose pixels change with the
+    redraw), so a grown manifest reads only its new files."""
     from common.readers import Readers, hit, read_scored
 
     f = out / "native_reads.json"
+    old = {}
     if reuse and f.exists():
-        old = json.loads(f.read_text("utf-8"))
-        if [m["file"] for m in old] == [m["file"] for m in manifest]:
-            print(f"reads reused: {f}", flush=True)
-            return old
-    rd = Readers(device)
-    t0 = time.time()
-    for n, m in enumerate(manifest):
-        reads = read_scored(rd, m)
-        m["hit_sfx"], m["hit_vl"] = (
-            hit(reads, m["text"], "sfx"),
-            hit(reads, m["text"], "vl"),
-        )
-        if n % 20 == 0:
-            print(
-                f"  read {n}/{len(manifest)} · {(time.time() - t0) / 60:.1f} min",
-                flush=True,
+        old = {m["file"]: m for m in json.loads(f.read_text("utf-8"))}
+    todo = [m for m in manifest if m["file"] not in old]
+    print(f"reads: {len(manifest) - len(todo)} reused, {len(todo)} to read", flush=True)
+    if todo:
+        rd = Readers(device)
+        t0 = time.time()
+        for n, m in enumerate(todo):
+            reads = read_scored(rd, m)
+            m["hit_sfx"], m["hit_vl"] = (
+                hit(reads, m["text"], "sfx"),
+                hit(reads, m["text"], "vl"),
             )
-    del rd
+            if n % 20 == 0:
+                print(
+                    f"  read {n}/{len(todo)} · {(time.time() - t0) / 60:.1f} min",
+                    flush=True,
+                )
+        del rd
+    manifest = [old.get(m["file"], m) for m in manifest]
     out.mkdir(parents=True, exist_ok=True)
     f.write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8")
     return manifest
@@ -469,6 +525,61 @@ def redraw(m: dict, dst: Path, rng: random.Random) -> dict:
     }
 
 
+def swap_words(kept: list, pool: dict, k: int, seed: int) -> tuple[dict, Counter]:
+    """``{pi: [k words]}`` — other pool words of the canvas's glyph count,
+    dealt in rounds (module docstring § Swap) — and the draws per glyph, the
+    canvases' own words counted in."""
+    from common.render.scene import NO_HEAD
+
+    rng = random.Random(seed + 1)
+    cov = Counter(c for r in kept for c in r["text"])
+    used = {r["text"] for r in kept}
+    out = {r["pi"]: [] for r in kept}
+    for _ in range(k):
+        for r in kept:
+            free = [
+                w for w in pool[len(r["text"])] if w not in used and w[0] not in NO_HEAD
+            ]
+            if not free:
+                continue
+            # a random draw (max keeps the first on a tie) unless a candidate
+            # carries a glyph still under the floor
+            w = max(
+                rng.sample(free, min(SWAP_TRIES, len(free))),
+                key=lambda t: sum(cov[c] < SWAP_FLOOR for c in set(t)),
+            )
+            used.add(w)
+            cov.update(w)
+            out[r["pi"]].append(w)
+    return out, cov
+
+
+def sheet_swap(kept: list, swaps: list, k: int, sheet_n: int) -> None:
+    from PIL import Image
+
+    from common.readers import contact_sheet
+
+    by = {}
+    for r in swaps:
+        by.setdefault(r["pi"], []).append(r)
+    rows = []
+    for it in kept[:sheet_n]:
+        tiles = [(it["canvas"], f"{it['text']}  own", it["canvas_read"])] + [
+            (
+                r["canvas"],
+                f"{r['text']}{'' if r['kept'] else '  [dropped]'}  px {r['px']:.0f}",
+                r["canvas_read"],
+            )
+            for r in by.get(it["pi"], [])
+        ]
+        for f, a, b in tiles:
+            rows.append((Image.open(f).convert("RGB"), [a, f"sfx {(b or '')[:14]}"]))
+        blank = Image.new("RGB", (8, 8), "white")
+        rows += [(blank, ["", ""])] * (1 + k - len(tiles))
+    if rows:
+        contact_sheet(rows, ROOT / "sheet_swap.png", thumb=224, cols=1 + k)
+
+
 def quart(xs: list) -> list:
     return [round(x) for x in st.quantiles(xs, n=4)] if len(xs) > 3 else sorted(xs)
 
@@ -509,29 +620,10 @@ def sheets(recs: list, items: list, sheet_n: int) -> None:
         contact_sheet(rows, ROOT / "sheet_items.png", thumb=320, cols=6)
 
 
-def main():
-    p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--label", required=True)
-    p.add_argument("--n", type=int, default=300)
-    p.add_argument("--lens", type=int, nargs="+", default=[2, 3, 4, 5, 6])
-    p.add_argument("--seed", type=int, default=STREAM_SEED)
-    p.add_argument("--sheet_n", type=int, default=24)
-    p.add_argument("--dry_run", action="store_true")
-    args = p.parse_args()
-    items, info = plan(args.n, args.lens, args.seed)
-    print(
-        f"{len(items)} renders; word pool {info['pool']} (dropped {info['dropped']})",
-        flush=True,
-    )
-    for it in items[:8]:
-        print(f"  {it['caption']}", flush=True)
-    if args.dry_run:
-        return
+def canvas(args, items: list) -> dict:
+    """The ``canvas`` leg: render, read, select, redraw, swap, sheets."""
     from common.text import lev, norm
 
-    run_dir = make_run_dir(
-        NAME, label=args.label, root=LINE / "experiments" / NAME / "results"
-    )
     device = render(items)
     recs = read(items, ROOT / "render", device)
     for m in recs:
@@ -569,9 +661,9 @@ def main():
                 for k in ("box", "read", "edits", "dup", "long", "short", "vertical")
             }
         )
-    cread = read(canvas, ROOT / "canvas", device, reuse=False) if canvas else []
-    out_items = []
-    for c in cread:
+
+    def score(c: dict) -> dict:
+        """A read canvas as an item: its loss box, its read, ``kept``."""
         t = norm(c["text"])
         best = min(
             (lev(norm(r.get(x) or ""), t) for r in c["reads"] for x in ("sfx", "vl")),
@@ -582,26 +674,94 @@ def main():
         dw, dh = d[2] - d[0], d[3] - d[1]
         px = (dw * dh / len(c["text"])) ** 0.5  # the reports' px: √(box area / glyphs)
         px_model = (c["long"] * c["short"] / max(1, len(norm(c["read"] or "")))) ** 0.5
-        out_items.append(
-            {k: v for k, v in c.items() if k not in ("reads", "file")}
-            | {
-                "file": c["src"],
-                "canvas": c["file"],
-                "loss_box": d,
-                "canvas_read": main_read,
-                "canvas_edits": best,
-                "kept": best <= 1,
-                "px": round(px, 1),
-                "grow": round(px / px_model, 3),  # the redrawn glyph / the model's
-                "span": round(max(dw, dh) / c["long"], 3),  # drawn extent / the model's
-            }
-        )
+        return {k: v for k, v in c.items() if k not in ("reads", "file")} | {
+            "file": c["src"],
+            "canvas": c["file"],
+            "loss_box": d,
+            "canvas_read": main_read,
+            "canvas_edits": best,
+            "kept": best <= 1,
+            "px": round(px, 1),
+            "grow": round(px / px_model, 3),  # the redrawn glyph / the model's
+            "span": round(max(dw, dh) / c["long"], 3),  # drawn extent / the model's
+        }
+
+    cread = read(canvas, ROOT / "canvas", device, reuse=False) if canvas else []
+    out_items = [score(c) for c in cread]
     ROOT.mkdir(parents=True, exist_ok=True)
     (ROOT / "items.jsonl").write_text(
         "\n".join(json.dumps(r, ensure_ascii=False) for r in out_items),
         encoding="utf-8",
     )
     kept = [r for r in out_items if r["kept"]]
+    swap_items, swap_metrics = [], {}
+    if args.swap and kept:
+        by_pi = {m["pi"]: m for m in near}
+        words, cov = swap_words(kept, word_pool(args.lens)[0], args.swap, args.seed)
+        sdir = ROOT / "swap" / "img"
+        for old in sdir.glob("*.png") if sdir.exists() else ():
+            old.unlink()  # an earlier swap's canvases
+        scanvas, smissed = [], Counter()
+        for it in kept:
+            m = by_pi[it["pi"]]
+            assert m["caption"].count(f'"{m["text"]}"') == 1, m["caption"]
+            for v, w in enumerate(words[it["pi"]]):
+                fa = sdir / f"s_{m['pi']:04d}_{v}_{w}.png"
+                geo = redraw(
+                    m | {"text": w}, fa, random.Random(f"{args.seed}:{m['pi']}:{v}")
+                )
+                if "why" in geo:
+                    smissed[geo["why"]] += 1
+                    continue
+                scanvas.append(
+                    {k: it[k] for k in ("pi", "seed", "prompt", "clause", "frame")}
+                    | {k: it[k] for k in ("shape", "horizontal", "box", "read")}
+                    | {k: it[k] for k in ("edits", "dup", "long", "short", "vertical")}
+                    | {
+                        "text": w,
+                        "caption": m["caption"].replace(f'"{m["text"]}"', f'"{w}"'),
+                        "file": str(fa),
+                        "cond": "swap",
+                        "geo": geo,
+                        "src": m["file"],
+                        "swap_of": m["text"],
+                        "v": v,
+                    }
+                )
+        sread = read(scanvas, ROOT / "swap", device, reuse=False) if scanvas else []
+        swap_items = [score(c) for c in sread]
+        (ROOT / "items_swap.jsonl").write_text(
+            "\n".join(json.dumps(r, ensure_ascii=False) for r in swap_items),
+            encoding="utf-8",
+        )
+        skept = [r for r in swap_items if r["kept"]]
+        rows = json.loads((OUT / WORD_RUN / "data" / "vocabs.json").read_text("utf-8"))
+        own = Counter(c for r in kept for c in r["text"])
+        both = own + Counter(c for r in skept for c in r["text"])
+        swap_metrics = {
+            "k": args.swap,
+            "dealt": sum(len(v) for v in words.values()),
+            "redraw_missed": dict(smissed),
+            "items": len(swap_items),
+            "kept": len(skept),
+            "kept_by_glyphs": dict(
+                sorted(Counter(len(r["text"]) for r in skept).items())
+            ),
+            "canvases_with_swaps": dict(
+                sorted(Counter(Counter(r["pi"] for r in skept).values()).items())
+            ),
+            "rows": len(rows),
+            "rows_drawn_own": sum(1 for v in rows if own[v]),
+            "rows_drawn_own_swap": sum(1 for v in rows if both[v]),
+            "rows_never": "".join(v for v in rows if not both[v]),
+            "draws_per_row_own_q": quart([own[v] for v in rows]),
+            "draws_per_row_own_swap_q": quart([both[v] for v in rows]),
+            "px_q": quart([r["px"] for r in skept]),
+            "canvas_edits": dict(
+                sorted(Counter(r["canvas_edits"] for r in swap_items).items())
+            ),
+        }
+        sheet_swap(kept, swap_items, args.swap, args.sheet_n)
     cls = Counter(m["sel"]["cls"] for m in recs)
     by_len = {
         n: dict(Counter(m["sel"]["cls"] for m in recs if len(m["text"]) == n))
@@ -614,7 +774,6 @@ def main():
     boxed = [m["sel"] for m in recs if "box" in m["sel"]]
     metrics = {
         "renders": len(recs),
-        "plan": info,
         "class": dict(cls),
         "class_by_glyphs": by_len,
         "class_by_frame": by_frame,
@@ -633,6 +792,7 @@ def main():
                 sum(s["vertical"] for s in boxed) / max(1, len(boxed)), 3
             ),
         },
+        "swap": swap_metrics,
         "kept_region": {
             "short_q": quart([r["short"] for r in kept]),
             "long_q": quart([r["long"] for r in kept]),
@@ -651,16 +811,179 @@ def main():
             "dup": sum(r["dup"] for r in kept),
         },
     }
-    print(json.dumps(metrics, ensure_ascii=False, indent=1), flush=True)
     random.Random(0).shuffle(out_items)
     sheets(recs, out_items, args.sheet_n)
+    return metrics
+
+
+def data(dst: Path, band: tuple, share: float) -> dict:
+    """The ``data`` leg: the seed's kana mix at its own bands + every kept
+    canvas (``items.jsonl`` + ``items_swap.jsonl``) at ``band``, repeated to
+    ``share`` of the records. The loss box is the drawn glyph box
+    (``layout: grid`` + ``boxes``, as ``garble_replace``)."""
+    seed = [
+        json.loads(ln)
+        for ln in (SRC / "train.jsonl").read_text("utf-8").splitlines()
+        if ln
+    ]
+    rows = set(json.loads((SRC / "vocabs.json").read_text("utf-8")))
+    items = []
+    for f in ("items.jsonl", "items_swap.jsonl"):
+        if not (ROOT / f).exists():
+            continue
+        for ln in (ROOT / f).read_text("utf-8").splitlines():
+            r = json.loads(ln)
+            if not r["kept"]:
+                continue
+            items.append(
+                {
+                    "file": r["canvas"],
+                    "text": r["text"],
+                    "caption": r["caption"],
+                    "src": "scene",
+                    "kind": NAME,
+                    "recipe": NAME,
+                    "group": "s8595",
+                    "layout": "grid",
+                    "boxes": [r["loss_box"]],
+                    "box": r["loss_box"],
+                    "units": sorted(set(r["text"]) & rows),
+                    "shape": r["shape"],
+                    "px": r["px"],
+                    "band": list(band),
+                    "window": list(band),
+                    "scene": r["pi"],
+                    "scene_pool": NAME,
+                    "frame": r["frame"],
+                    "horizontal": r["horizontal"],  # the caption's mark
+                    "lines_horizontal": r["geo"]["lines_horizontal"],  # the draw
+                    "glyphs": len(r["text"]),
+                    "swap_of": r.get("swap_of"),
+                }
+            )
+    assert items, f"no canvases under {ROOT} — run the canvas leg first"
+    repeat = max(1, round(share / (1 - share) * len(seed) / len(items)))
+    out = seed + items * repeat
+    dst.mkdir(parents=True, exist_ok=True)
+    (dst / "train.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in out), encoding="utf-8"
+    )
+    for f in ("vocabs.json", "eval.json"):
+        shutil.copy2(SRC / f, dst / f)
+    bj = json.loads((SRC / "build.json").read_text("utf-8"))
+    info = {
+        "from": str(SRC),
+        "seed_records": len(seed),
+        "canvases": len({r["scene"] for r in items}),
+        "items": len(items),
+        "items_own": sum(r["swap_of"] is None for r in items),
+        "repeat": repeat,
+        "records": len(out),
+        "item_share": round(len(items) * repeat / len(out), 3),
+        "band": list(band),
+        "items_glyphs": dict(sorted(Counter(r["glyphs"] for r in items).items())),
+        "items_px_q": quart([r["px"] for r in items]),
+        "rows_drawn": len({c for r in items for c in r["units"]}),
+        "mark_vs_draw": {
+            f"{'hz' if a else 'v'}→{'hz' if b else 'v'}": n
+            for (a, b), n in sorted(
+                Counter((r["horizontal"], r["lines_horizontal"]) for r in items).items()
+            )
+        },
+        "glyph_route": bj.get("glyph_route"),
+    }
+    (dst / "build.json").write_text(
+        json.dumps(bj | {"seed_synth": info}, ensure_ascii=False, indent=1),
+        encoding="utf-8",
+    )
+    return info
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    p.add_argument("--label", required=True)
+    p.add_argument(
+        "--legs",
+        nargs="+",
+        default=["canvas"],
+        choices=["canvas", "data", "train", "read"],
+    )
+    p.add_argument("--n", type=int, default=300)
+    p.add_argument(
+        "--grow", type=int, default=0, help="renders after the first --n (plan())"
+    )
+    p.add_argument("--lens", type=int, nargs="+", default=[2, 3, 4, 5, 6])
+    p.add_argument("--seed", type=int, default=STREAM_SEED)
+    p.add_argument("--sheet_n", type=int, default=24)
+    p.add_argument(
+        "--swap",
+        type=int,
+        default=0,
+        help="draws per kept canvas with another pool word of the same glyph count",
+    )
+    p.add_argument("--band", type=float, nargs=2, default=list(BAND))
+    p.add_argument("--mu", type=float, default=MU)
+    p.add_argument("--steps_per_row", type=int, default=STEPS_PER_ROW)
+    p.add_argument("--share", type=float, default=SHARE)
+    p.add_argument("--tag", default="", help="suffix for the data dir and the arm")
+    p.add_argument("--dry_run", action="store_true")
+    args = p.parse_args()
+    sfx = f"_{args.tag}" if args.tag else ""
+    dst = OUT / f"run1001_{NAME}" / f"data{sfx}"
+    name = f"{NAME}_warm{sfx}"
+    items = []
+    if "canvas" in args.legs:
+        items, info = plan(args.n, args.lens, args.seed, args.grow)
+        print(
+            f"{len(items)} renders; word pool {info['pool']} (dropped {info['dropped']})",
+            flush=True,
+        )
+        for it in items[:4] + items[args.n : args.n + 4]:
+            print(f"  {it['caption']}", flush=True)
+    if set(args.legs) & {"data", "train", "read"}:
+        print(
+            f"{name}: canvases → band {args.band} at {args.share:g} of the records, "
+            f"{args.steps_per_row} steps / row, μ {args.mu}, warm from {SEED_ROWS}; "
+            f"data {dst}",
+            flush=True,
+        )
+    if args.dry_run:
+        return
+    run_dir = make_run_dir(
+        NAME, label=args.label, root=LINE / "experiments" / NAME / "results"
+    )
+    metrics: dict = {}
+    if "canvas" in args.legs:
+        metrics = canvas(args, items) | {"plan": info}
+        print(json.dumps(metrics, ensure_ascii=False, indent=1), flush=True)
+    if "data" in args.legs:
+        metrics["data"] = data(dst, tuple(args.band), args.share)
+        print(json.dumps(metrics["data"], ensure_ascii=False), flush=True)
+    if "train" in args.legs:
+        from cjk_scale import train as T
+        from cjk_scale.config import load_run
+
+        T.INIT_ANCHOR = args.mu
+        T.train(
+            dataclasses.replace(load_run(WORD_RUN), name=name),
+            data=dst,
+            out=OUT / "experiments" / name,
+            cold=False,
+            steps_per_row=args.steps_per_row,
+            context=SEED_ROWS,
+        )
+        metrics["train"] = {"mu": args.mu, "steps_per_row": args.steps_per_row}
+    if "read" in args.legs:
+        GR = load_experiment("garble_replace")
+        GR.DATA = dst
+        metrics["read"] = GR.read("warm", name)
     write_result(
         run_dir,
         script=__file__,
         args=args,
         label=args.label,
         metrics=metrics,
-        artifacts=[str(ROOT)],
+        artifacts=[str(ROOT), str(dst), str(OUT / "experiments" / name)],
     )
     print(f"→ {run_dir / 'result.json'}", flush=True)
 

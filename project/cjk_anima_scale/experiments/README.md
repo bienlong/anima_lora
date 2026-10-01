@@ -157,3 +157,16 @@ their reads are in `../_archive/reports/` and `../hypothesis.md`.
   canvases, all read ≤ 1 edit (74 near-misses have no bubble, 3 do not fit).
   The first look (the ruler's bare caption at 512²) drew the word over the
   scene — `seed_synth_nobubble_partial/`.
+  `--grow 360 --swap 9` (10-01, job `20261001-2318-grow1`): 660 renders →
+  208 canvases (the first 98 byte-identical), each drawn 9 more times with
+  another pool word of the same glyph count, the caption's quote replaced
+  (`garble_replace`'s `VARIANTS`; a random draw unless a candidate carries a
+  glyph under 6 draws) → 1 865 kept of 1 872 dealt, 2 073 items; the kana
+  rows with an item 150 → 163 of 174 (the rest are punctuation, ヂ, ヵ).
+  **The arm** (`--tag swap --legs data train read`, job `swap_r0`, result
+  `20261001-2355-swap_r0`): the seed's kana mix + the items at 0.85–0.95
+  × 6 (42 % of 29 838 records), warm μ 0.02, 174 rows × 23 steps, warm_cos
+  0.980 → `sent` 184: **dup 100 → 116** (+35 / −19, p 0.04), official
+  29 → 19, ≤ 1 edit 92 → 71 (p 0.006); the banner is longer (box 0.156 →
+  0.170, long side 401 → 427 px) at the floor's glyph size (78 px), IoU vs
+  EN 0.198 → 0.170 (`../proposal_seed_synthesis.md` § Result).

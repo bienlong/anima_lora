@@ -1,4 +1,4 @@
-# seed synthesis — the seed's own renders as the canvas (2026-10-01, draft)
+# seed synthesis — the seed's own renders as the canvas (2026-10-01, draft; arm read 10-02)
 
 Takes over `proposal_length.md`: its span lever ran (`experiments/span_reband`)
 and closed, and the reads it left behind say where the leftover slot is
@@ -167,6 +167,46 @@ floor's; widen with untagged-caption and bubble-prompt canvases).
 **If dup does not move**: the count is not a σ-less row's to carry; the
 remaining route is σ-gated rows (a layout delta applied above 0.8 only), a
 pack-format change, to be weighed against living with the slot.
+
+## Result — the arm at 208 canvases × 10 words (2026-10-02)
+
+Step 1 at 660 renders: 208 canvases (371 near-misses; 155 have no bubble, 8
+do not fit), and each canvas drawn 9 more times with another pool word of
+the same glyph count (user, 10-01: the same render, bubble and redraw, the
+caption's quote replaced — the string alone changes, the render was not
+selected on the swapped word, and the rows with an item go 150 → 163 of
+174) → 2 073 items, px 32 / 43 / 55, the region's long side 134 / 188 / 276.
+Step 2 as written: the seed's kana mix + the items at 0.85–0.95 × 6 (42 % of
+29 838 records), warm μ 0.02, 174 rows × 23 steps, warm_cos 0.980. Jobs
+`grow1`, `swap_r0`; `experiments/seed_synth/results/20261001-2355-swap_r0/`,
+sheets `output/cjk_anima_scale/experiments/seed_synth_warm_swap/sheets_sent/`.
+
+| `sent`, 184 | official | ≤ 1 edit | dup | box | box_h | flat_white | IoU vs EN |
+|---|---|---|---|---|---|---|---|
+| floor | 29 | 92 | 100 | 0.156 | 0.180 | 0.132 | 0.198 |
+| seed_synth swap | 19 (+9 / −19, p 0.09) | 71 (+16 / −37, p 0.006) | **116** (+35 / −19, p 0.04) | 0.170 | 0.186 | 0.153 | 0.170 |
+
+| main box | long side (quartiles) | glyph px | glyphs read − glyphs asked |
+|---|---|---|---|
+| floor | 354 / 401 / 457 | 62 / 78 / 93 | 2.37 |
+| seed_synth swap | 371 / 427 / 467 | 65 / 78 / 92 | 2.65 |
+| span_reband | 356 / 404 / 455 | 56 / 68 / 84 | 2.83 |
+
+- The banner keeps its glyph size and gets longer, with more glyphs in it:
+  `たすけて` → `たたすすけけて`, `ちょっと来い` → `ちちょっと来来いい`. The
+  extra glyphs land on the long words (5 glyphs 1.69 → 2.88, 6 glyphs
+  1.25 → 2.75 over the string; 2–3 glyphs unchanged).
+- Per string, ≤ 1 edit of 8: ちょっと来い 7 → 1, やったネ 7 → 3, たすけて
+  5 → 2, おしい 7 → 5; カメラ official 2 → 4, こうえん / かんがえ lose their
+  last reads.
+- The item set's size did not transfer (px 43 in the items, 78 in the
+  banner before and after — `span_reband`'s 34 px items shrank it to 68),
+  so the "no common size" answer held for size. The count did not come
+  with it: three item sets at 0.75–0.95 (`b0305_reband`, `span_reband`,
+  this one) each put more glyphs in the base's region. This is the
+  proposal's third branch — the count is not a σ-less row's to carry from
+  items trained above 0.85.
+- Not run: `shared_dir` on this arm, the 3 000-render step 1.
 
 ## Closed by these reads
 
