@@ -384,7 +384,6 @@ STRINGS: dict[str, str] = {
     "multires_written": "多分辨率蓝图已写入变体“{variant}”——现在直接点“训练”就会使用它。随时可点“恢复基础蓝图”撤销。",
     "multires_cleared": "已移除内联蓝图——变体恢复使用 base.toml 的数据集。",
     "multires_nothing_to_clear": "该变体没有可移除的内联蓝图。",
-    "accent_field_note": "按要求高亮显示——最常调整的参数之一。",
     # Turbo 蒸馏配置标签页 (gui/tabs/distill_tab.py)
     "distill_general_section": "通用",
     "distill_job_running": "此标签页已有任务正在运行。",

@@ -458,7 +458,6 @@ STRINGS: dict[str, str] = {
     "multires_written": "Multi-res blueprint written into variant '{variant}' — the Train button now uses it. Restore the base blueprint anytime.",
     "multires_cleared": "Inline blueprint removed — the variant uses base.toml's dataset again.",
     "multires_nothing_to_clear": "This variant has no inline blueprint to remove.",
-    "accent_field_note": "Highlighted at your request — one of the most-tuned knobs.",
     # Turbo distillation config tab (gui/tabs/distill_tab.py)
     "distill_general_section": "general",
     "distill_job_running": "A job is already running on this tab.",

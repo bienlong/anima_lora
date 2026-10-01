@@ -404,7 +404,6 @@ STRINGS: dict[str, str] = {
     "multires_written": "マルチ解像度ブループリントをバリアント '{variant}' に書き込みました。Train ボタンで使用されます。",
     "multires_cleared": "インラインブループリントを削除しました。base.toml のデータセットに戻ります。",
     "multires_nothing_to_clear": "削除できるインラインブループリントがありません。",
-    "accent_field_note": "リクエストによりハイライト表示 — 特によく調整する項目です。",
     # Turbo 蒸留設定タブ (gui/tabs/distill_tab.py)
     "distill_general_section": "全般",
     "distill_job_running": "このタブでは既にジョブが実行中です。",

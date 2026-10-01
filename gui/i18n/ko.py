@@ -443,7 +443,6 @@ STRINGS: dict[str, str] = {
     "multires_written": "멀티 해상도 블루프린트를 변형 '{variant}'에 기록했습니다. Train 버튼이 이를 사용합니다.",
     "multires_cleared": "인라인 블루프린트를 제거했습니다. base.toml 데이터셋으로 복원됩니다.",
     "multires_nothing_to_clear": "제거할 인라인 블루프린트가 없습니다.",
-    "accent_field_note": "요청에 따라 강조 표시 — 가장 많이 조정하는 항목 중 하나입니다.",
     # Turbo 증류 설정 탭 (gui/tabs/distill_tab.py)
     "distill_general_section": "일반",
     "distill_job_running": "이 탭에서 이미 작업이 실행 중입니다.",

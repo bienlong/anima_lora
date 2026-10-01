@@ -485,14 +485,13 @@ class ConfigTab(DaemonJobMixin, DirtyTrackingMixin, QWidget):
                 )
                 notes = (note,)
                 if k in _ACCENT_FIELDS:
-                    # Slightly-highlighted knob (user request): keep the
-                    # origin's dotted-underline vocabulary but lift the label
-                    # to the theme's link color + bold + a ★ marker.
+                    # Slightly-highlighted knob: keep the origin's
+                    # dotted-underline vocabulary but lift the label to the
+                    # theme's link color + bold + a ★ marker.
                     style = (
                         f"color:{tok('link')}; font-weight:600;"
                         " text-decoration: underline dotted;"
                     )
-                    notes = (note, t("accent_field_note"))
                 lbl = make_field_label(
                     f"★ {k}" if k in _ACCENT_FIELDS else k,
                     style=style,
