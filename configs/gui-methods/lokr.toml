@@ -21,25 +21,6 @@ sample_decode_inline = "false"
 pretrained_model_name_or_path = "D:/本地整合包/ComfyUI/models/diffusion_models/anima_baseV10.safetensors"
 qwen3 = "D:/本地整合包/ComfyUI/models/text_encoders/qwen_3_06b_base.safetensors"
 vae = "D:/本地整合包/ComfyUI/models/vae/qwen_image_vae.safetensors"
-[[datasets]]
-batch_size = 1
-validation_split_num = 0
-validation_split = 0.0
-[[datasets.subsets]]
-image_dir = "post_image_dataset/resized_t512"
-cache_dir = "post_image_dataset/lora_t512"
-num_repeats = 1
-
-[[datasets.subsets]]
-image_dir = "post_image_dataset/resized_t768"
-cache_dir = "post_image_dataset/lora_t768"
-num_repeats = 1
-
-[[datasets.subsets]]
-image_dir = "post_image_dataset/resized_t1024"
-cache_dir = "post_image_dataset/lora_t1024"
-num_repeats = 2
-
 
 [variant]
 family = "lora"
@@ -59,5 +40,3 @@ prompts = [ "speech bubble", "text bubble",]
 threshold = 0.7
 dilate = 3
 
-[general]
-batch_size = 1
