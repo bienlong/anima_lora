@@ -265,6 +265,39 @@ are `sigma_split_b0305/b0305_reads.json`, the sheet rebuilt on CPU).
   not for the seed's small JA. As in § 5, uncond drops the scene conditional
   too; `hi` / `unk` there scored the same.
 
+## Against the earlier reads
+
+No earlier record contradicts § 1–8; where wording differs, the setup does.
+
+- **FreeText Stage-2** (`_archive/bench/freetext/stage2_report.md`): "glyph
+  strokes are resolved in the tail (σ < 0.45)" was read on Korean glyphs the
+  base has no identity for — § 4's JA garble, not § 4's EN. Narrowed: strokes
+  move late only when the model has no identity for the glyph.
+- **Cross-attn drive** (`docs/findings/crossattn_self_attn_dominance.md`): the
+  velocity reads say text only rescales below σ ≈ 0.85, but its Result 5
+  measures a glyph-specific drive bump over 0.8 → 0.45 (peak 0.66) — the
+  velocity side of § 5 / § 8 (dropping the conditional below 0.8 rewrites
+  small text). Result 4 (the `korean text` tag keeps its attention mass, the
+  glyph tokens fade) is the attention side of § 3.
+- **Commitment timing**: `_archive/bench/cross_attn_drive/report.md` (bubble
+  84 % committed by σ 0.8), `docs/findings/traj_stats_front_loaded_commitment.md`
+  (channel profile fixed from σ ≈ 0.92; its commit-CDF counts the last
+  change, colour and stroke weight included, hence 18 % at 0.8),
+  `docs/findings/foveated_denoise.md` (composition locks above 0.75) — all
+  consistent with layout at ≥ 0.9 and identity by 0.85–0.7.
+  `docs/findings/sigma_signal_where_anima_resolves.md` ("0.95 is mostly a
+  blur") is teacher-forced, not the trajectory's x̂0.
+- **Ceiling vs trajectory**: `cf_band_a1` is not the first —
+  `../finished/cjk_renderable_anima/reports/cf_sense_gate0_2026_09_22.md`
+  (single leverage peak 0.8, two-word strings 0.5–0.7) and that line's kana
+  classifier (identity ≈ 0.8, EN order / count peak 0.65) are teacher-forced
+  too and peak below where the trajectory commits.
+- **Repeats**: the base's EN repeat in a 3 × 3 grid (§ 6) was already in
+  `../finished/cjk_renderable_anima/reports/position_probe_2026_09_20.md`
+  (k = 9 shuffles: `GO GO`, `RUN RUN`). `cjk_renderable_anima/findings.md`
+  read the JA repeats as the rows' count prior (singles-only → one,
+  strings-only → several); both readings stay open (below).
+
 ## Open
 
 - The JA counterpart of § 4: a long JA line in a bubble with the seed rows,
@@ -272,7 +305,8 @@ are `sigma_split_b0305/b0305_reads.json`, the sheet rebuilt on CPU).
   no identity at 0.85–0.7 and strokes moving late.
 - Where the 5-glyph leftover slot comes from, now that the tag is out: the
   base's `reads as` prior or the rows' shared count habit (the same captions
-  at Δ 0).
+  at Δ 0). The base side has § 6 and position_probe's `GO GO`; the
+  rows side has cjk_renderable_anima's singles-only / strings-only count read.
 - A training read for the bands: the seed's item mix rebanded to 0.7–0.9,
   b0305's 12–24 px items out (or re-rendered larger), micro arm on the 57
   `sent` singles.

@@ -4,7 +4,8 @@ Training-free weak-tag adherence lever: scale every block's cross-attn
 residual by λ on the conditional forward only, gated to σ ≥ band
 (default 0.85) — the plan-writing window where cross-attn text drive exists at
 all (peaks at σ = 1, ~0.02 floor below σ ≈ 0.85 —
-`docs/findings/crossattn_self_attn_dominance.md`). Amplify the text voice while
+`docs/findings/crossattn_self_attn_dominance.md`; a caption with a glyph to
+render keeps a drive bump over σ 0.8 → 0.45, its Result 5). Amplify the text voice while
 the plan is being written and the plan changes; self-attn + MLP then render the
 corrected plan in the normal style. Since Phase-1'' the boost ships norm-
 matched by default (`--xattn_boost_renorm img`, ρ 0.5): the boosted hidden
