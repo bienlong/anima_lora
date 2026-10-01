@@ -185,7 +185,7 @@ class LoKrModule(BaseLoRAModule):
     # -- forward ------------------------------------------------------------
 
     def _eval_delta(self, x, org_forwarded):
-        return torch.nn.functional.linear(
+        return self.multiplier * torch.nn.functional.linear(
             self._rebalance(x), self._delta_weight(grad=False)
         )
 
@@ -206,9 +206,9 @@ class LoKrModule(BaseLoRAModule):
         work = org_forwarded.dtype
         delta = self._delta_weight(grad=True).to(work)
         x_lora = self._rebalance(x.to(work))
-        return org_forwarded + torch.nn.functional.linear(x_lora, delta).to(
-            org_forwarded.dtype
-        )
+        return org_forwarded + self.multiplier * torch.nn.functional.linear(
+            x_lora, delta
+        ).to(org_forwarded.dtype)
 
     # -- fuse / merge -------------------------------------------------------
 

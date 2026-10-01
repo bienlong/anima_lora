@@ -20,6 +20,12 @@ use_cmmd = false
 use_lokr = true
 lokr_factor = -1
 
+# 可选叠加开关（对应其它训练器的 Lora Dora / Lora Rs 勾选框）：
+# use_dora=true → DoKr（LoKr 方向 + 逐通道幅度，LyCORIS dokr 语义）；
+# rs_lora=true  → 有效缩放 alpha/sqrt(r)。两个可以同时开。
+use_dora = false
+rs_lora = false
+
 [variant]
 family = "lora"
 label = "LoKr"

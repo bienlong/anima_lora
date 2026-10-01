@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Literal, Mapping, Optional, Type, Union
 
 import torch
 
-from networks.lora_modules import DoRALoRAModule, LoRAModule
+from networks.lora_modules import DoKrLoRAModule, DoRALoRAModule, LoKrModule, LoRAModule
 
 # Three-axis routing config (see plan2.md §three-axis-config).
 MoEStyle = Union[Literal[False], Literal["shared_A"], Literal["independent_A"]]
@@ -447,15 +447,24 @@ class LoRANetworkCfg:
         if lokr_factor != -1 and not use_lokr:
             logger.warning("lokr_factor set but use_lokr is off — ignored.")
         rs_lora = _as_bool(kwargs.get("rs_lora"))
-        if rs_lora and module_class not in (LoRAModule, DoRALoRAModule):
+        # rs-LoRA applies wherever scale = alpha / lora_dim holds: the plain
+        # two-GEMM family and the kron family alike (use_w2 LoKr forces
+        # scale=1, which is rs-inert by construction).
+        if rs_lora and module_class not in (
+            LoRAModule,
+            DoRALoRAModule,
+            LoKrModule,
+            DoKrLoRAModule,
+        ):
             raise ValueError(
-                "rs_lora applies to plain LoRA and DoRA only — the selected "
-                f"adapter ({module_class.__name__}) computes its own scaling."
+                "rs_lora applies to plain LoRA / DoRA / LoKr / DoKr only — "
+                f"the selected adapter ({module_class.__name__}) computes its "
+                "own scaling."
             )
         if use_dora and use_timestep_mask:
-            # The T-LoRA gate multiplies the low-rank activations; DoRA's
-            # forward is weight-space and never builds lx, so the mask would
-            # silently no-op.
+            # The T-LoRA gate multiplies the low-rank activations; the DoRA /
+            # DoKr forward is weight-space and never builds lx, so the mask
+            # would silently no-op.
             raise ValueError(
                 "use_timestep_mask is incompatible with use_dora — the DoRA "
                 "forward is weight-space and has no rank activations to gate. "

@@ -22,6 +22,7 @@ from networks.lora_anima.loading import (
 from networks.lora_modules import (
     ChimeraHydraInferenceModule,
     ChimeraHydraLoRAModule,
+    DoKrLoRAModule,
     DoRALoRAModule,
     HydraLoRAModule,
     LoKrModule,
@@ -510,17 +511,21 @@ class LoRANetwork(_NetworkMetricsMixin, torch.nn.Module):
                 if cfg.down_init != "kaiming" and effective_module_class is LoRAModule:
                     extra_kwargs["down_init"] = cfg.down_init
 
-                # DoRA: hand the module its saved magnitude when rebuilding
-                # from a checkpoint (fresh training seeds from W0's row norms;
-                # load_state_dict overwrites either way).
-                if effective_module_class is DoRALoRAModule and cfg.dora_scales_dict:
+                # DoRA / DoKr: hand the module its saved magnitude when
+                # rebuilding from a checkpoint (fresh training seeds from W0's
+                # row norms; load_state_dict overwrites either way).
+                if (
+                    effective_module_class in (DoRALoRAModule, DoKrLoRAModule)
+                    and cfg.dora_scales_dict
+                ):
                     _ds = cfg.dora_scales_dict.get(lora_name)
                     if _ds is not None:
                         extra_kwargs["dora_scale"] = _ds
 
-                # LoKr: w2 factorization split, plus the saved shapes on the
-                # from-weights path so the exact trained factorization reloads.
-                if effective_module_class is LoKrModule:
+                # LoKr / DoKr: w2 factorization split, plus the saved shapes on
+                # the from-weights path so the exact trained factorization
+                # reloads.
+                if effective_module_class in (LoKrModule, DoKrLoRAModule):
                     extra_kwargs["factor"] = cfg.lokr_factor
                     if cfg.lokr_shapes:
                         extra_kwargs["lokr_shapes"] = cfg.lokr_shapes
@@ -530,21 +535,25 @@ class LoRANetwork(_NetworkMetricsMixin, torch.nn.Module):
                 # per-module alpha — the saved alpha buffer then carries
                 # sqrt(r), so every kohya-format loader (in-repo reload,
                 # ComfyUI, sd-scripts) reproduces the trained scale from plain
-                # alpha/dim with no metadata sniffing. Plain LoRA / DoRA only;
-                # other families are refused at cfg level.
+                # alpha/dim with no metadata sniffing. Valid wherever
+                # scale = alpha / lora_dim holds (plain / DoRA / LoKr / DoKr);
+                # other families are refused at cfg level. use_w2 LoKr forces
+                # scale=1 downstream, so the extra sqrt is inert there.
                 if cfg.rs_lora and effective_module_class in (
                     LoRAModule,
                     DoRALoRAModule,
+                    LoKrModule,
+                    DoKrLoRAModule,
                 ):
                     alpha_val = alpha_val * math.sqrt(dim)
 
                 # Per-channel scaling is DiT-only — TE activations are never
-                # calibrated. LoKr has no lora_down to absorb the scale into,
-                # so it stays unsupported there.
+                # calibrated. LoKr/DoKr have no lora_down to absorb the scale
+                # into, so they stay unsupported there.
                 if (
                     cfg.channel_scales_dict is not None
                     and is_unet
-                    and effective_module_class is not LoKrModule
+                    and effective_module_class not in (LoKrModule, DoKrLoRAModule)
                 ):
                     _cs = cfg.channel_scales_dict.get(lora_name)
                     if _cs is not None:
@@ -1434,17 +1443,35 @@ class LoRANetwork(_NetworkMetricsMixin, torch.nn.Module):
 
         # Family guard: a warm start loads into a network built from the TOML
         # spec, and load_state_dict(strict=False) would silently drop
-        # mismatched keys — a dora/lokr checkpoint loaded into plain modules
-        # (or the reverse) would "resume" by training from scratch. Refuse
-        # loudly instead.
+        # mismatched keys — a dora/lokr/dokr checkpoint loaded into plain
+        # modules (or the reverse) would "resume" by training from scratch.
+        # Refuse loudly instead.
         _sd_has_dora = any(k.endswith(".dora_scale") for k in weights_sd)
         _sd_has_lokr = any(".lokr_w1" in k for k in weights_sd)
-        _net_is_dora = any(isinstance(mod, DoRALoRAModule) for mod in self.unet_loras)
-        _net_is_lokr = any(isinstance(mod, LoKrModule) for mod in self.unet_loras)
+        _net_is_dora = any(
+            isinstance(mod, (DoRALoRAModule, DoKrLoRAModule)) for mod in self.unet_loras
+        )
+        _net_is_lokr = any(
+            isinstance(mod, (LoKrModule, DoKrLoRAModule)) for mod in self.unet_loras
+        )
         if _sd_has_dora != _net_is_dora or _sd_has_lokr != _net_is_lokr:
-            _sd_family = "dora" if _sd_has_dora else "lokr" if _sd_has_lokr else "plain"
+            _sd_family = (
+                "dokr"
+                if _sd_has_dora and _sd_has_lokr
+                else "dora"
+                if _sd_has_dora
+                else "lokr"
+                if _sd_has_lokr
+                else "plain"
+            )
             _net_family = (
-                "dora" if _net_is_dora else "lokr" if _net_is_lokr else "plain"
+                "dokr"
+                if _net_is_dora and _net_is_lokr
+                else "dora"
+                if _net_is_dora
+                else "lokr"
+                if _net_is_lokr
+                else "plain"
             )
             raise RuntimeError(
                 f"network_weights checkpoint family mismatch: the file is a "

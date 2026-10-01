@@ -115,7 +115,7 @@ class DoRALoRAModule(LoRAModule):
     # -- forward ------------------------------------------------------------
 
     def _eval_delta(self, x, org_forwarded):
-        return torch.nn.functional.linear(
+        return self.multiplier * torch.nn.functional.linear(
             self._rebalance(x), self._dora_delta(grad=False)
         )
 
@@ -136,9 +136,9 @@ class DoRALoRAModule(LoRAModule):
         work = org_forwarded.dtype
         delta = self._dora_delta(grad=True).to(work)
         x_lora = self._rebalance(x.to(work))
-        return org_forwarded + torch.nn.functional.linear(x_lora, delta).to(
-            org_forwarded.dtype
-        )
+        return org_forwarded + self.multiplier * torch.nn.functional.linear(
+            x_lora, delta
+        ).to(org_forwarded.dtype)
 
     # -- merge --------------------------------------------------------------
 

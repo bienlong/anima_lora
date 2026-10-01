@@ -87,8 +87,8 @@
   "sample_ratio": "全局数据范围覆盖: 每个 subset 的缓存图像中实际参与训练的比例 (1.0 = 完整数据集)。快捷选项与 CLI 预设一致 ([half]=0.5, [quarter]=0.25, [tenth]=0.1)；也可以输入 0<r≤1 的任意值。小于 1.0 时在加载阶段按 bucket 子采样，磁盘上的缓存不受影响。适合在正式训练前做快速试跑。",
   "artists_shard": "将训练限制在每个 subset 的 image_dir 下画师子目录的一个轮询分片上。格式为 `k_N` (例如 `1_4` = 4 个分片中的第 1 个): 画师排序后第 i 位分配到 i mod N 分片，因此每个分片都是跨字母表的均衡混合。留空表示关闭。加载时会展开为 path_pattern，因此与显式 path_pattern 互斥。",
   "scale_weight_norms": "对每对LoRA up/down做最大范数正则：乘积范数超过该值就按比例缩回去（sd-scripts约定）。5是常用起点；0为关闭。对LoKr无效（没有up/down对）。",
-  "use_dora": "DoRA：把适配权重分解为逐通道幅度 + 低秩方向分别训练。比普通LoRA收敛更稳，显存略增。保存的文件可在ComfyUI直接加载（DoRA格式）。仅限普通LoRA家族（不能与正交/路由类组合）。",
-  "use_lokr": "LoKr：用Kronecker积（w1×w2）替代低秩增量——单位参数表达力更强。仅限本仓库内加载使用（ComfyUI原装LoRA加载路径不支持）。与DoRA/正交/路由互斥。",
+  "use_dora": "DoRA：把适配权重分解为逐通道幅度 + 低秩方向分别训练。比普通LoRA收敛更稳，显存略增。与use_lokr同开即 DoKr（Kronecker方向+幅度）。普通DoRA保存的文件可在ComfyUI直接加载。",
+  "use_lokr": "LoKr：用Kronecker积（w1×w2）替代低秩增量——单位参数表达力更强。仅限本仓库内加载使用（ComfyUI原装LoRA加载路径不支持）。不能与正交/路由类组合。",
   "lokr_factor": "LoKr的w2因式分解切分。-1：取最均衡的因子（LyCORIS默认）。填正整数则固定w1轴，例如4 → w1轴=4。use_lokr关闭时无效。",
-  "rs_lora": "rs-LoRA：有效缩放 = alpha / sqrt(r)（而非 alpha / r）——高rank（>32）训练更稳。sqrt(r)会折进保存的alpha里，所有kohya格式加载器都会按训练时缩放应用。仅限普通LoRA/DoRA。"
+  "rs_lora": "rs-LoRA：有效缩放 = alpha / sqrt(r)（而非 alpha / r）——高rank（>32）训练更稳。对普通LoRA / DoRA / LoKr / DoKr 都可用。sqrt(r)会折进保存的alpha里，所有kohya格式加载器都会按训练时缩放应用。"
 }

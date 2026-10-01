@@ -22,6 +22,7 @@ import pytest
 import torch
 
 from networks import NETWORK_REGISTRY, resolve_network_spec
+from networks.lora_modules.dokr import DoKrLoRAModule
 from networks.lora_modules.dora import DoRALoRAModule
 from networks.lora_modules.lokr import LoKrModule, factorization, make_kron
 from networks.lora_modules.lora import defuse_standard_qkv
@@ -39,18 +40,18 @@ def _wire(module, org: torch.nn.Module) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_spec_dispatch_selects_dora_and_lokr():
+def test_spec_dispatch_selects_dora_lokr_and_dokr():
     assert resolve_network_spec({"use_dora": "true"}).name == "dora"
     assert resolve_network_spec({"use_dora": True}).name == "dora"
     assert resolve_network_spec({"use_lokr": True}).name == "lokr"
     assert resolve_network_spec({"use_lokr": "true", "lokr_factor": 4}).name == "lokr"
+    # dora + lokr together = DoKr (the user-facing "LoKr + Lora Dora" combo)
+    assert resolve_network_spec({"use_lokr": True, "use_dora": True}).name == "dokr"
     assert resolve_network_spec({}).name == "lora"
     assert resolve_network_spec({"use_dora": "false"}).name == "lora"
 
 
-def test_spec_rejects_dora_lokr_and_routed_combos():
-    with pytest.raises(ValueError, match="mutually exclusive"):
-        resolve_network_spec({"use_dora": True, "use_lokr": True})
+def test_spec_rejects_routed_combos():
     for routed in (
         {"use_ortho": True},
         {"use_ortho_init": True},
@@ -63,11 +64,36 @@ def test_spec_rejects_dora_lokr_and_routed_combos():
             resolve_network_spec({"use_dora": True, **routed})
         with pytest.raises(ValueError, match="plain"):
             resolve_network_spec({"use_lokr": True, **routed})
+        with pytest.raises(ValueError, match="plain"):
+            resolve_network_spec({"use_dora": True, "use_lokr": True, **routed})
 
 
 def test_registry_entries():
     assert NETWORK_REGISTRY["dora"].save_variant == "standard"
     assert NETWORK_REGISTRY["lokr"].save_variant == "lokr"
+    assert NETWORK_REGISTRY["dokr"].save_variant == "lokr"
+
+
+def test_cfg_rs_lora_accepts_kron_family_and_refuses_others():
+    from networks.lora_anima.config import LoRANetworkCfg
+    from networks.lora_modules import OrthoLoRAModule
+
+    cfg = LoRANetworkCfg.from_kwargs(
+        {"rs_lora": "true", "use_lokr": "true", "use_dora": "true"},
+        network_dim=8,
+        network_alpha=8,
+        neuron_dropout=None,
+        module_class=NETWORK_REGISTRY["dokr"].module_class,
+    )
+    assert cfg.rs_lora is True
+    with pytest.raises(ValueError, match="rs_lora"):
+        LoRANetworkCfg.from_kwargs(
+            {"rs_lora": "true"},
+            network_dim=8,
+            network_alpha=8,
+            neuron_dropout=None,
+            module_class=OrthoLoRAModule,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +228,110 @@ def test_dora_rejects_conv2d():
     conv = torch.nn.Conv2d(4, 8, 3)
     with pytest.raises(ValueError, match="Linear"):
         DoRALoRAModule("t_conv", conv, 1.0, 4, 16)
+
+
+def test_dora_forward_honors_multiplier():
+    # Regression: the forward path must scale the weight-decomposed delta by
+    # self.multiplier (merge_to/get_weight always did).
+    torch.manual_seed(0)
+    org = torch.nn.Linear(48, 32, bias=False)
+    module = DoRALoRAModule("t_dora_m2", org, 2.0, 8, 16)
+    _wire(module, org)
+    with torch.no_grad():
+        module.lora_up.weight.normal_()
+    W0 = org.weight.data.float()
+    V = W0 + module.scale * (
+        module.lora_up.weight.detach().float()
+        @ module.lora_down.weight.detach().float()
+    )
+    delta = (
+        module.dora_scale.unsqueeze(1)
+        / V.norm(p=2, dim=1, keepdim=True).clamp_min(1e-12)
+    ) * V - W0
+    x = torch.randn(2, 48)
+    org.training = False
+    assert torch.allclose(
+        module(x),
+        org(x) + 2.0 * torch.nn.functional.linear(x, delta),
+        atol=1e-4,
+    )
+
+
+def test_lokr_forward_honors_multiplier():
+    torch.manual_seed(0)
+    org = torch.nn.Linear(256, 512, bias=False)
+    module = LoKrModule("t_lokr_m2", org, 2.0, 4, 16)
+    _wire(module, org)
+    with torch.no_grad():
+        module.lokr_w2_b.normal_()
+    x = torch.randn(2, 256)
+    org.training = False
+    expected = org(x) + 2.0 * torch.nn.functional.linear(
+        x,
+        make_kron(
+            module.lokr_w1.detach().float(),
+            (module.lokr_w2_a @ module.lokr_w2_b).detach().float(),
+            module.scale,
+        ),
+    )
+    assert torch.allclose(module(x), expected, atol=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# DoKr module (LoKr direction + DoRA magnitude)
+# ---------------------------------------------------------------------------
+
+
+def test_dokr_zero_init_and_forward_matches_formula():
+    torch.manual_seed(0)
+    org = torch.nn.Linear(256, 512, bias=False)
+    module = DoKrLoRAModule("t_dokr", org, 1.0, 4, 16)
+    _wire(module, org)
+    assert module.use_w2 is False
+    # Magnitude seeds from W0 row norms → identity start.
+    assert torch.allclose(
+        module.dora_scale, org.weight.data.float().norm(dim=1), atol=1e-6
+    )
+    assert module.get_weight().abs().sum() == 0
+
+    with torch.no_grad():
+        module.lokr_w2_b.normal_()
+    W0 = org.weight.data.float()
+    V = W0 + module.scale * make_kron(
+        module.lokr_w1.detach().float(),
+        (module.lokr_w2_a @ module.lokr_w2_b).detach().float(),
+        1.0,
+    )
+    expected_delta = (
+        module.dora_scale.unsqueeze(1)
+        / V.norm(p=2, dim=1, keepdim=True).clamp_min(1e-12)
+    ) * V - W0
+    x = torch.randn(2, 256)
+    org.training = False
+    assert torch.allclose(
+        module(x), org(x) + torch.nn.functional.linear(x, expected_delta), atol=1e-4
+    )
+
+
+def test_dokr_gradients_reach_factors_and_magnitude_frozen():
+    torch.manual_seed(0)
+    org = torch.nn.Linear(256, 512, bias=False)
+    module = DoKrLoRAModule("t_dokr", org, 1.0, 4, 16)
+    _wire(module, org)
+    with torch.no_grad():
+        module.lokr_w2_b.normal_()
+    org.training = True
+    module(torch.randn(2, 256)).sum().backward()
+    for p in (module.lokr_w1, module.lokr_w2_a, module.lokr_w2_b):
+        assert p.grad is not None and p.grad.abs().sum() > 0
+    assert module.dora_scale.grad is None
+    assert all(p is not module.dora_scale for p in module.parameters())
+
+
+def test_dokr_rejects_conv2d():
+    conv = torch.nn.Conv2d(4, 8, 3)
+    with pytest.raises(ValueError, match="Linear"):
+        DoKrLoRAModule("t_conv", conv, 1.0, 4, 16)
 
 
 # ---------------------------------------------------------------------------

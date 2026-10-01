@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, Mapping, Optional, Tuple, Type
 
 from networks.lora_modules import (
     ChimeraHydraLoRAModule,
+    DoKrLoRAModule,
     DoRALoRAModule,
     HydraLoRAModule,
     LoKrModule,
@@ -163,6 +164,15 @@ NETWORK_REGISTRY: Dict[str, NetworkSpec] = {
         module_class=LoKrModule,
         save_variant="lokr",
     ),
+    # DoKr: DoRA weight-decomposition on a LoKr direction (LyCORIS "dokr") —
+    # trainable per-channel magnitude over the kron-product delta. Selected by
+    # use_dora=true + use_lokr=true together; saves lokr keys + dora_scale
+    # through the lokr write path (in-repo loading only, like lokr).
+    "dokr": NetworkSpec(
+        name="dokr",
+        module_class=DoKrLoRAModule,
+        save_variant="lokr",
+    ),
     "ortho": NetworkSpec(
         name="ortho",
         module_class=OrthoLoRAModule,
@@ -252,12 +262,13 @@ def resolve_network_spec(kwargs: Mapping[str, Any]) -> NetworkSpec:
     Precedence (first match wins): use_chimera_hydra -> chimera_hydra;
     use_moe_style="independent_A" -> stacked_experts_global_fei (FeRA);
     use_moe_style="shared_A" (+use_ortho) -> ortho_hydra, else hydra;
-    use_lokr -> lokr; use_dora -> dora; use_ortho_init -> ortho_init;
-    use_ortho -> ortho; else lora. Raises on mutually-exclusive
-    combinations. The legacy use_hydra kwarg was retired in plan2 task #6 —
-    LoRANetworkCfg.from_kwargs raises if a TOML carries it. (``use_dora``
-    also predates plan2 on the removed ``lora_deprecated`` module; the name
-    was re-introduced for the live DoRA implementation.)
+    use_lokr+use_dora -> dokr; use_lokr -> lokr; use_dora -> dora;
+    use_ortho_init -> ortho_init; use_ortho -> ortho; else lora. Raises on
+    combinations with the routed/ortho cells. The legacy use_hydra kwarg was
+    retired in plan2 task #6 — LoRANetworkCfg.from_kwargs raises if a TOML
+    carries it. (``use_dora`` also predates plan2 on the removed
+    ``lora_deprecated`` module; the name was re-introduced for the live DoRA
+    implementation.)
     """
     use_ortho = _parse_bool_flag(kwargs, "use_ortho")
     use_ortho_init = _parse_bool_flag(kwargs, "use_ortho_init")
@@ -269,12 +280,6 @@ def resolve_network_spec(kwargs: Mapping[str, Any]) -> NetworkSpec:
             "use_ortho and use_ortho_init are mutually exclusive: ortho freezes "
             "the SVD basis (Cayley-rotates within it); ortho_init trains the SVD "
             "basis (no cap). Pick one."
-        )
-    if use_dora and use_lokr:
-        raise ValueError(
-            "use_dora and use_lokr are mutually exclusive — DoRA decomposes a "
-            "low-rank direction update, LoKr replaces it with a Kronecker "
-            "product. Pick one."
         )
     raw_step_K = kwargs.get("step_expert_K")
     _step_moe = raw_step_K is not None and int(raw_step_K) > 1
@@ -329,7 +334,7 @@ def resolve_network_spec(kwargs: Mapping[str, Any]) -> NetworkSpec:
             NETWORK_REGISTRY["ortho_hydra"] if use_ortho else NETWORK_REGISTRY["hydra"]
         )
     if use_lokr:
-        return NETWORK_REGISTRY["lokr"]
+        return NETWORK_REGISTRY["dokr"] if use_dora else NETWORK_REGISTRY["lokr"]
     if use_dora:
         return NETWORK_REGISTRY["dora"]
     if use_ortho_init:

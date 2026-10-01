@@ -489,11 +489,8 @@ def create_network_from_weights(
             "those adapter families cannot share one network. Split the file "
             "or retrain."
         )
-    if has_dora and has_lokr:
-        raise RuntimeError(
-            "Checkpoint mixes DoRA (.dora_scale) and LoKr (.lokr_w*) keys — "
-            "pick one family per checkpoint."
-        )
+    # dora_scale + lokr keys together = DoKr (DoRA-decomposed LoKr); either
+    # alone is plain dora / lokr.
 
     # MoE keys but no metadata usually means load_file() dropped __metadata__
     # and weights_sd= was passed without file=/metadata= — surface the real
@@ -596,9 +593,9 @@ def create_network_from_weights(
         # static merge, so don't downgrade to plain LoRA.
         pass
     elif has_lokr:
-        # LoKr merges statically (the kron delta is fixed at inference), so
-        # it keeps its own class on the inference path too.
-        spec = NETWORK_REGISTRY["lokr"]
+        # LoKr / DoKr merge statically (the kron delta is fixed at
+        # inference), so they keep their own class on the inference path too.
+        spec = NETWORK_REGISTRY["dokr" if has_dora else "lokr"]
         module_class = spec.module_class
     elif has_dora:
         spec = NETWORK_REGISTRY["dora"]

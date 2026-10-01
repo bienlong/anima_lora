@@ -1,10 +1,22 @@
-# DoRA / LoKr / rs-LoRA — plain-family adapter extensions
+# DoRA / DoKr / LoKr / rs-LoRA — plain-family adapter extensions
 
-Three additions to the plain (non-routed) LoRA family, selectable from the GUI
-Config tab (LoRA family dropdown) or via TOML/CLI network kwargs. All three are
-dispatched by `resolve_network_spec` (`networks/__init__.py`) and validate their
-combos there — routed/ortho cells (Hydra, FeRA, Chimera, Ortho*, step-expert)
-refuse them with a `ValueError` rather than silently ignoring the flags.
+Additions to the plain (non-routed) LoRA family, selectable from the GUI
+Config tab (LoRA family dropdown) or via TOML/CLI network kwargs. All of them
+are dispatched by `resolve_network_spec` (`networks/__init__.py`) and validate
+their combos there — routed/ortho cells (Hydra, FeRA, Chimera, Ortho*,
+step-expert) refuse them with a `ValueError` rather than silently ignoring
+the flags.
+
+Combo matrix (`use_dora` × `use_lokr`):
+
+| use_dora | use_lokr | adapter | direction | magnitude (`dora_scale`) | ComfyUI file |
+|---|---|---|---|---|---|
+| – | – | LoRA | low-rank `up @ down` | – | native |
+| ✓ | – | DoRA | low-rank `up @ down` | ✓ | native |
+| – | ✓ | LoKr | `kron(w1, w2)` | – | in-repo only |
+| ✓ | ✓ | **DoKr** (LyCORIS `dokr`) | `kron(w1, w2)` | ✓ | in-repo only |
+
+`rs_lora` composes with all four (see §rs-LoRA).
 
 ## DoRA (`use_dora = true`)
 
@@ -56,6 +68,19 @@ runtime-fused qkv keys for this variant, and ComfyUI's stock LoRA path is not
 wired for Anima LoKr files. Train/merge/test through the repo tooling
 (`inference.py`, `make merge`, …).
 
+## DoKr (`use_lokr = true` + `use_dora = true`)
+
+DoRA weight-decomposition applied to a LoKr direction (LyCORIS `dokr`):
+`W' = m ⊙ V / ‖V‖_row` with `V = W0 + scale·kron(w1, w2)` — the Kronecker
+product trains the per-row *direction*, the trainable magnitude vector `m`
+(one float per output channel) absorbs the norm drift. `m` starts at
+`‖W0‖_row` (ΔW = 0 at init); the `(out × in)` intermediates are
+checkpoint-recomputed, same memory discipline as LoKr/DoRA.
+
+Save format: `lokr_w1 / lokr_w2[_a/_b]` plus `<name>.dora_scale` through the
+lokr write path. In-repo loading only (same constraint as plain LoKr —
+runtime-fused qkv keys are not defused for this variant).
+
 ## rs-LoRA (`rs_lora = true`)
 
 Rank-stabilized scaling ([rs-LoRA](https://arxiv.org/abs/2312.03732)): the
@@ -68,8 +93,10 @@ the trained scale from plain `alpha / dim` with no metadata sniffing.
 
 Caveats:
 
-- Plain LoRA / DoRA only (`module_class` check in `LoRANetworkCfg.from_kwargs`);
-  LoKr and the routed families compute their own scaling and refuse the flag.
+- Plain LoRA / DoRA / LoKr / DoKr (`module_class` check in
+  `LoRANetworkCfg.from_kwargs`); the routed families compute their own
+  scaling and refuse the flag. use_w2 LoKr forces `scale = 1`, so rs is
+  inert there by construction.
 - Resume/warm-start must keep `rs_lora = true` in the TOML: the transform is
   applied at construction from the config alpha, so a resume that drops the
   flag trains at `alpha / r` against a checkpoint scaled for `alpha / √r`.
@@ -96,7 +123,10 @@ Provides a flat-σ draw, so `sigma_lowres` composes with it.
 
 - New LoRA-family variants: **DoRA** / **rs-LoRA** / **LoKr**
   (`configs/gui-methods/{dora,rs_lora,lokr}.toml`), plus `use_dora` / `rs_lora`
-  switches on the plain **LoRA** variant.
+  switches on the plain **LoRA** variant. The **LoKr** variant carries all
+  three knobs (`use_lokr` / `lokr_factor` / `use_dora` / `rs_lora`) — tick
+  `use_dora` (+ optionally `rs_lora`) on the LoKr variant to train DoKr,
+  matching other trainers' "Lora Type = LoKr + Lora Dora / Lora Rs" layout.
 - `timestep_sampling` and `scale_weight_norms` are promoted into the Basic
   section and get the accent highlight (★ + bold link-colored label) per user
   request; `scale_weight_norms` now ships a default of `5.0` in `base.toml`
@@ -106,8 +136,10 @@ Provides a flat-σ draw, so `sigma_lowres` composes with it.
 
 ## Tests
 
-`tests/test_dora_lokr_rs.py` pins: spec dispatch + combo refusals, LoKr
-zero-init / kron-forward / full-matrix scale=1 rules, DoRA magnitude seeding
-and the weight-decompose forward formula (magnitude frozen), the rs alpha
-convention, qinglong_flux bounds/determinism/range restriction + end-to-end
-timestep path, and dora_scale chunking through the qkv defuse.
+`tests/test_dora_lokr_rs.py` pins: spec dispatch (incl. dora+lokr → dokr) +
+combo refusals, LoKr zero-init / kron-forward / full-matrix scale=1 rules,
+DoRA magnitude seeding and the weight-decompose forward formula (magnitude
+frozen, multiplier honored), DoKr zero-init / forward formula / factor
+gradients, the rs alpha convention + cfg module_class acceptance matrix,
+qinglong_flux bounds/determinism/range restriction + end-to-end timestep
+path, and dora_scale chunking through the qkv defuse.
