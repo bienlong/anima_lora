@@ -10,7 +10,7 @@ weighs the text (in-box share). Status 2026-09-28: the kana rows
 two kanji batches and the bake of the new seed are left.
 
 The line's code and records live in `project/cjk_anima_scale/`. Its
-`README.md` holds the current state, `plan_retrain.md` what is left,
+`README.md` holds the current state, `proposal_length.md` the open question,
 `retrain_experiments.md` the reads behind this page, and
 `band_experiment_results.md` the band law. Run it through that project's
 `scale.py <run> data | train | eval`. There is no `make` target.

@@ -111,7 +111,7 @@ EN-only datasets are unaffected either way (identical ids, identical caches).
   `models/vocab_packs/anima_cjk_vocab_pack_300fsp_line05/` no longer loads
   — and `bake_vocab_pack.py` has no `--line_*` flags. The retrain line
   composes through per-glyph routing on cold singles instead
-  (`project/cjk_anima_scale/plan_retrain.md`).
+  (`project/cjk_anima_scale/retrain_experiments.md`).
 
 ## Rebuilding a pack
 

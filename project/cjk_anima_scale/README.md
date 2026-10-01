@@ -3,10 +3,12 @@
 Opened 2026-09-23 out of [`../finished/cjk_renderable_anima/`](../finished/cjk_renderable_anima/).
 That line is the research surface (probe code, `reports/`, `findings.md`);
 this one is the production line that builds the pack on what it settled:
-one loss, one trainer, σ per item from the band law. Since 2026-09-28 the
-line is the **singles retrain** (`plan_retrain.md`); what came before it —
-the stage chain, the 300-piece runs, line mode, plan_2900 — is under
-`_archive/` (see its README).
+one loss, one trainer, σ per item from the band law. The **singles retrain**
+(2026-09-28 – 09-30) produced the current seed; its plan and the plans after
+it (`plan.md`, `plan_retrain.md`, `plan_polish.md`, `hypothesis.md`,
+`idea.md`, `plan_garble_replace.md`) are under `_archive/` with what came
+before — the stage chain, the 300-piece runs, line mode, plan_2900 (see its
+README). The open question is [`proposal_length.md`](proposal_length.md).
 
 ## The vocab band law
 
@@ -42,19 +44,14 @@ A new read that changes a row of the law goes into
 
 | file | what |
 |---|---|
-| [`plan_retrain.md`](plan_retrain.md) | **the live plan**: the kanji budget, `retrain_kanji_b1..b4` chained by `context`, the new seed + `SEED_ROWS` move + floor re-render, the bake with routing on; open: doubling, the cut |
+| [`proposal_length.md`](proposal_length.md) | **the open question** (2026-10-01): the repeats are leftover slots — the concept so far (attack the base's own confused text region), what the garble arms closed, and a counterfactual count pair at σ 0.8–0.9 with a no-training `cf_sense` step first |
 | [`retrain_experiments.md`](retrain_experiments.md) | the retrain's record (2026-09-28): why the singles re-seed cold (P1 / P1b), per-glyph routing (P2), the windowed word pool, checks C0–C3, `retrain_kana` trained and read, the code that landed |
-| [`hypothesis.md`](hypothesis.md) | why a JA row does not compose (2026-09-27) — the P0 / P1 / P2 reads the retrain is built on |
 | [`band_experiment_results.md`](band_experiment_results.md) | **the vocab band law** — the verdict, the per-px window table, the training reads, what is left unrun |
-| [`plan.md`](plan.md) | the collapse spec the code implements: a run is one file, everything else is a rule |
 | [`floor_score.md`](floor_score.md) | the floors on sent / target / word / en: the new seed's (`seed_retrain_0930`, what runs read against) and the old seed's (what the retrain was read against) |
 | [`product_criteria.md`](product_criteria.md) | what a pack has to do to ship: the text axis and the page axis, dev set vs acceptance set |
 | [`colab.md`](colab.md) | running `data` / `train` on a Colab VM (G4 = the kanji batches) |
 | [`future.md`](future.md) | not planned: real images do not train rows, an OCR-reward update, token scaling as the last stage |
-| [`idea.md`](idea.md) | 2026-09-29: layout from the base's own text, identity at 0.3–0.5; the paste read that motivated it. Band half closed by `sigma_split` (2026-09-30), data half → `plan_garble_replace.md` |
-| [`plan_garble_replace.md`](plan_garble_replace.md) | proposal (2026-09-30): the base's own garble in one or two regions, erased and replaced by a real line at the base's px / orientation; data sheet first, then warm vs cold on the 57 `sent` singles |
-| [`plan_polish.md`](plan_polish.md) | pilot only: `future.md` § 3 at 4 k tokens on a self-generated EN-anchor canvas; planned: SFX / small text on a text-free canvas in the post-b3 polish |
-| `reports/` | the reads the live code cites: [`conflict_joint_2026_09_25.md`](reports/conflict_joint_2026_09_25.md) + [`grid_box_2026_09_25.md`](reports/grid_box_2026_09_25.md) (the trainer constants), [`piece_2026_09_25.md`](reports/piece_2026_09_25.md) (the piece ruler), [`long_b0_2026_09_27.md`](reports/long_b0_2026_09_27.md) (the long-piece budget row), [`stage_i_2026_09_26.md`](reports/stage_i_2026_09_26.md) (`b0709`, the cold-kanji budget), [`row_geometry_2026_09_28.md`](reports/row_geometry_2026_09_28.md) (the retrain rows in row space), [`sigma_split_2026_09_30.md`](reports/sigma_split_2026_09_30.md) (the rows gated by σ, x̂0 per σ: text is decided at 0.9–0.7) |
+| `reports/` | the reads the live code cites: [`conflict_joint_2026_09_25.md`](reports/conflict_joint_2026_09_25.md) + [`grid_box_2026_09_25.md`](reports/grid_box_2026_09_25.md) (the trainer constants), [`piece_2026_09_25.md`](reports/piece_2026_09_25.md) (the piece ruler), [`long_b0_2026_09_27.md`](reports/long_b0_2026_09_27.md) (the long-piece budget row), [`stage_i_2026_09_26.md`](reports/stage_i_2026_09_26.md) (`b0709`, the cold-kanji budget), [`row_geometry_2026_09_28.md`](reports/row_geometry_2026_09_28.md) (the retrain rows in row space), [`sigma_split_2026_09_30.md`](reports/sigma_split_2026_09_30.md) (the rows gated by σ, x̂0 per σ: text is decided at 0.9–0.7), [`garble_replace_2026_09_30.md`](reports/garble_replace_2026_09_30.md) + [`delta_scale_2026_10_01.md`](reports/delta_scale_2026_10_01.md) (the garble arms; the repeats are leftover slots) |
 | `configs/runs/*.toml` | the runs — `{vocabs, read[, context]}`: `retrain_kana`, `retrain_kanji_b1..b4`; `run0923_micro` / `run0925_300f` stay for the tests |
 | `cjk_scale/` | the code (`windows` = the law, `config` = the run file + data pools, `recipes` + `builder` = data, `rows` + `train` = the fixed trainer, `budget`, `eval` = floor + trained on one sheet, `conflict`, `merge`, `ledger`); `scale.py` is the front door |
 | `src/` | the stage packages the line runs on (render, readers, scoring, sheets, eval / native / target / cf_sense / scenes), vendored 2026-09-25 byte-faithful and pruned the same day; `src/run_stage.py` runs one by hand |
@@ -63,7 +60,7 @@ A new read that changes a row of the law goes into
 | `_archive/` | gitignored: the retired stage code, and the pre-retrain docs / reports / experiments / run files (see its README) |
 | `runs/` | `ledger.jsonl` — every submitted job |
 
-## Where it stands (2026-09-30)
+## Where it stands (2026-10-01)
 
 `retrain_kana` (174 cold kana rows, routed) composes like `p1_mix` and holds
 the singles; its rows are the kana half of the new seed.
@@ -74,7 +71,12 @@ seed, `output/cjk_anima_scale/seed_retrain_0930/` (`paths.SEED_ROWS`; the
 old one is `SEED_ROWS_0921`). Its floor is in `floor_score.md` (acceptance
 8 → 37 / 80), and it is baked with routing on and published as
 `anima_cjk_vocab_pack_preview4` (Hub `sorryhyun/anima-vocab-pack-cjk`,
-ComfyUI Adapter node ≥ 3.13.0). Details and numbers: `plan_retrain.md`, `retrain_experiments.md`.
+ComfyUI Adapter node ≥ 3.13.0). Details and numbers: `retrain_experiments.md`,
+`_archive/plan_retrain.md`.
+
+2026-10-01: the polish passes on the seed (`polish_seed`, `garble_replace`)
+moved layout but not strings; the repeats are slots the word leaves over
+(`proposal_length.md`).
 
 ## Running a run
 

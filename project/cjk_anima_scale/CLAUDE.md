@@ -1,9 +1,10 @@
 # cjk_anima_scale
 
 Production line for the JA vocab pack: a run is its vocabs + what to read;
-one loss, one trainer, σ per item from the band law (`plan.md`). `README.md`
-= state, `plan_retrain.md` = the live plan, `band_experiment_results.md` = the
-vocab band law. The line is self-contained: its stage code is its own `src/`, and
+one loss, one trainer, σ per item from the band law. `README.md`
+= state, `proposal_length.md` = the open question, `band_experiment_results.md` = the
+vocab band law; the finished plans (`plan.md` = the collapse spec the code
+implements, `plan_retrain.md`, …) are in `_archive/`. The line is self-contained: its stage code is its own `src/`, and
 nothing here imports, paths into or configures from `../finished/cjk_renderable_anima/`
 (the independent research line) — `tests/test_line.py` asserts it.
 
