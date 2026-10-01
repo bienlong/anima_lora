@@ -1,0 +1,74 @@
+pretrained_model_name_or_path = "models/diffusion_models/anima-base-v1.0.safetensors"
+qwen3 = "models/text_encoders/qwen_3_06b_base.safetensors"
+vae = "models/vae/qwen_image_vae.safetensors"
+
+output_dir = "output/ckpt"
+output_name = "anima_lora"
+logging_dir = "output/logs"
+training_comment = ""
+log_with = "tensorboard"
+
+network_module = "networks.lora_anima"
+network_train_unet_only = true
+
+resized_image_dir = "post_image_dataset/resized"
+lora_cache_dir = "post_image_dataset/lora"
+
+sample_ratio = 1.0
+artists_shard = ""
+
+optimizer_type = "AdamW"
+lr_scheduler = "cosine"
+lr_warmup_steps = 0.05
+
+timestep_sampling = "sigmoid"
+sigmoid_bias = 0.0
+discrete_flow_shift = 1.0
+
+gradient_checkpointing = false
+unsloth_offload_checkpointing = false
+
+use_vae_cache = true
+use_text_cache = true
+skip_cache_check = true
+vae_chunk_size = 64
+vae_disable_cache = true
+masked_loss = true
+torch_compile = true
+attn_mode = "flash"
+compile_dynamic_seq = true
+activation_memory_budget = 0.99
+log_every_n_steps=2
+dataloader_pin_memory = true
+persistent_data_loader_workers= true
+use_cmmd = false
+channel_scaling_alpha = 0.5
+gradient_accumulation_steps=1
+train_adaln = true
+adaln_rank = 16
+
+sigma_lowres = false
+sigma_lowres_route = "1024:896"
+sigma_lowres_threshold = 0.5
+sigma_lowres_span = "late:0.75"
+sigma_lowres_route2 = "1024:768"
+sigma_lowres_threshold2 = 0.65
+sigma_lowres_threshold2_max = 0.95
+sigma_lowres_span2 = "late:0.75"
+
+use_repa = false
+
+[general]
+[[datasets]]
+batch_size = 1
+
+validation_split_num = 0
+validation_seed = 42
+
+repeat_by_folder_name = false
+
+  [[datasets.subsets]]
+  image_dir = '{resized_image_dir}'
+  cache_dir = '{lora_cache_dir}'
+  num_repeats = 1
+  recursive = true
