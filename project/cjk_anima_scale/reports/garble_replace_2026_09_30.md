@@ -340,3 +340,80 @@ Results: `experiments/garble_replace/results/20261001-0759-data-grid50nh/`,
 `…081331-a77066`, `…094838-cdbfdf`. Data:
 `output/cjk_anima_scale/run0930_garble_replace/data_{grid50nh,short50}/`.
 Rows: `output/cjk_anima_scale/experiments/garble_replace_{cold_grid50nh,warm_short50,warm_short50if}/`.
+
+## Follow-up (10-01): x̂0 per σ on the trained rows
+
+`plan_garble_replace.md` § 4's `--traj` leg, run 10-01 through `sigma_split
+--traj --rows <arm> --traj_conds ja_seed` (the arm's rows at every σ), on
+the seed, warm (μ 0.1) and cold rows. Samples: こんにちは / やったネ × the 4 grid
+prompts, seed 0. x̂0 at the step nearest σ 1.0 / 0.95 / 0.9 / 0.85 / 0.8 /
+0.75 / 0.7 / 0.5 / 0, each read.
+
+| rows | σ 0.9 | σ 0.84 | σ 0 | glyphs read at σ 0 (target 5 / 4) |
+|---|---|---|---|---|
+| seed | ≤ 1 edit 4 / 8, box 0.037 | 7 / 8, box 0.121 | 6 / 8, hit 4 | 5 4 6 4 6 4 5 5 |
+| warm | 0, box 0 | 2 / 8, box 0.039 | 2 / 8, hit 0 | 6 5 8 4 8 14 8 7 |
+| cold | 0, box 0.005 (tall: box h 0.06) | 0, box h 0.17 | 0 | 23 4 14 6 33 12 19 11 |
+
+- σ 0.95: seed and warm draw the same blurred banner, same place and span.
+- σ 0.9: the seed fills it with 4–5 large glyphs that already read. Warm
+  fills the same span with a row of smaller glyphs (`こんにちがつぬいぐり`) —
+  more slots than the word.
+- σ 0.84 → 0.7: warm's string settles into those slots; the extra slots take
+  a repeated glyph (`こんにちはは`, `こんくにちちはは`, `ややったたえっ…`) and
+  stay to the end.
+- Cold: tall vertical columns from σ 0.9 on, sentence-length.
+- Warm moves the string's commit from σ 0.9 (seed) to 0.85: inside its band
+  (0.6–0.85, σ drawn as 0.6 + 0.25 · sigmoid(z), ⅔ of draws in 0.67–0.78).
+
+The span is set by σ 0.95 with or without the trained rows; the glyph count
+inside it is set at σ ≈ 0.9, just above the band. The repeats are the slots
+left over once the word is written. Not tested, but consistent with it: the
+garble items draw their glyphs at the canvas's px (median 14.4), and warm's
+glyphs come out smaller in the same span.
+
+Results: `experiments/sigma_split/results/20261001-1217-traj-seed/`,
+`…-1218-traj-garble_replace_warm/`, `…-1220-traj-garble_replace_cold/`.
+Sheets: `output/cjk_anima_scale/experiments/sigma_split_s0.5/traj_<rows>/sheet_traj_ja_seed.png`.
+
+## Follow-up (10-01): short50 at σ 0.8–0.95
+
+One arm against warm μ 0.02 short50: the same items (`--legs reband --tag
+short50hb --mix_from short50 --band 0.8 0.95`: images, captions, order and
+latents of `data_short50`, every band → 0.8–0.95), same trainer constants,
+5 130 steps. Job `20261001-122410-18dd04`.
+
+| arm | official | contained | ≤ 1 edit | ≤ 2 edit | dup | kana |
+|---|---|---|---|---|---|---|
+| floor | 29 | 64 | 92 | 129 | 100 | 169 |
+| warm μ 0.02, short50 (0.6–0.85) | 2 | 19 | 18 | 51 | 133 | 171 |
+| warm μ 0.02, short50 at 0.8–0.95 | 1 | 3 | 7 (+3 / −88 vs floor, p 1e-22) | 25 | 120 | 178 |
+
+| arm | box | box h | flat white | en_cos | box IoU vs EN ref |
+|---|---|---|---|---|---|
+| floor | 0.156 | 0.180 | 0.132 | 0.922 | 0.198 |
+| short50 (0.6–0.85) | 0.073 | 0.198 | 0.123 | 0.929 | 0.254 |
+| short50 at 0.8–0.95 | 0.078 | 0.309 | 0.174 | 0.917 | 0.084 |
+
+Training: in-box loss 0.174 → 0.146 by step 2 500 (−16 %; short50 at its
+band −9 %, 0.125 → 0.113), out-box flat at 0.124; warm_cos to the seed 0.930
+at step 2 650 (short50 0.961).
+
+traj (`sigma_split --traj --rows garble_replace_warm_short50hb`, same
+samples and σ as above):
+
+- Two to four large white bubble blobs at σ 1.0 / 0.95, before the figures —
+  the garble canvases' bubbles. No banner at any σ.
+- The bubbles hold vertical columns of small glyphs that only form at
+  σ ≤ 0.5, sentence-length (`どこ夢んして ど疾な感る…`); 0 / 8 ≤ 1 edit at
+  every σ (short50 at its band: 2–3 / 8 from σ 0.8).
+
+At 0.8–0.95 the rows learn the canvas — its bubbles — not the line's length.
+The short line's glyphs are drawn at the garble's px (median 14.4); at
+σ ≥ 0.8 they are below what the FM target resolves, so the only gradient
+the rows get there is layout. `windows.py` says the same of glyph identity:
+0.8–0.95 is dead at 48 px (C.2), and 12–24 px singles sit at 0.3–0.5.
+
+Results: `experiments/garble_replace/results/20261001-1223-reband-short50hb/`,
+`…/20261001-1224-warm-short50hb-mu002/`, `experiments/sigma_split/results/20261001-1314-traj-garble_replace_warm_short50hb/`, `…/20261001-1316-traj-garble_replace_warm_short50/`.
+Rows: `output/cjk_anima_scale/experiments/garble_replace_warm_short50hb/`.

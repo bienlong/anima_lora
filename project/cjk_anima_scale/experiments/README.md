@@ -104,3 +104,12 @@ their reads are in `../_archive/reports/` and `../hypothesis.md`.
   `hi` = floor), text is decided at 0.9–0.7; switched at 0.8, `garble` keeps
   the base's bubbles and reads 16 / 29 official, 61 / 92 ≤ 1 edit
   (`../reports/sigma_split_2026_09_30.md`).
+- `delta_scale/` — why `garble_replace`'s strings repeat, no training: `probe`
+  (CPU) splits each word token's adapter output and DiT cross-attn keys into
+  identity / slot / residual over all 24 slot orders of a 4-glyph word, per
+  arm × Δ scale; `rows` + `read` render the seed rows with Δ × s on the `sent`
+  ruler (`garble_replace`'s read leg). **Ran 2026-10-01** → the slot share falls
+  with the reads across arms (cold 0.009), but shrinking the seed's Δ restores
+  it and the reads fall anyway (Δ 0.9 ≤ 1 edit 92 → 48, dup 100 → 124;
+  Δ 0.75 → 5): the rows shorten the base's sentence-length line, and the
+  leftover slots are the repeats (`../reports/delta_scale_2026_10_01.md`).

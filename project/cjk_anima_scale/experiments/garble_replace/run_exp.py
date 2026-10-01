@@ -44,6 +44,9 @@ Legs:
 - ``no_humans --tag T`` (CPU) → ``data_T``: ``data_<--mix_from>``'s items
   and latents as they are, ``no humans`` added to every 3×3 grid caption
   that lacks it (``no_humans()``);
+- ``reband --tag T --band LO HI`` (CPU) → ``data_T``: ``data_<--mix_from>``'s
+  items and latents as they are, every item's σ band set to ``--band``
+  (``reband()``);
 - ``read --arm warm|cold`` (GPU): the ``sent`` ruler vs the seed's routed
   floor (``read``'s docstring);
 - ``train --arm warm|cold`` (GPU) → ``OUT/experiments/garble_replace_<arm>``
@@ -820,6 +823,40 @@ def no_humans(src: Path) -> dict:
     }
 
 
+def reband(src: Path, band: tuple) -> dict:
+    """The ``reband`` leg: ``src``'s items as they are — images, boxes,
+    captions, order, so its latents are copied — every item's σ band set to
+    ``band``. The TE cache is not copied."""
+    import shutil
+
+    recs = [
+        json.loads(ln)
+        for ln in (src / "train.jsonl").read_text("utf-8").splitlines()
+        if ln
+    ]
+    old = Counter(tuple(r["band"]) for r in recs)
+    for r in recs:
+        r["band"] = list(band)
+    (DATA / "train.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in recs), encoding="utf-8"
+    )
+    for f in ("vocabs.json", "eval.json"):
+        shutil.copy2(src / f, DATA / f)
+    for d in src.glob("latents_*"):
+        if d.is_dir() and not (DATA / d.name).exists():
+            shutil.copytree(d, DATA / d.name)
+    bj = json.loads((src / "build.json").read_text())
+    (DATA / "build.json").write_text(
+        json.dumps(bj | {"band": list(band), "reband_from": str(src)})
+    )
+    return {
+        "from": str(src),
+        "items": len(recs),
+        "old_bands": {f"{a}-{b}": n for (a, b), n in old.items()},
+        "band": list(band),
+    }
+
+
 def inv_freq(data: Path) -> dict:
     """Per single: ``min(1, median / n)``, ``n`` = the items carrying it — the
     over-drawn singles (っ な い ん て …) step slower, the rest at the lr."""
@@ -850,7 +887,7 @@ def main():
         "--legs",
         nargs="+",
         default=["data"],
-        choices=["data", "mix", "no_humans", "train", "read"],
+        choices=["data", "mix", "no_humans", "reband", "train", "read"],
     )
     p.add_argument("--arm", choices=["warm", "cold"])
     p.add_argument("--mu", type=float, default=MU_WARM, help="warm arm's anchor μ")
@@ -877,13 +914,19 @@ def main():
         help="train: each single's update × min(1, median / its item count) (row_step_scale)",
     )
     p.add_argument(
-        "--mix_from", default="quoted", help="mix / no_humans: the source data tag"
+        "--mix_from",
+        default="quoted",
+        help="mix / no_humans / reband: the source data tag",
     )
     p.add_argument(
         "--grid_frac", type=float, default=0.2, help="mix: 3×3 grid share of the items"
     )
     p.add_argument(
-        "--band", type=float, nargs=2, default=list(BAND), help="mix: the grids' σ band"
+        "--band",
+        type=float,
+        nargs=2,
+        default=list(BAND),
+        help="mix: the grids' σ band; reband: every item's",
     )
     args = p.parse_args()
     assert not {"train", "read"} & set(args.legs) or args.arm, (
@@ -979,6 +1022,14 @@ def main():
         src = DATA.parent / (f"data_{args.mix_from}" if args.mix_from else "data")
         metrics["no_humans"] = no_humans(src)
         print(json.dumps(metrics["no_humans"], ensure_ascii=False), flush=True)
+    if "reband" in args.legs:
+        assert args.tag and args.tag != args.mix_from, (
+            "--legs reband needs its own --tag"
+        )
+        src = DATA.parent / (f"data_{args.mix_from}" if args.mix_from else "data")
+        metrics["reband"] = reband(src, tuple(args.band))
+        metrics["band"] = list(args.band)
+        print(json.dumps(metrics["reband"], ensure_ascii=False), flush=True)
     if "train" in args.legs:
         from cjk_scale import train as T
 

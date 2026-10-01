@@ -24,7 +24,9 @@ Arms, JA caption = the ``sent`` ruler's ``en`` clause
 
 Seed rows on both sides = the floor, read from the cache of record
 (``seed_retrain_0930/routed/native_sent/``, the ``retrain_read`` grid: 4
-prompts × 2 seeds × 23 strings = 184). ``--check`` renders one floor key
+prompts × 2 seeds × 23 strings = 184). ``--traj [--rows <arm>] [--traj_conds …] [--traj_sigmas …]`` decodes x̂0 per σ
+(``--rows``: an arm's rows in place of the seed's, into ``traj_<arm>/``).
+``--check`` renders one floor key
 through the split path with seed on both sides and diffs it against the
 cached file (the plumbing check). The seed trained singles at 0.7–0.9, so
 ``lo`` is a lower bound on what rows trained at 0.3–0.5 could do.
@@ -99,7 +101,7 @@ def out_file(switch: float, arm: str, it: dict) -> Path:
 class Splitter:
     """The DiT + the seed Δ, rendering a caption pair split at σ."""
 
-    def __init__(self):
+    def __init__(self, rows_dir: Path = SEED_ROWS.parent):
         import torch
 
         from common.hooks import ExtDelta
@@ -110,7 +112,7 @@ class Splitter:
         )
         self.anima = self.shared["model"]
         self.anima.eval()
-        sd = load_trained(SEED_ROWS.parent)
+        sd = load_trained(rows_dir)
         self.delta = ExtDelta.from_state(self.anima, sd["delta"], self.device)
         self.vae = load_vae(self.device)
         self.caches = {"seed": {}, "raw": {}}  # conds_cache per Δ scale
@@ -368,11 +370,25 @@ TRAJ = {
 }
 
 
-def traj_dir(switch: float) -> Path:
-    return OUT / "experiments" / f"sigma_split_s{switch:g}" / "traj"
+def rows_dir(rows: str) -> Path:
+    """``""`` / ``seed`` = the seed rows, else an arm under ``OUT/experiments``."""
+    return SEED_ROWS.parent if rows in ("", "seed") else OUT / "experiments" / rows
 
 
-def traj(label: str, switch: float) -> None:
+def traj_dir(switch: float, rows: str = "") -> Path:
+    """``rows``: ``seed`` or an arm under ``OUT/experiments`` (``rows_dir``);
+    ``""`` = the record's own dir."""
+    d = OUT / "experiments" / f"sigma_split_s{switch:g}"
+    return d / (f"traj_{rows}" if rows else "traj")
+
+
+def traj(
+    label: str,
+    switch: float,
+    rows_arm: str = "",
+    conds: tuple = tuple(TRAJ),
+    sigmas: tuple = TRAJ_SIGMAS,
+) -> None:
     """Render each TRAJ condition on the 4 grid prompts × TRAJ_TEXTS (seed
     ``TRAJ_SEED``; ``garble`` once per prompt: its caption has no string),
     decode x̂0 at the step nearest each of ``TRAJ_SIGMAS``, read every decode,
@@ -388,10 +404,10 @@ def traj(label: str, switch: float) -> None:
         for it in floor_items()
         if it["text"] in TRAJ_TEXTS and it["seed"] == TRAJ_SEED
     }
-    root = traj_dir(switch)
-    sp = Splitter()
+    root = traj_dir(switch, rows_arm)
+    sp = Splitter(rows_dir(rows_arm))
     manifest = []
-    for cond, (above, below) in TRAJ.items():
+    for cond, (above, below) in ((c, TRAJ[c]) for c in conds):
         for (text, pi), it in sorted(
             items.items(), key=lambda kv: (kv[0][1], kv[0][0])
         ):
@@ -403,7 +419,7 @@ def traj(label: str, switch: float) -> None:
             x0s: dict = {}
             sp.render(d / "sig0.00.png", it, above, below, switch, x0s)
             steps = sorted(x0s)
-            for target in TRAJ_SIGMAS:
+            for target in sigmas:
                 if target == 0.0:
                     fn, s = d / "sig0.00.png", 0.0
                 else:
@@ -452,10 +468,15 @@ def traj(label: str, switch: float) -> None:
     (root / "traj_reads.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8"
     )
-    metrics: dict = {"switch": switch, "sigmas": TRAJ_SIGMAS, "per_cond": {}}
-    for cond in TRAJ:
+    metrics: dict = {
+        "switch": switch,
+        "rows": rows_arm,
+        "sigmas": sigmas,
+        "per_cond": {},
+    }
+    for cond in conds:
         per = {}
-        for target in TRAJ_SIGMAS:
+        for target in sigmas:
             ms = [
                 m for m in manifest if m["cond"] == cond and m["sigma_target"] == target
             ]
@@ -491,7 +512,7 @@ def traj(label: str, switch: float) -> None:
                 )
             )
         contact_sheet(
-            rows, root / f"sheet_traj_{cond}.png", thumb=224, cols=len(TRAJ_SIGMAS)
+            rows, root / f"sheet_traj_{cond}.png", thumb=224, cols=len(sigmas)
         )
     run_dir = make_run_dir(
         "sigma_split",
@@ -501,7 +522,9 @@ def traj(label: str, switch: float) -> None:
     write_result(
         run_dir,
         script=__file__,
-        args=argparse.Namespace(label=label, switch=switch, traj=True),
+        args=argparse.Namespace(
+            label=label, switch=switch, traj=True, rows=rows_arm, conds=conds
+        ),
         label=label,
         metrics=metrics,
         artifacts=[str(root)],
@@ -515,16 +538,32 @@ def main():
     ap.add_argument("--switch", type=float, default=0.5)
     ap.add_argument("--arms", default=",".join(ARMS))
     ap.add_argument("--traj", action="store_true", help="the x̂0-per-σ leg alone")
+    ap.add_argument(
+        "--rows",
+        default="",
+        help="traj: `seed` or an arm under OUT/experiments (its own traj_<rows> dir)",
+    )
+    ap.add_argument("--traj_conds", default=",".join(TRAJ))
+    ap.add_argument("--traj_sigmas", nargs="+", type=float, default=list(TRAJ_SIGMAS))
     ap.add_argument("--dry_run", action="store_true")
     args = ap.parse_args()
     if args.traj:
-        n = sum(1 if c == "garble" else len(TRAJ_TEXTS) for c in TRAJ) * PROMPTS
+        conds = tuple(c for c in args.traj_conds.split(",") if c)
+        assert set(conds) <= set(TRAJ), conds
+        n = sum(1 if c == "garble" else len(TRAJ_TEXTS) for c in conds) * PROMPTS
         print(
-            f"traj: {n} renders × {len(TRAJ_SIGMAS)} σ → {traj_dir(args.switch)}",
+            f"traj: {n} renders × {len(args.traj_sigmas)} σ → "
+            f"{traj_dir(args.switch, args.rows)}",
             flush=True,
         )
         if not args.dry_run:
-            traj(args.label, args.switch)
+            traj(
+                args.label,
+                args.switch,
+                args.rows,
+                conds,
+                tuple(args.traj_sigmas),
+            )
         return
     arms = [a for a in args.arms.split(",") if a]
     assert set(arms) <= set(ARMS), arms
