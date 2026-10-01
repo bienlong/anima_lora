@@ -28,11 +28,22 @@ saying frame's ``… is saying something.``, else `` Japanese text reads as
 are the drawn glyph boxes (``layout: grid`` + ``boxes``: ``loss.item_boxes``
 masks each region; ``box`` is their union, for ``BoxSplit`` logging only).
 
+Short variants (``--short_variants K``): the last K of a canvas's
+``VARIANTS`` draws take a 2–4-glyph pool line (``SHORT_LEN``) instead,
+at the garble's px, one column centred on the garble's ink (``short_m``);
+the rest of the erased region stays blank. Same canvas, px, fonts, band
+and caption form — only the length moves. The short lines leave out any
+line that is a piece of a held string or carries a ≤ 2-glyph held string
+(はい: the trigram hold does not reach it).
+
 Legs:
 - ``data`` (CPU) → ``OUT/run0930_garble_replace/data`` + ``sheet_*.png``;
 - ``mix --tag T`` (CPU) → ``data_T``: ``data_<--mix_from>``'s items plus
   3×3 ``grid_single`` items over the same singles (``--grid_frac`` of the
   items) at ``--band``, the source items at their own;
+- ``no_humans --tag T`` (CPU) → ``data_T``: ``data_<--mix_from>``'s items
+  and latents as they are, ``no humans`` added to every 3×3 grid caption
+  that lacks it (``no_humans()``);
 - ``read --arm warm|cold`` (GPU): the ``sent`` ruler vs the seed's routed
   floor (``read``'s docstring);
 - ``train --arm warm|cold`` (GPU) → ``OUT/experiments/garble_replace_<arm>``
@@ -40,6 +51,8 @@ Legs:
   the 57 singles of the ``sent`` strings, 90 steps / row, every other row
   frozen at the seed; warm starts from the seed rows (μ ``--mu``, default
   0.1 as polish_seed), cold from the pack rows (μ 0, the retrain's singles).
+  ``--inv_freq``: each single's update × min(1, median / the items carrying
+  it) (``inv_freq()``, ``train.train(row_step_scale=…)``).
 
     ANIMA_VOCAB_PACK=models/vocab_packs/anima_cjk_vocab_pack \\
       .venv/bin/python project/cjk_anima_scale/experiments/garble_replace/run_exp.py \\
@@ -75,6 +88,7 @@ EXP = OUT / "experiments"
 BAND = (0.6, 0.85)
 VARIANTS = 8  # lines per canvas
 LINE_LEN = (2, 32)
+SHORT_LEN = (2, 4)  # --short_variants: the short lines' glyph counts
 PITCH_MIN, PITCH_MAX = 0.95, 1.25  # glyph pitch along a column, × px (renderer: 1.05)
 MIN_FITS = 20  # fewer single lines fit a region → add joined pairs
 JOIN_BARE = set("。！？…!?")  # a line ending in these joins the next without 、
@@ -151,11 +165,20 @@ def measure(arr, tb) -> dict | None:
             continue
         off_c, off_a = (x0, y0) if vertical else (y0, x0)
         cols.append(
-            {"c": off_c + (a + b) / 2, "a0": off_a + int(nz[0]), "a1": off_a + int(nz[-1]) + 1}
+            {
+                "c": off_c + (a + b) / 2,
+                "a0": off_a + int(nz[0]),
+                "a1": off_a + int(nz[-1]) + 1,
+            }
         )
     if vertical:
         cols.reverse()  # right to left
-    return {"vertical": bool(vertical), "k": len(cols), "px": round(float(px), 1), "cols": cols}
+    return {
+        "vertical": bool(vertical),
+        "k": len(cols),
+        "px": round(float(px), 1),
+        "cols": cols,
+    }
 
 
 def capacity(m: dict) -> tuple[int, int]:
@@ -228,13 +251,46 @@ def draw_line(im, text: str, m: dict, font_path: str, color):
             else:
                 w = ld.textlength(ch, font=font)
                 ld.text(
-                    (cell + (fs - w) / 2, col["c"] - fs * 0.6), ch, fill=color, font=font
+                    (cell + (fs - w) / 2, col["c"] - fs * 0.6),
+                    ch,
+                    fill=color,
+                    font=font,
                 )
     bb = layer.getbbox()
     if bb is None:
         return None
     im.paste(layer, (0, 0), layer)
     return [max(0, bb[0] - 2), max(0, bb[1] - 2), min(W, bb[2] + 2), min(H, bb[3] + 2)]
+
+
+def short_m(m: dict, n: int) -> dict | None:
+    """One column for an ``n``-glyph line, centred on the garble's ink (across:
+    the mid of its first and last column; along: the mid of its ink extent),
+    at the garble's px and the renderer's 1.05 pitch; ``None`` when the line
+    runs past the garble's ink along."""
+    fs = round(m["px"])
+    cs = [c["c"] for c in m["cols"]]
+    a0 = min(c["a0"] for c in m["cols"])
+    a1 = max(c["a1"] for c in m["cols"])
+    L = n * 1.05 * fs
+    if L > a1 - a0 + fs:
+        return None
+    mid = (a0 + a1) / 2
+    col = {"c": (min(cs) + max(cs)) / 2, "a0": mid - L / 2, "a1": mid + L / 2}
+    return {"vertical": m["vertical"], "k": 1, "px": m["px"], "cols": [col]}
+
+
+def short_lines(lines: list, held) -> list:
+    """The pool's ``SHORT_LEN`` lines minus any piece of a held string and any
+    line carrying a ≤ 2-glyph held string."""
+    tiny = [h for h in held if len(h) <= 2]
+    return [
+        ln
+        for ln in lines
+        if SHORT_LEN[0] <= len(ln) <= SHORT_LEN[1]
+        and not any(ln in h for h in held)
+        and not any(t in ln for t in tiny)
+    ]
 
 
 def erase(arr, scene: dict):
@@ -285,8 +341,12 @@ def heavy_fonts(fonts: list) -> tuple[list, dict]:
     cov = {}
     for f in fonts:
         im = Image.new("L", (fs * len(t) + 20, fs * 2), 0)
-        ImageDraw.Draw(im).text((5, 5), t, fill=255, font=ImageFont.truetype(f, fs, index=0))
-        cov[Path(f).name] = round(float(np.asarray(im).sum()) / 255 / (fs * fs * len(t)), 3)
+        ImageDraw.Draw(im).text(
+            (5, 5), t, fill=255, font=ImageFont.truetype(f, fs, index=0)
+        )
+        cov[Path(f).name] = round(
+            float(np.asarray(im).sum()) / 255 / (fs * fs * len(t)), 3
+        )
     return [f for f in fonts if cov[Path(f).name] >= FONT_MIN_INK], cov
 
 
@@ -339,13 +399,19 @@ class Dealer:
             a = self.rng.choice(self.lines)
             sep = "" if a[-1] in JOIN_BARE else "、"
             want = [x - len(a) - len(sep) for x in (lo, hi)]
-            bs = [ln for L in range(max(2, want[0]), want[1] + 1) for ln in self.by_len.get(L, ())]
+            bs = [
+                ln
+                for L in range(max(2, want[0]), want[1] + 1)
+                for ln in self.by_len.get(L, ())
+            ]
             if not bs:
                 continue
             t = a + sep + self.rng.choice(bs)
             j = len(a) + len(sep)
             seam = t[max(0, j - 3) : j + 3]
-            if any(x == y for x, y in zip(t, t[1:])) or any(g in seam for g in self.grams):
+            if any(x == y for x, y in zip(t, t[1:])) or any(
+                g in seam for g in self.grams
+            ):
                 continue
             out.append(t)
         return out
@@ -366,7 +432,9 @@ def caption(prompt: str, texts: list) -> str:
     return f"{p} Japanese text reads as {quoted}."
 
 
-def build(sing: list, lines: list, held=(), seed: int = 0) -> tuple[list, dict]:
+def build(
+    sing: list, lines: list, held=(), seed: int = 0, short_variants: int = 0
+) -> tuple[list, dict]:
     import numpy as np
     from PIL import Image
 
@@ -380,6 +448,8 @@ def build(sing: list, lines: list, held=(), seed: int = 0) -> tuple[list, dict]:
     ]
     fonts, font_ink = heavy_fonts(find_fonts())
     dealer = Dealer(lines, sing, rng, held)
+    shorts = short_lines(lines, held)
+    sdealer = Dealer(shorts, sing, rng, held)
     (DATA / "img").mkdir(parents=True, exist_ok=True)
     recs, why, regions = [], Counter(), []
     for sc in scenes:
@@ -397,21 +467,26 @@ def build(sing: list, lines: list, held=(), seed: int = 0) -> tuple[list, dict]:
         colors = [ink_color(base, tb, f) for tb, f in zip(sc["boxes_anchor"], fills)]
         # manga order: right to left, then top to bottom
         order = sorted(
-            range(len(ms)), key=lambda j: (-sc["boxes_anchor"][j][2], sc["boxes_anchor"][j][1])
+            range(len(ms)),
+            key=lambda j: (-sc["boxes_anchor"][j][2], sc["boxes_anchor"][j][1]),
         )
         for v in range(VARIANTS):
+            short = v >= VARIANTS - short_variants
             im = Image.fromarray(arr.copy())
             texts, boxes, used, faces = [], [], set(), []
             for j in order:
                 m = ms[j]
-                lo, hi = capacity(m)
+                lo, hi = SHORT_LEN if short else capacity(m)
                 box = None
                 for _try in range(6):
-                    t = dealer.draw(lo, hi, used)
+                    t = (sdealer if short else dealer).draw(lo, hi, used)
                     if t is None:
                         break
                     font = pick_font(t, fonts, rng)
-                    box = draw_line(im, t, m, font, colors[j])
+                    mm = short_m(m, len(t)) if short else m
+                    if mm is None:
+                        continue
+                    box = draw_line(im, t, mm, font, colors[j])
                     if box is not None:
                         break
                 if box is None:
@@ -453,10 +528,14 @@ def build(sing: list, lines: list, held=(), seed: int = 0) -> tuple[list, dict]:
                     "scene_pool": "garble",
                     "frame": sc["frame"],
                     "layout_garble": [
-                        {**{k: m[k] for k in ("vertical", "k", "px")}, "cap": capacity(m)}
+                        {
+                            **{k: m[k] for k in ("vertical", "k", "px")},
+                            "cap": capacity(m),
+                        }
                         for m in (ms[j] for j in order)
                     ],
                     "glyphs": len("".join(texts)),
+                    "short": short,
                     "fonts": faces,
                 }
             )
@@ -470,6 +549,11 @@ def build(sing: list, lines: list, held=(), seed: int = 0) -> tuple[list, dict]:
         "px": sorted(r["px"] for r in regions),
         "cap_hi": dict(sorted(Counter(capacity(r)[1] for r in regions).items())),
         "distinct_lines": len({t for r in recs for t in r["texts"]}),
+        "short_variants": short_variants,
+        "short_items": sum(r["short"] for r in recs),
+        "short_pool": len(shorts),
+        "short_distinct": len({t for r in recs if r["short"] for t in r["texts"]}),
+        "short_single_draws": dict(sorted(sdealer.cov.items(), key=lambda x: x[1])),
         "font_ink": font_ink,
         "fonts": dict(Counter(f for r in recs for f in r["fonts"])),
         "single_draws": dict(sorted(dealer.cov.items(), key=lambda x: x[1])),
@@ -516,7 +600,8 @@ def canvases_sheet(path: Path):
             m = measure(arr, tb)
             d.rectangle(tb, outline="red", width=2)
             labs.append(
-                "none" if m is None
+                "none"
+                if m is None
                 else f"{'V' if m['vertical'] else 'H'}{m['k']} {capacity(m)[0]}–{capacity(m)[1]} {m['px']:.0f}px"
             )
         rows.append((im, [f"{sc['i']:05d}", " / ".join(labs), "", ""]))
@@ -548,7 +633,9 @@ def read(arm: str, name: str) -> dict:
     items = SS.floor_items()
     keys = {(it["text"], it["clause"], it["pi"], it["seed"]) for it in items}
     chars = sorted({it["text"] for it in items})
-    floor_h = {k: v for k, v in R.hits(SS.FLOOR_READS, chars, SS.CLAUSE).items() if k in keys}
+    floor_h = {
+        k: v for k, v in R.hits(SS.FLOOR_READS, chars, SS.CLAUSE).items() if k in keys
+    }
     arm_h = {k: v for k, v in R.hits(f, chars, SS.CLAUSE).items() if k in keys}
     print("===== floor", flush=True)
     out: dict = {"floor_tally": R.tally(floor_h)}
@@ -558,11 +645,13 @@ def read(arm: str, name: str) -> dict:
     print(f"  vs floor {out['vs_floor']}", flush=True)
     recs = {
         "floor": [
-            m for m in json.loads(SS.FLOOR_READS.read_text("utf-8"))
+            m
+            for m in json.loads(SS.FLOOR_READS.read_text("utf-8"))
             if (m["text"], m["clause"], m["pi"], m["seed"]) in keys
         ],
         arm: [
-            m for m in json.loads(f.read_text("utf-8"))
+            m
+            for m in json.loads(f.read_text("utf-8"))
             if (m["text"], m["clause"], m["pi"], m["seed"]) in keys
         ],
     }
@@ -570,7 +659,8 @@ def read(arm: str, name: str) -> dict:
     for k, ms in recs.items():
         ps = [SS.placement(m) for m in ms]
         place[k] = {
-            x: round(st.mean(p[x] for p in ps), 4) for x in ("box", "box_h", "flat_white")
+            x: round(st.mean(p[x] for p in ps), 4)
+            for x in ("box", "box_h", "flat_white")
         } | {
             x: round(st.mean(m[x] for m in ms if m.get(x) is not None), 4)
             for x in ("en_cos", "en_cos_out", "box_iou")
@@ -597,11 +687,17 @@ def mix(src: Path, sing: list, frac: float, band: tuple, seed: int = 0) -> dict:
 
     rng = random.Random(seed)
     recs = [
-        json.loads(ln) for ln in (src / "train.jsonl").read_text("utf-8").splitlines() if ln
+        json.loads(ln)
+        for ln in (src / "train.jsonl").read_text("utf-8").splitlines()
+        if ln
     ]
     n = round(frac / (1 - frac) * len(recs))
     pools = SimpleNamespace(
-        singles=list(sing), decks={}, fonts=find_fonts(), shapes=None, horizontal_frac=0.3
+        singles=list(sing),
+        decks={},
+        fonts=find_fonts(),
+        shapes=None,
+        horizontal_frac=0.3,
     )
     params = {
         "grids": "3x3",
@@ -642,7 +738,9 @@ def mix(src: Path, sing: list, frac: float, band: tuple, seed: int = 0) -> dict:
         shutil.copy2(src / f, DATA / f)
     bj = json.loads((src / "build.json").read_text())
     (DATA / "build.json").write_text(
-        json.dumps(bj | {"grid_band": list(band), "mix_from": str(src), "grid_frac": frac})
+        json.dumps(
+            bj | {"grid_band": list(band), "mix_from": str(src), "grid_frac": frac}
+        )
     )
     from PIL import Image
 
@@ -650,7 +748,10 @@ def mix(src: Path, sing: list, frac: float, band: tuple, seed: int = 0) -> dict:
 
     contact_sheet(
         [
-            (Image.open(g["file"]).convert("RGB"), ["".join(g["units"]), f"{g['px']:.0f}px", "", ""])
+            (
+                Image.open(g["file"]).convert("RGB"),
+                ["".join(g["units"]), f"{g['px']:.0f}px", "", ""],
+            )
             for g in grids[:16]
         ],
         DATA / "sheet_grids.png",
@@ -664,9 +765,74 @@ def mix(src: Path, sing: list, frac: float, band: tuple, seed: int = 0) -> dict:
         "garble": len(recs),
         "grid3x3": n,
         "grid_frac": round(n / len(out), 3),
-        "grid_units": {"min": min(units.values()), "max": max(units.values()), "n": len(units)},
+        "grid_units": {
+            "min": min(units.values()),
+            "max": max(units.values()),
+            "n": len(units),
+        },
         "px": sorted(g["px"] for g in grids),
     }
+
+
+def no_humans(src: Path) -> dict:
+    """The ``no_humans`` leg: ``src``'s items as they are — images, boxes,
+    bands, order, so its latents are copied — with ``no humans`` added to
+    every 3×3 grid caption that lacks it: the bubble half
+    (``manga, multiple speech bubbles, …``); the flat half already carries it.
+    The garble items keep their captions. The TE cache is not copied."""
+    import shutil
+
+    recs = [
+        json.loads(ln)
+        for ln in (src / "train.jsonl").read_text("utf-8").splitlines()
+        if ln
+    ]
+    bubble = "manga, multiple speech bubbles, "
+    n = 0
+    for r in recs:
+        if r["kind"] != "grid_single" or "no humans" in r["caption"]:
+            continue
+        assert r["caption"].startswith(bubble), r["caption"]
+        r["caption"] = (
+            "manga, no humans, multiple speech bubbles, " + r["caption"][len(bubble) :]
+        )
+        n += 1
+    (DATA / "train.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in recs), encoding="utf-8"
+    )
+    for f in ("vocabs.json", "eval.json"):
+        shutil.copy2(src / f, DATA / f)
+    for d in src.glob("latents_*"):
+        if d.is_dir() and not (DATA / d.name).exists():
+            shutil.copytree(d, DATA / d.name)
+    bj = json.loads((src / "build.json").read_text())
+    (DATA / "build.json").write_text(json.dumps(bj | {"no_humans_from": str(src)}))
+    grids = [r for r in recs if r["kind"] == "grid_single"]
+    return {
+        "from": str(src),
+        "items": len(recs),
+        "grid3x3": len(grids),
+        "captions_changed": n,
+        "grid_no_humans": sum("no humans" in r["caption"] for r in grids),
+        "garble_no_humans": sum(
+            "no humans" in r["caption"] for r in recs if r["kind"] != "grid_single"
+        ),
+    }
+
+
+def inv_freq(data: Path) -> dict:
+    """Per single: ``min(1, median / n)``, ``n`` = the items carrying it — the
+    over-drawn singles (っ な い ん て …) step slower, the rest at the lr."""
+    import statistics
+
+    recs = [
+        json.loads(ln)
+        for ln in (data / "train.jsonl").read_text("utf-8").splitlines()
+        if ln
+    ]
+    n = Counter(u for r in recs for u in r["units"])
+    med = statistics.median(n.values())
+    return {g: round(min(1.0, med / c), 4) for g, c in sorted(n.items())}
 
 
 def rc_of(name: str, sing: list, held: tuple):
@@ -681,7 +847,10 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--label", required=True)
     p.add_argument(
-        "--legs", nargs="+", default=["data"], choices=["data", "mix", "train", "read"]
+        "--legs",
+        nargs="+",
+        default=["data"],
+        choices=["data", "mix", "no_humans", "train", "read"],
     )
     p.add_argument("--arm", choices=["warm", "cold"])
     p.add_argument("--mu", type=float, default=MU_WARM, help="warm arm's anchor μ")
@@ -696,11 +865,30 @@ def main():
         default=None,
         help="the data dir's tag when it differs from --tag ('' = the untagged data)",
     )
-    p.add_argument("--mix_from", default="quoted", help="mix: the source data tag")
-    p.add_argument("--grid_frac", type=float, default=0.2, help="mix: 3×3 grid share of the items")
-    p.add_argument("--band", type=float, nargs=2, default=list(BAND), help="mix: the grids' σ band")
+    p.add_argument(
+        "--short_variants",
+        type=int,
+        default=0,
+        help=f"data: how many of a canvas's {VARIANTS} draws take a {SHORT_LEN} line",
+    )
+    p.add_argument(
+        "--inv_freq",
+        action="store_true",
+        help="train: each single's update × min(1, median / its item count) (row_step_scale)",
+    )
+    p.add_argument(
+        "--mix_from", default="quoted", help="mix / no_humans: the source data tag"
+    )
+    p.add_argument(
+        "--grid_frac", type=float, default=0.2, help="mix: 3×3 grid share of the items"
+    )
+    p.add_argument(
+        "--band", type=float, nargs=2, default=list(BAND), help="mix: the grids' σ band"
+    )
     args = p.parse_args()
-    assert not {"train", "read"} & set(args.legs) or args.arm, "--legs train / read need --arm"
+    assert not {"train", "read"} & set(args.legs) or args.arm, (
+        "--legs train / read need --arm"
+    )
     global DATA
     dtag = args.tag if args.data_tag is None else args.data_tag
     if dtag:
@@ -718,7 +906,7 @@ def main():
         P.LINE_LEN = LINE_LEN
         lines, why = P.line_pool(held)
         print(f"lines: {len(lines)} ({LINE_LEN}), dropped {why}", flush=True)
-        recs, stats = build(sing, lines, held)
+        recs, stats = build(sing, lines, held, short_variants=args.short_variants)
         (DATA / "train.jsonl").write_text(
             "\n".join(json.dumps(r, ensure_ascii=False) for r in recs), encoding="utf-8"
         )
@@ -726,7 +914,11 @@ def main():
         (DATA / "eval.json").write_text(
             json.dumps(
                 [
-                    {"group": "sent", "text": h, "caption": f'manga, speech bubble, japanese text. Japanese text reads as "{h}".'}
+                    {
+                        "group": "sent",
+                        "text": h,
+                        "caption": f'manga, speech bubble, japanese text. Japanese text reads as "{h}".',
+                    }
                     for h in held
                 ],
                 ensure_ascii=False,
@@ -735,27 +927,68 @@ def main():
             encoding="utf-8",
         )
         (DATA / "build.json").write_text(
-            json.dumps({"run": NAME, "glyph_route": True, "variants": VARIANTS, "band": list(BAND)})
+            json.dumps(
+                {
+                    "run": NAME,
+                    "glyph_route": True,
+                    "variants": VARIANTS,
+                    "band": list(BAND),
+                    "short_variants": args.short_variants,
+                    "short_len": list(SHORT_LEN),
+                }
+            )
         )
-        sheet([r for r in recs if r["file"].endswith("_0.png")], DATA / "sheet_items.png")
-        sheet([r for r in recs if r["scene"] == recs[0]["scene"]], DATA / "sheet_variants.png")
+        sheet(
+            [r for r in recs if r["file"].endswith("_0.png")], DATA / "sheet_items.png"
+        )
+        sheet(
+            [r for r in recs if r["scene"] == recs[0]["scene"]],
+            DATA / "sheet_variants.png",
+        )
         canvases_sheet(DATA / "sheet_canvases.png")
+        if args.short_variants:
+            sheet([r for r in recs if r["short"]][:64], DATA / "sheet_short.png")
         metrics["data"] = stats
-        print(json.dumps({k: v for k, v in stats.items() if k != "px"}, ensure_ascii=False), flush=True)
+        print(
+            json.dumps(
+                {k: v for k, v in stats.items() if k != "px"}, ensure_ascii=False
+            ),
+            flush=True,
+        )
         px = stats["px"]
-        print(f"px: min {px[0]} p25 {px[len(px) // 4]} median {px[len(px) // 2]} max {px[-1]}", flush=True)
+        print(
+            f"px: min {px[0]} p25 {px[len(px) // 4]} median {px[len(px) // 2]} max {px[-1]}",
+            flush=True,
+        )
     if "mix" in args.legs:
         assert args.tag and args.tag != args.mix_from, "--legs mix needs its own --tag"
         src = DATA.parent / (f"data_{args.mix_from}" if args.mix_from else "data")
         metrics["mix"] = mix(src, sing, args.grid_frac, tuple(args.band))
         metrics["grid_band"] = list(args.band)
-        print(json.dumps({k: v for k, v in metrics["mix"].items() if k != "px"}, ensure_ascii=False), flush=True)
+        print(
+            json.dumps(
+                {k: v for k, v in metrics["mix"].items() if k != "px"},
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+    if "no_humans" in args.legs:
+        assert args.tag and args.tag != args.mix_from, (
+            "--legs no_humans needs its own --tag"
+        )
+        src = DATA.parent / (f"data_{args.mix_from}" if args.mix_from else "data")
+        metrics["no_humans"] = no_humans(src)
+        print(json.dumps(metrics["no_humans"], ensure_ascii=False), flush=True)
     if "train" in args.legs:
         from cjk_scale import train as T
 
         rc = rc_of(name, sing, held)
         T.INIT_ANCHOR = args.mu if args.arm == "warm" else 0.0
         metrics.update(arm=args.arm, mu=T.INIT_ANCHOR, steps_per_row=STEPS_PER_ROW)
+        scale = None
+        if args.inv_freq:
+            scale = inv_freq(DATA)
+            metrics["row_step_scale"] = scale
         T.train(
             rc,
             data=DATA,
@@ -763,6 +996,7 @@ def main():
             cold=args.arm == "cold",
             steps_per_row=STEPS_PER_ROW,
             context=SEED_ROWS,
+            row_step_scale=scale,
         )
     if "read" in args.legs:
         metrics["read"] = read(args.arm, name)

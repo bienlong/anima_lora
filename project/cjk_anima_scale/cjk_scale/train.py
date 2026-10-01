@@ -230,6 +230,7 @@ def train(
     row_cap: float | str | None = None,
     steps_per_row: int | None = None,
     context: Path | None = None,
+    row_step_scale: dict | None = None,
 ) -> Path:
     """Train the run. ``data`` / ``out`` default to the run's dirs;
     ``max_steps`` stops the loop early with the full-length schedule
@@ -242,7 +243,11 @@ def train(
     the old items' exposure); ``context`` replaces the seed rows as the
     warm-from / frozen-context / merge file (plan_retrain § 2: the kanji run
     sits on the kana run's merged rows; the run file's ``context`` is the
-    default, ``paths.SEED_ROWS`` without one). ``scale.py`` passes none of them.
+    default, ``paths.SEED_ROWS`` without one); ``row_step_scale`` = {vocab:
+    factor} multiplies that vocab's rows' update each step — a per-row lr
+    (AdamW normalizes a gradient scale away, so the step is scaled, not the
+    gradient; ``experiments/garble_replace`` inverse frequency). ``scale.py``
+    passes none of them.
     A data dir built with windows (``build.json`` ``glyph_route``) is
     trained routed: ``ANIMA_VOCAB_GLYPH_ROUTE=1`` is set in-process before
     the TE cache (whose key carries it)."""
@@ -353,6 +358,27 @@ def train(
         flush=True,
     )
     opt = torch.optim.AdamW(rows.params, weight_decay=0.0, betas=(0.9, 0.99))
+    step_scale = None
+    if row_step_scale:
+        from data.inventory import pieces as qpieces
+        from data.inventory import qwen_pieces
+
+        tokq = qwen_pieces(char_rows=True)
+        by_id = {}
+        for v, f in row_step_scale.items():
+            for _p, e in qpieces(*tokq, v):
+                if e is not None:
+                    by_id[int(e)] = float(f)
+        assert set(by_id) <= set(p.idx), "row_step_scale: vocabs outside the run"
+        step_scale = torch.tensor(
+            [by_id.get(int(e), 1.0) for e in rows.delta.ext_ids], device=device
+        )[:, None]
+        p.record["row_step_scale"] = {str(k): v for k, v in sorted(by_id.items())}
+        print(
+            f"row step scale: {len(by_id)} rows, {int((step_scale < 1).sum())} below 1, "
+            f"min {float(step_scale.min()):.3f}",
+            flush=True,
+        )
 
     def lr_mult(st):
         m = 1.0
@@ -397,7 +423,12 @@ def train(
             split.add(pred, target, brecs, ts)
         opt.zero_grad(set_to_none=True)
         loss.backward()
+        if step_scale is not None:
+            before = rows.delta.raw.detach().clone()
         opt.step()
+        if step_scale is not None:
+            with torch.no_grad():
+                rows.delta.raw.copy_(before + step_scale * (rows.delta.raw - before))
         rows.project()
         sched.step()
         if step % 25 == 0 or step == 1:

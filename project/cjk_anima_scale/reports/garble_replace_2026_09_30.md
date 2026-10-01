@@ -244,3 +244,99 @@ Results: `experiments/garble_replace/results/20260930-2217-cold-quoted/`,
 `…/20261001-0008-warm-mu002/`. Data:
 `output/cjk_anima_scale/run0930_garble_replace/data_{quoted,grid20,grid50}/`.
 Rows: `output/cjk_anima_scale/experiments/garble_replace_{cold_quoted,cold_grid20,cold_grid50,warm_mu002}/`.
+
+## Follow-ups (10-01): no humans, short lines, inverse frequency
+
+Three more arms, same `sent` grid, same floor, 5 130 steps each. Each varies
+one thing against an arm above.
+
+- **grid50nh** (cold): `data_grid50`, captions only. The 137 bubble grids
+  (`manga, multiple speech bubbles, …`) take `no humans` after `manga`; the
+  111 flat grids already carried it. Images, order and latents are
+  grid50's (`--legs no_humans`).
+- **short50** (warm μ 0.02): a fresh `--legs data --short_variants 4`. Of a
+  canvas's 8 draws, the last 4 take a 2–4-glyph pool line instead of a
+  long one, at the garble's px, in one column centred on the garble's ink;
+  the rest of the erased region stays blank. Same canvases, fonts, band and
+  quoted captions.
+  - 124 / 248 items short (196 regions: 2 glyphs 18, 3 60, 4 118); 5 890
+    short pool lines, 195 drawn. 15 of the 196 carry `・` (`そうー・`,
+    `え・と・`), kept.
+  - Short lines leave out any piece of a held string and any line carrying
+    a ≤ 2-glyph held string (はい: the trigram hold does not reach it).
+    丈 gets no short line (its only short word is 大丈夫).
+  - The long half is redrawn (破線G out, other draws), so short50 vs the
+    μ 0.02 arm also differs in captions (quoted) and long lines.
+- **inv_freq** (warm μ 0.02, `data_short50`): each single's update ×
+  `min(1, median / items carrying it)` after every step
+  (`train.train(row_step_scale=…)`). Median 16 items, max 85 (っ). 26 rows
+  scale below 1: っ 0.19, な 0.21, い て ん 0.23, か 0.24, し 0.25, …; kanji
+  and most katakana stay 1. It is the update that is scaled, not the
+  gradient: AdamW normalizes a per-row gradient scale away.
+
+| arm | official | contained | ≤ 1 edit | ≤ 2 edit | dup | kana |
+|---|---|---|---|---|---|---|
+| floor | 29 | 64 | 92 | 129 | 100 | 169 |
+| cold, quoted + grid50 (above) | 1 | 3 | 3 | 11 | 87 | 178 |
+| cold, quoted + grid50nh | 1 | 3 | 2 | 10 | 70 | 180 |
+| warm μ 0.02 (above) | 3 | 27 | 24 | 50 | 144 | 168 |
+| warm μ 0.02, short50 | 2 | 19 | 18 | 51 | 133 | 171 |
+| warm μ 0.02, short50, inv_freq | 2 | 11 | 9 | 28 | 142 | 177 |
+
+Paired, [gained, lost, p]:
+
+- grid50nh vs grid50: ≤ 2 edit 6 / 7 (p 1.0), dup 31 / 48 (p 0.07). The dup
+  drop does not hold to one string (山田太郎 たいせつ やったネ ことば −4,
+  こうえん +4).
+- short50 vs μ 0.02: ≤ 1 edit 14 / 20 (p 0.39), ≤ 2 edit 33 / 32 (p 1.0),
+  dup 25 / 36 (p 0.2).
+- inv_freq vs short50: ≤ 1 edit 7 / 16 (p 0.09), **≤ 2 edit 9 / 32
+  (p 4e-4)**, contained 6 / 14 (p 0.12). Hiragana strings ≤ 2 edit
+  23 → 12, the others 28 → 16: the slowed rows' strings fall, and so do the
+  rest.
+
+| arm | box | box h | flat white | en_cos | box IoU vs EN ref |
+|---|---|---|---|---|---|
+| floor | 0.156 | 0.180 | 0.132 | 0.922 | 0.198 |
+| cold, quoted + grid50 | 0.130 | 0.177 | 0.071 | 0.929 | 0.290 |
+| cold, quoted + grid50nh | 0.120 | 0.168 | 0.069 | 0.933 | 0.317 |
+| warm μ 0.02 | 0.102 | 0.189 | 0.109 | 0.931 | 0.217 |
+| warm μ 0.02, short50 | 0.073 | 0.198 | 0.123 | 0.929 | 0.254 |
+| warm μ 0.02, short50, inv_freq | 0.073 | 0.142 | 0.134 | 0.928 | 0.331 |
+
+Training: grid50nh's in-box / out-box loss and Δ norm track grid50's within
+0.001 / 1 % at every step (same seed, same batch order). inv_freq's mean Δ
+norm peaks at 272.3 vs short50's 274.5 (seed ≈ 268); in-box loss sits
+0.0005 above short50's throughout.
+
+On the sheets (`garble_replace_compare/short50/`, columns EN ref | floor |
+μ 0.02 | short50 | inv_freq; `overview_p0s0.png` + one sheet per string):
+
+- **EN ref:** the base writes English small and horizontal — a line at the
+  top, a black subtitle bar at the bottom, or a small `hi` in a corner —
+  often sentence-length pseudo-English. No banner, no speech bubble.
+- **floor:** the large banner where EN ref puts its small line.
+- **μ 0.02 / short50:** no banner; 2–3 speech bubbles with 2–3-column
+  lines. short50's bubbles reuse the target's glyphs (`かしてかいい`,
+  `がしきしいきいい`) where μ 0.02's read as unrelated lines; no render
+  draws the short word alone and stops. Where short50 keeps a banner it
+  is smaller and fainter (小山田, 日本人 tiny at the top; パソコン → `オヌン`).
+- **inv_freq:** fewer bubbles; small horizontal lines at the top or along
+  the bottom, where EN ref writes (`かかな応さぃなしいしいい`,
+  `かか 暮しなな帰ししいい`). The target's glyphs recur, repeated and
+  mixed; the string does not read.
+
+- **no humans:** no effect on the strings.
+- **Short lines:** move layout (box 0.102 → 0.073), not length. Every
+  render still writes a line, not the word.
+- **Inverse frequency:** the strings get worse, not better (≤ 2 edit
+  51 → 28). The layout moves furthest toward EN ref of any arm (IoU 0.331,
+  box h 0.142, flat white back at the floor's).
+
+Results: `experiments/garble_replace/results/20261001-0759-data-grid50nh/`,
+`…/20261001-0759-cold-grid50nh/`, `…/20261001-0811-data-short50/`,
+`…/20261001-0848-warm-short50-mu002/`,
+`…/20261001-0948-warm-short50-mu002-invfreq/`. Jobs `…075957-47effd`,
+`…081331-a77066`, `…094838-cdbfdf`. Data:
+`output/cjk_anima_scale/run0930_garble_replace/data_{grid50nh,short50}/`.
+Rows: `output/cjk_anima_scale/experiments/garble_replace_{cold_grid50nh,warm_short50,warm_short50if}/`.
