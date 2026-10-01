@@ -113,3 +113,15 @@ their reads are in `../_archive/reports/` and `../hypothesis.md`.
   it and the reads fall anyway (Δ 0.9 ≤ 1 edit 92 → 48, dup 100 → 124;
   Δ 0.75 → 5): the rows shorten the base's sentence-length line, and the
   leftover slots are the repeats (`../reports/delta_scale_2026_10_01.md`).
+- `b0305_reband/` — the seed's own b0305 kana items (`retrain_kana`'s 5 800
+  `scene_window` items, 12–24 px) moved to σ 0.75–0.93 and trained warm from
+  the seed (μ 0.02, 23 steps × 174 rows). **Ran 2026-10-01** → the floor's
+  banner turns into the items' layout (small columns, sentence-length lines)
+  on every kana caption at an ordinary drift (warm_cos 0.959); the read was
+  stopped at 158 / 184 renders (`../hypothesis.md`).
+- `shared_dir/` — `hypothesis.md` prediction 0, no training: an arm's update
+  split into the rows' mean and the per-row residual, each rendered on the
+  `sent` ruler at every σ or only below 0.8 (the seed rows above). **Ran
+  2026-10-01** on `b0305_reband` (seed 0, 92 keys) → the layout break is in
+  the residual and acts above 0.8; the mean keeps the layout and adds
+  glyphs (dup 40 → 54) (`../hypothesis.md` § Result).
