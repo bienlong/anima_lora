@@ -27,6 +27,75 @@ from gui.widgets.target_res import _TargetResWidget
 # flash4 is not supported yet (flash-attention-sm120 disabled)
 _ATTN_MODES = ["flex", "flash"]
 
+# Keys that are enum-ish in practice get a quick-pick dropdown instead of a
+# free-text field (user request: "每个功能添加快捷的选择，而不是输入名字").
+# Editable=True keeps the dropdown typeable for long-tail values (custom
+# optimizers, exotic schedulers); closed sets are non-editable so a typo can
+# never silently change semantics. A value outside a closed list is appended
+# and selected rather than dropped.
+_COMBO_CHOICES: dict[str, tuple[list[str], bool]] = {
+    # key: (options, editable)
+    "timestep_sampling": (
+        [
+            "sigma",
+            "uniform",
+            "sigmoid",
+            "shift",
+            "flux_shift",
+            "qinglong_flux",
+        ],
+        False,
+    ),
+    "mixed_precision": (["no", "fp16", "bf16"], False),
+    "lr_scheduler": (
+        [
+            "constant",
+            "cosine",
+            "cosine_with_restarts",
+            "linear",
+            "polynomial",
+            "piecewise_constant",
+            "adafactor",
+        ],
+        True,
+    ),
+    "optimizer_type": (
+        [
+            "AdamW",
+            "AdamW8bit",
+            "Lion",
+            "Lion8bit",
+            "Prodigy",
+            "ProdigyPlusScheduleFree",
+            "DAdaptAdam",
+            "DAdaptLion",
+            "SGDNesterov",
+            "SGDNesterov8bit",
+        ],
+        True,
+    ),
+    "discrete_flow_shift": (["1.0", "2.0", "3.0", "4.0"], True),
+}
+
+
+def _enum_combo(key: str, v) -> QWidget:
+    """Quick-pick combo for an enum-ish TOML key (see _COMBO_CHOICES)."""
+    options, editable = _COMBO_CHOICES[key]
+    w = QComboBox()
+    w.addItems(options)
+    w.setEditable(editable)
+    cur = "" if v is None else str(v)
+    if w.findText(cur) < 0:
+        if editable:
+            w.setCurrentText(cur)
+        elif cur:
+            # Never silently change an unknown saved value.
+            w.addItem(cur)
+            w.setCurrentText(cur)
+    else:
+        w.setCurrentText(cur)
+    return _no_wheel(w)
+
 
 def _widget(v: Any, key: str = "") -> QWidget:
     if key == "target_res":
@@ -68,6 +137,10 @@ def _widget(v: Any, key: str = "") -> QWidget:
         if idx >= 0:
             w.setCurrentIndex(idx)
         return _no_wheel(w)
+    if key in _COMBO_CHOICES:
+        # Quick-pick enums (before the type dispatch — a str value would
+        # otherwise become a free-text QLineEdit).
+        return _enum_combo(key, v)
     if isinstance(v, bool):
         w = QCheckBox()
         w.setChecked(v)

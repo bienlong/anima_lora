@@ -65,6 +65,7 @@ from gui.i18n import t
 from gui.progress import TQDM_RE, TqdmProgressTracker, make_progress_bar
 from gui.tabs.config_tab import ConfigTab, SplitButtonStyle
 from gui.tabs.preprocess.captions import AutotagSection, CaptionEditingSection
+from gui.tabs.preprocess.multires_section import MultiResSection
 from gui.tabs.preprocess.image_prep import ImagePrepSection
 from gui.tabs.preprocess.knobs import (
     DEFAULT_MASK_PATH_PATTERN,
@@ -327,6 +328,14 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
             mask_path_pattern=sam_yaml.get("path_pattern") or DEFAULT_MASK_PATH_PATTERN,
         )
         self.mit_section = MitMaskSection(help_cb, settings=settings)
+        # Multi-resolution (多重分辨率): standalone section — not a knob-table
+        # member (structured tiers+weights setting, persisted via gui_settings).
+        self.multires_section = MultiResSection()
+        self.multires_section.run_requested.connect(self._run_multires)
+        self.multires_section.write_variant_requested.connect(
+            self._multires_write_variant
+        )
+        self.multires_section.clear_requested.connect(self._multires_clear_variant)
         self.sections = (
             self.image_section,
             self.text_section,
@@ -343,6 +352,7 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         layout.setContentsMargins(0, 0, 0, 0)
         for section in self.sections:
             layout.addWidget(section)
+        layout.addWidget(self.multires_section)
         layout.addStretch()
         scroll.setWidget(host)
         return scroll
@@ -908,6 +918,73 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
             config_snapshot=snapshot,
             attach=not queue,
         )
+
+    def _multires_selection_or_warn(self):
+        from library.preprocess.multires import parse_tiers
+
+        raw_tiers, weights = self.multires_section.selection()
+        try:
+            tiers = parse_tiers(raw_tiers)
+        except ValueError as e:
+            QMessageBox.warning(self, t("error"), str(e))
+            return None
+        if not tiers:
+            QMessageBox.warning(self, t("error"), t("multires_need_tier"))
+            return None
+        return tiers, weights
+
+    def _run_multires(self, *, queue: bool = False) -> None:
+        """多重分辨率: per-tier preprocess + weighted blueprint (one daemon job)."""
+        sel = self._multires_selection_or_warn()
+        if sel is None:
+            return
+        tiers, weights = sel
+        argv = ["tasks.py", "multires", "--tiers", ",".join(str(x) for x in tiers)]
+        if weights:
+            argv += ["--weights", weights]
+        self._submit(
+            label="multires",
+            argv=argv,
+            extra_env=None,
+            config_snapshot=None,
+            attach=not queue,
+        )
+
+    def _multires_write_variant(self) -> None:
+        from library.preprocess.multires import (
+            multires_dataset_config,
+            parse_weights,
+            weights_to_repeats,
+            write_variant_blueprint,
+        )
+
+        variant = self._variant
+        if not variant:
+            QMessageBox.warning(self, t("error"), t("multires_no_variant"))
+            return
+        sel = self._multires_selection_or_warn()
+        if sel is None:
+            return
+        tiers, weights = sel
+        repeats = weights_to_repeats(parse_weights(weights, tiers))
+        path = variant_path(variant)
+        write_variant_blueprint(path, multires_dataset_config(tiers, repeats))
+        self.log.appendPlainText(
+            f"[multires] {t('multires_written').format(variant=variant)} ({path})"
+        )
+        QMessageBox.information(self, "", t("multires_written").format(variant=variant))
+
+    def _multires_clear_variant(self) -> None:
+        from library.preprocess.multires import clear_variant_blueprint
+
+        variant = self._variant
+        if not variant:
+            QMessageBox.warning(self, t("error"), t("multires_no_variant"))
+            return
+        removed = clear_variant_blueprint(variant_path(variant))
+        msg = t("multires_cleared") if removed else t("multires_nothing_to_clear")
+        self.log.appendPlainText(f"[multires] {msg} ({variant})")
+        QMessageBox.information(self, "", msg)
 
     def _submit(
         self,

@@ -64,6 +64,7 @@ gui = _LazyModule("scripts.tasks.gui")
 inference = _LazyModule("scripts.tasks.inference")
 masking = _LazyModule("scripts.tasks.masking")
 preprocess = _LazyModule("scripts.tasks.preprocess")
+multires = _LazyModule("scripts.tasks.multires")
 tagger = _LazyModule("scripts.tasks.tagger")
 training = _LazyModule("scripts.tasks.training")
 utilities = _LazyModule("scripts.tasks.utilities")
@@ -219,6 +220,12 @@ COMMANDS = {
     "preprocess-resize": (
         preprocess.cmd_preprocess_resize,
         "Resize images to bucket resolutions",
+    ),
+    "multires": (
+        multires.cmd_multires,
+        "Multi-resolution training prep (多重分辨率): one preprocess pass per "
+        "tier (same image at every listed resolution) + a weighted dataset "
+        'blueprint. Usage: ARGS="--tiers 1024,896 --weights 1024:2,896:1"',
     ),
     "preprocess-reconcile": (
         preprocess.cmd_preprocess_reconcile,
