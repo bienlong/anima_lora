@@ -23,6 +23,8 @@ qwen3 = "D:/本地整合包/ComfyUI/models/text_encoders/qwen_3_06b_base.safeten
 vae = "D:/本地整合包/ComfyUI/models/vae/qwen_image_vae.safetensors"
 [[datasets]]
 batch_size = 1
+validation_split_num = 0
+validation_split = 0.0
 [[datasets.subsets]]
 image_dir = "post_image_dataset/resized_t512"
 cache_dir = "post_image_dataset/lora_t512"
@@ -46,6 +48,16 @@ description = "LoRA + Kronecker product — more expressive per parameter; loads
 order = 40
 target_res = [ 896, 1024,]
 min_pixels = 250000
+source_image_dir = "D:\\本地整合包\\ComfyUI\\models\\gemma-4-e4b-vision\\1_新建文件夹"
+run_sam_mask = true
+run_mit_mask = true
+mask_path_pattern = "*"
+mit_text_threshold = 0.8
+mit_dilate = 5
+[[variant.mask_rules]]
+prompts = [ "speech bubble", "text bubble",]
+threshold = 0.7
+dilate = 3
 
 [general]
 batch_size = 1

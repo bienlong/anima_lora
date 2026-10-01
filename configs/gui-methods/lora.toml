@@ -10,11 +10,25 @@ caption_dropout_rate = 0.1
 output_name = "anima"
 blocks_to_swap = 0
 use_cmmd = false
-
-# Plain-family adapter switches: flip either to true (or pick the DoRA /
-# rs-LoRA / LoKr variants in the dropdown) to change the adapter type.
 use_dora = false
 rs_lora = false
+[[datasets]]
+batch_size = 1
+[[datasets.subsets]]
+image_dir = "post_image_dataset/resized_t512"
+cache_dir = "post_image_dataset/lora_t512"
+num_repeats = 1
+
+[[datasets.subsets]]
+image_dir = "post_image_dataset/resized_t768"
+cache_dir = "post_image_dataset/lora_t768"
+num_repeats = 1
+
+[[datasets.subsets]]
+image_dir = "post_image_dataset/resized_t1024"
+cache_dir = "post_image_dataset/lora_t1024"
+num_repeats = 2
+
 
 [variant]
 family = "lora"
@@ -22,3 +36,6 @@ label = "LoRA"
 description = "Plain classic LoRA — simplest baseline."
 order = 10
 target_res = [ 896, 1024,]
+
+[general]
+batch_size = 1
