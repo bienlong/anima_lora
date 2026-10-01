@@ -71,7 +71,16 @@ SIZE, STEPS, CFG = 512, 28, 4.0  # the sent ruler's (cjk_scale.eval)
 ENREF = OUT / "native_enref" / f"{SIZE}_{STEPS}_{CFG:g}"
 # arm → (above the switch, below it); "seed" / "raw" = JA caption at Δ 1 / 0,
 # "garble" = GARBLE (no ext row: Δ irrelevant)
-ARMS = {"lo": ("raw", "seed"), "hi": ("seed", "raw"), "garble": ("garble", "seed")}
+ARMS = {
+    "lo": ("raw", "seed"),
+    "hi": ("seed", "raw"),
+    "garble": ("garble", "seed"),
+    # below the switch, no string at all: "unk" = the JA caption under the
+    # stock T5 tokenizer (the base with no pack: the quote is <unk>), "uncond"
+    # = the negative embedding as the conditional (CFG collapses to uncond)
+    "unk": ("seed", "unk"),
+    "uncond": ("seed", "uncond"),
+}
 
 
 def floor_items() -> list[dict]:
@@ -115,16 +124,27 @@ class Splitter:
         sd = load_trained(rows_dir)
         self.delta = ExtDelta.from_state(self.anima, sd["delta"], self.device)
         self.vae = load_vae(self.device)
-        self.caches = {"seed": {}, "raw": {}}  # conds_cache per Δ scale
+        self.caches = {"seed": {}, "raw": {}, "unk": {}}  # conds_cache per side
         self.torch = torch
 
     def encode(self, caption: str, side: str):
         from library.inference.text import prepare_text_inputs
 
-        self.delta.scale = 0.0 if side == "raw" else 1.0
-        self.shared["conds_cache"] = self.caches["raw" if side == "raw" else "seed"]
+        from library.anima import vocab_pack as VP
+
+        self.delta.scale = 0.0 if side in ("raw", "unk") else 1.0
+        self.shared["conds_cache"] = self.caches[
+            side if side in self.caches else "seed"
+        ]
         a2 = self._args(caption, 0)
-        return prepare_text_inputs(a2, self.device, self.anima, self.shared)
+        if side != "unk":
+            return prepare_text_inputs(a2, self.device, self.anima, self.shared)
+        tok = VP.VocabPackTokenizeStrategy.tokenize  # stock T5 ids: no pack routing
+        VP.VocabPackTokenizeStrategy.tokenize = VP.AnimaTokenizeStrategy.tokenize
+        try:
+            return prepare_text_inputs(a2, self.device, self.anima, self.shared)
+        finally:
+            VP.VocabPackTokenizeStrategy.tokenize = tok
 
     def _args(self, caption: str, seed: int):
         import copy
@@ -142,8 +162,9 @@ class Splitter:
         switch: float,
         x0s: dict | None = None,
     ):
-        """``x0s``: filled with ``{step: (σ, x̂0 latent on CPU)}`` — the
-        (CFG-combined) prediction ``x_t − σ·v`` the Euler step is taken from."""
+        """``x0s``: filled with ``{step: (σ, x̂0 latent on CPU, x_t on CPU)}`` —
+        the (CFG-combined) prediction ``x_t − σ·v`` the Euler step is taken
+        from, and the input it was taken on."""
         from common.models import decode_image
         from library.inference import generation as G
         from library.inference import sampling as S
@@ -158,7 +179,7 @@ class Splitter:
             else it["caption"]
         )
         hi, null = self.encode(cap(above), above)
-        lo, _ = self.encode(cap(below), below)
+        lo = null if below == "uncond" else self.encode(cap(below), below)[0]
         body, step = G.generate_body, S.step
         G.generate_body = lambda *x, **k: body(
             *x, context_alt=lo, tag_drop_sigma=switch, **k
@@ -167,7 +188,11 @@ class Splitter:
 
             def rec(latents, noise_pred, sigmas, i):
                 s = float(sigmas[i])
-                x0s[i] = (s, (latents.float() - s * noise_pred.float()).cpu())
+                x0s[i] = (
+                    s,
+                    (latents.float() - s * noise_pred.float()).cpu(),
+                    latents.float().cpu(),
+                )
                 return step(latents, noise_pred, sigmas, i)
 
             S.step = rec
@@ -532,6 +557,402 @@ def traj(
     print(f"→ {run_dir / 'result.json'}", flush=True)
 
 
+# --span: proposal_length.md step 0 — does the caption's glyph count reach the
+# text region's span at σ 0.95? Seed rows both sides; the same (prompt, seed)
+# under captions of 2 / 4 / 5 / 5 / 6 glyphs. The OCR box reads 0 at σ 0.95 in
+# every traj run (nothing boxes a blur), so the span is read as where the
+# captions' x̂0 differ (`chg` = share of 16² patches with mean |Δpx| > CHG_PX,
+# `chg_box` = their bounding box / canvas) beside the OCR box, and on the
+# sheets. x_t at the step nearest σ 0.85 is kept for the count read.
+SPAN_TEXTS = (
+    "はい",
+    "やったネ",
+    "やったネネ",
+    "やったネ！",
+    "こんにちは",
+    "こんにちはは",
+    "こんにちは！",
+)
+# caption from; ！ folds to base T5 (no row) — the leftover slot given to the base
+SPAN_BASE = {
+    "やったネネ": "やったネ",
+    "やったネ！": "やったネ",
+    "こんにちはは": "こんにちは",
+    "こんにちは！": "こんにちは",
+}
+SPAN_SIGMAS = (0.95, 0.9, 0.85, 0.0)
+SPAN_PAIRS = (  # (a, b): the glyph-count contrasts, then a same-span control
+    ("こんにちは", "こんにちはは"),
+    ("やったネ", "やったネネ"),
+    ("はい", "こんにちは"),
+    ("はい", "こんにちはは"),
+    ("やったネ", "こんにちは"),
+    ("こんにちは！", "こんにちはは"),
+    ("やったネ！", "やったネネ"),
+)
+CHG_PX = 12.0
+XT_SIGMA = 0.85
+
+
+# caption variants of the span leg: `ja` = the sent ruler's `en` clause;
+# `notag` drops the `japanese text` tag and the language word from the clause
+SPAN_CAPTIONS = {
+    "ja": lambda c: c,
+    "notag": lambda c: c.replace(
+        ", japanese text. Japanese text reads as", ". Text reads as"
+    ),
+}
+
+
+def span_items(variant: str = "ja") -> list[dict]:
+    base = {
+        (it["text"], it["pi"], it["seed"]): it
+        for it in floor_items()
+        if it["text"] in SPAN_TEXTS
+    }
+    out = []
+    for text in SPAN_TEXTS:
+        src = SPAN_BASE.get(text, text)
+        for (t, pi, seed), it in sorted(base.items(), key=lambda kv: kv[0][1:]):
+            if t != src:
+                continue
+            cap = it["caption"]
+            assert f'"{src}"' in cap, cap
+            cap = SPAN_CAPTIONS[variant](cap.replace(f'"{src}"', f'"{text}"'))
+            assert variant == "ja" or "apanese" not in cap, cap
+            out.append(it | {"text": text, "caption": cap})
+    assert len(out) == len(SPAN_TEXTS) * PROMPTS * 2, len(out)
+    return out
+
+
+def pixel_diff(fa: str, fb: str) -> dict:
+    import numpy as np
+    from PIL import Image
+
+    a = np.asarray(Image.open(fa).convert("L"), np.float32)
+    b = np.asarray(Image.open(fb).convert("L"), np.float32)
+    d = np.abs(a - b)
+    H, W = d.shape
+    p = (
+        d[: H // 16 * 16, : W // 16 * 16]
+        .reshape(H // 16, 16, W // 16, 16)
+        .mean(axis=(1, 3))
+    )
+    on = p > CHG_PX
+    if on.any():
+        ys, xs = np.nonzero(on)
+        box = (ys.max() - ys.min() + 1) * (xs.max() - xs.min() + 1) / on.size
+    else:
+        box = 0.0
+    return {"dpx": float(d.mean()), "chg": float(on.mean()), "chg_box": float(box)}
+
+
+def span(label: str, variant: str = "ja", sigmas: tuple = SPAN_SIGMAS) -> None:
+    import statistics as st
+
+    import torch
+    from PIL import Image
+
+    from common.readers import Readers, contact_sheet, hit, read_scored
+    from common.text import lev, norm
+
+    items = span_items(variant)
+    root = (
+        OUT
+        / "experiments"
+        / ("sigma_split_span" + ("" if variant == "ja" else f"_{variant}"))
+    )
+    sp = Splitter()
+    manifest, xts = [], {}
+    for it in items:
+        key = f"p{it['pi']:02d}_s{it['seed']}"
+        d = root / it["text"] / key
+        d.mkdir(parents=True, exist_ok=True)
+        x0s: dict = {}
+        done = all((d / f"sig{t:.2f}.png").exists() for t in sigmas)
+        if not done:  # a rerun with added captions renders only the new ones
+            sp.render(d / "sig0.00.png", it, "seed", "seed", 1.0, x0s)
+        steps = sorted(x0s)
+        for target in sigmas:
+            fn = d / f"sig{target:.2f}.png"
+            if done or target == 0.0:
+                s = target
+            else:
+                i = min(steps, key=lambda j: abs(x0s[j][0] - target))
+                s = x0s[i][0]
+                sp.decode(x0s[i][1], fn)
+            manifest.append(
+                {
+                    "file": str(fn),
+                    "text": it["text"],
+                    "glyphs": len(it["text"]),
+                    "pi": it["pi"],
+                    "seed": it["seed"],
+                    "caption": it["caption"],
+                    "sigma_target": target,
+                    "sigma": s,
+                }
+            )
+        if not done:
+            i = min(steps, key=lambda j: abs(x0s[j][0] - XT_SIGMA))
+            xts[(it["text"], key)] = {"sigma": x0s[i][0], "x_t": x0s[i][2]}
+        print(f"  span {it['text']} {key}{' (cached)' if done else ''}", flush=True)
+    xt_file = root / f"xt_{XT_SIGMA:g}.pt"
+    if xt_file.exists():
+        xts = torch.load(xt_file) | xts
+    torch.save(xts, xt_file)
+    device = sp.device
+    sp.free()
+    rd = Readers(device)
+    for m in manifest:
+        reads = read_scored(rd, m)
+        m["reads"] = reads
+        m["hit"] = all(hit(reads, m["text"], r) for r in ("sfx", "vl"))
+        m["best_edit"] = min(
+            (
+                lev(norm(r.get(x) or ""), norm(m["text"]))
+                for r in reads
+                for x in ("sfx", "vl")
+                if r.get(x)
+            ),
+            default=len(m["text"]),
+        )
+        m.update(placement(m))
+    by = {(m["text"], m["pi"], m["seed"], m["sigma_target"]): m for m in manifest}
+    diffs = []
+    for a, b in SPAN_PAIRS:
+        for (t, pi, seed, sig), m in by.items():
+            if t == a:
+                diffs.append(
+                    {"a": a, "b": b, "pi": pi, "seed": seed, "sigma_target": sig}
+                    | pixel_diff(m["file"], by[(b, pi, seed, sig)]["file"])
+                )
+    (root / "span_reads.json").write_text(
+        json.dumps(
+            {"manifest": manifest, "diffs": diffs}, ensure_ascii=False, indent=1
+        ),
+        encoding="utf-8",
+    )
+    metrics: dict = {"sigmas": sigmas, "chg_px": CHG_PX, "per_text": {}, "pairs": {}}
+    print("===== span: per caption (OCR placement, reads)", flush=True)
+    for text in SPAN_TEXTS:
+        per = {}
+        for target in sigmas:
+            ms = [
+                m for m in manifest if m["text"] == text and m["sigma_target"] == target
+            ]
+            per[f"{target:g}"] = {
+                "n": len(ms),
+                "hit": sum(m["hit"] for m in ms),
+                "le1": sum(m["best_edit"] <= 1 for m in ms),
+                "box": round(st.mean(m["box"] for m in ms), 4),
+                "box_h": round(st.mean(m["box_h"] for m in ms), 4),
+            }
+        metrics["per_text"][text] = per
+        print(
+            f"  {text} ({len(text)}): "
+            + "  ".join(
+                f"σ{k} hit {v['hit']}/{v['n']} ≤1 {v['le1']} box {v['box']} h {v['box_h']}"
+                for k, v in per.items()
+            ),
+            flush=True,
+        )
+    print("===== span: caption pairs, x̂0 pixel diff (mean over 8 samples)", flush=True)
+    for a, b in SPAN_PAIRS:
+        per = {}
+        for target in sigmas:
+            ds = [
+                x
+                for x in diffs
+                if x["a"] == a and x["b"] == b and x["sigma_target"] == target
+            ]
+            per[f"{target:g}"] = {
+                k: round(st.mean(x[k] for x in ds), 4)
+                for k in ("dpx", "chg", "chg_box")
+            }
+        metrics["pairs"][f"{a}|{b}"] = per
+        print(
+            f"  {a} vs {b}: "
+            + "  ".join(
+                f"σ{k} dpx {v['dpx']:.2f} chg {v['chg']:.3f} box {v['chg_box']:.3f}"
+                for k, v in per.items()
+            ),
+            flush=True,
+        )
+    # one sheet per (prompt, seed): rows = captions, cols = σ
+    for pi in range(PROMPTS):
+        for seed in (0, 1):
+            rows = []
+            for text in SPAN_TEXTS:
+                for target in sigmas:
+                    m = by[(text, pi, seed, target)]
+                    r0 = max(
+                        m["reads"] or [{}],
+                        key=lambda r: len(r.get("vl") or ""),
+                        default={},
+                    )
+                    rows.append(
+                        (
+                            Image.open(m["file"]).convert("RGB"),
+                            [
+                                f"{text} σ {m['sigma']:.2f}{' ✓' if m['hit'] else ''}",
+                                f"sfx {(r0.get('sfx') or '')[:14]}",
+                                f"vl {(r0.get('vl') or '')[:14]}",
+                            ],
+                        )
+                    )
+            contact_sheet(
+                rows, root / f"sheet_p{pi}_s{seed}.png", thumb=224, cols=len(sigmas)
+            )
+    run_dir = make_run_dir(
+        "sigma_split",
+        label=label,
+        root=LINE / "experiments" / "sigma_split" / "results",
+    )
+    write_result(
+        run_dir,
+        script=__file__,
+        args=argparse.Namespace(
+            label=label, span=True, variant=variant, texts=SPAN_TEXTS
+        ),
+        label=label,
+        metrics=metrics,
+        artifacts=[str(root)],
+    )
+    print(f"→ {run_dir / 'result.json'}", flush=True)
+
+
+# --en_small: the base alone (row Δ 0) writing EN at three lengths in a speech
+# bubble — longer strings come out smaller. x̂0 per σ, read by VL: when does
+# small text become legible on the trajectory, and from which σ does it stop
+# changing? (cf_sense's 12–16 px ceiling 0.2–0.6 was read teacher-forced, on
+# a noised clean render; this is the generation trajectory.)
+EN_SMALL = {
+    "hello": "hello",
+    "s30": "I think it's going to rain today.",
+    "s75": "I told you we should have left before midnight, but you never listen to me.",
+}
+EN_SMALL_CAPTION = '{p}, speech bubble, english text. English text reads as "{s}".'
+EN_SMALL_SIGMAS = (1.0, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7, 0.6, 0.5, 0.4, 0.3, 0.0)
+
+
+def _words(s: str) -> list[str]:
+    import re
+
+    return re.findall(r"[a-z']+", s.casefold().replace("’", "'"))
+
+
+def en_small(label: str, sigmas: tuple = EN_SMALL_SIGMAS) -> None:
+    import statistics as st
+
+    from PIL import Image
+
+    from common.readers import Readers, contact_sheet, read_scored
+
+    keys = sorted({(it["pi"], it["prompt"], it["seed"]) for it in floor_items()})
+    root = OUT / "experiments" / "sigma_split_en_small"
+    sp = Splitter()
+    manifest = []
+    for cond, s in EN_SMALL.items():
+        for pi, prompt, seed in keys:
+            cap = EN_SMALL_CAPTION.format(p=prompt, s=s)
+            it = {"pi": pi, "prompt": prompt, "seed": seed, "caption": cap}
+            d = root / cond / f"p{pi:02d}_s{seed}"
+            d.mkdir(parents=True, exist_ok=True)
+            x0s: dict = {}
+            sp.render(d / "sig0.00.png", it, "raw", "raw", 1.0, x0s)
+            steps = sorted(x0s)
+            for target in sigmas:
+                fn = d / f"sig{target:.2f}.png"
+                if target == 0.0:
+                    sig = 0.0
+                else:
+                    i = min(steps, key=lambda j: abs(x0s[j][0] - target))
+                    sig = x0s[i][0]
+                    sp.decode(x0s[i][1], fn)
+                manifest.append(
+                    {
+                        "file": str(fn),
+                        "cond": cond,
+                        "text": s,
+                        "pi": pi,
+                        "seed": seed,
+                        "caption": cap,
+                        "sigma_target": target,
+                        "sigma": sig,
+                    }
+                )
+            print(f"  en_small {cond} p{pi} s{seed}", flush=True)
+    device = sp.device
+    sp.free()
+    rd = Readers(device)
+    for m in manifest:
+        reads = read_scored(rd, m)
+        got = set()
+        for r in reads:
+            got.update(_words(r.get("vl") or ""))
+        want = _words(m["text"])
+        m["recall"] = sum(w in got for w in want) / len(want)
+        m.update(placement(m))
+    (root / "en_small_reads.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    metrics: dict = {"sigmas": sigmas, "per_cond": {}}
+    for cond in EN_SMALL:
+        per = {}
+        for target in sigmas:
+            ms = [
+                m for m in manifest if m["cond"] == cond and m["sigma_target"] == target
+            ]
+            per[f"{target:g}"] = {
+                "n": len(ms),
+                "sigma": round(ms[0]["sigma"], 3),
+                "recall": round(st.mean(m["recall"] for m in ms), 3),
+                "recall_ge_half": sum(m["recall"] >= 0.5 for m in ms),
+                "cer_vl": round(st.mean(m["cer_vl"] for m in ms), 3),
+                "box_h": round(st.mean(m["box_h"] for m in ms), 4),
+            }
+        metrics["per_cond"][cond] = per
+        print(f"===== en_small {cond}: {EN_SMALL[cond]!r}", flush=True)
+        for k, v in per.items():
+            print(
+                f"  σ {k:>4} (step σ {v['sigma']}): recall {v['recall']:.2f}  "
+                f"≥½ {v['recall_ge_half']}/{v['n']}  cer_vl {v['cer_vl']:.2f}  "
+                f"box_h {v['box_h']}",
+                flush=True,
+            )
+        rows = []
+        for m in (m for m in manifest if m["cond"] == cond):
+            r0 = max(
+                m["reads"] or [{}], key=lambda r: len(r.get("vl") or ""), default={}
+            )
+            rows.append(
+                (
+                    Image.open(m["file"]).convert("RGB"),
+                    [
+                        f"p{m['pi']} s{m['seed']} σ {m['sigma']:.2f}",
+                        f"recall {m['recall']:.2f}",
+                        f"vl {(r0.get('vl') or '')[:24]}",
+                    ],
+                )
+            )
+        contact_sheet(rows, root / f"sheet_{cond}.png", thumb=200, cols=len(sigmas))
+    run_dir = make_run_dir(
+        "sigma_split",
+        label=label,
+        root=LINE / "experiments" / "sigma_split" / "results",
+    )
+    write_result(
+        run_dir,
+        script=__file__,
+        args=argparse.Namespace(label=label, en_small=True, texts=EN_SMALL),
+        label=label,
+        metrics=metrics,
+        artifacts=[str(root)],
+    )
+    print(f"→ {run_dir / 'result.json'}", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--label", required=True)
@@ -546,7 +967,34 @@ def main():
     ap.add_argument("--traj_conds", default=",".join(TRAJ))
     ap.add_argument("--traj_sigmas", nargs="+", type=float, default=list(TRAJ_SIGMAS))
     ap.add_argument("--dry_run", action="store_true")
+    ap.add_argument(
+        "--span", action="store_true", help="proposal_length step 0: span vs caption"
+    )
+    ap.add_argument("--span_caption", default="ja", choices=tuple(SPAN_CAPTIONS))
+    ap.add_argument(
+        "--en_small", action="store_true", help="base EN text by length, x̂0 per σ"
+    )
     args = ap.parse_args()
+    if args.en_small:
+        print(
+            f"en_small: {len(EN_SMALL)} × 8 renders × {len(EN_SMALL_SIGMAS)} σ",
+            flush=True,
+        )
+        if not args.dry_run:
+            en_small(args.label)
+        return
+    if args.span:
+        items = span_items(args.span_caption)
+        print(
+            f"span: {len(items)} renders × {len(SPAN_SIGMAS)} σ "
+            f"({', '.join(SPAN_TEXTS)})",
+            flush=True,
+        )
+        for it in items[:: PROMPTS * 2]:
+            print(f"  {it['caption']}", flush=True)
+        if not args.dry_run:
+            span(args.label, args.span_caption)
+        return
     if args.traj:
         conds = tuple(c for c in args.traj_conds.split(",") if c)
         assert set(conds) <= set(TRAJ), conds

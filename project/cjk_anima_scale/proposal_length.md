@@ -39,29 +39,50 @@ rows carry no order leverage at any σ —
 `../finished/cjk_renderable_anima/findings.md` § Settled); ΔFM (plain FM's
 target with less variance — same findings, closed 2026-09-18).
 
-## Proposal: train the count where the base miscounts
+## Proposal: shorten the span, where it is set
 
-A counterfactual pair on the base's confusion state, not a clean target:
+Repeats = span − word. Two levers follow, at two σ:
 
-- **A** = the word once, banner-size, filling the region; **B** = the same
-  region and span with one slot more — a glyph of the word repeated
-  (`こんにちはは`), the leftover-slot error itself.
-- Input = B noised, caption = A's, target toward A
-  (`../finished/cjk_renderable_anima/idea.md`'s CF; the residual
-  (x0_A − x0_B)/σ does not vanish with ε). Plain FM only ever shows the
-  rows trajectories that start from a clean A; at inference they meet an x_t
-  that already has the extra slot.
-- **σ 0.8–0.9**, where the count is decided and a single glyph's caption
-  leverage peaks (`cf_sense`: EN 0.197, trained rows 0.155 at σ 0.8).
-- Large glyphs only — the base's banner, not its garble.
+- **Span** (σ ≥ 0.9): the text region's width at σ 0.95. The rows already act
+  on it there — the seed's large banner vs the raw pack's small one is the
+  rows' doing above the switch (`sigma_split` `hi` / `lo`), and `short50hb`
+  at 0.8–0.95 learned its canvases' bubbles. What no row has learned is a
+  span of the word's length: the seed's word items (`scene_window`, the text
+  filling 0.7–1.0 of a bubble at ≈ 40 px) train at 0.5–0.7 and 0.3–0.5
+  (`builder.TABLE` b0507 / b0305), below where the span is set, and the
+  garble canvases were sentence-span by construction. 0.8–0.95 is dead for
+  glyph identity at 48 px (`windows.py` C.2); the span is layout, which is
+  the one thing that did train there.
+- **Count** (σ 0.8–0.9): a counterfactual pair — A = the word once,
+  banner-size, filling the region; B = the same span with one slot more, a
+  glyph of the word repeated (`こんにちはは`); input B noised, caption A,
+  target toward A (`../finished/cjk_renderable_anima/idea.md`'s CF). Two
+  caveats the record puts on it: the CF argument was made for σ ≤ 0.7, where
+  the input decides and the residual `(x0_A − x0_B)/σ` grows as σ falls — at
+  0.85 the correction term is 0.18 · (x0_B − x0_A) on an input that is 15 %
+  B; and no leverage read covers the pair — Gate 0's 0.197 / 0.155 at σ 0.8
+  is single glyphs, its strings were read at ≤ 48 px (dead at 0.8–0.9), and
+  the ceiling table has no cell for strings above 48 px
+  (`band_experiment_results.md` § 2).
 
-**Step 0 (no training, minutes):** `src/eval/cf_sense.py` on the seed rows
-with A / B pairs as above, a handful of `sent` words, σ 0.8 / 0.85 / 0.9 —
-does caption A move x̂0 from B toward A? ≥ 0.1 opens step 1; ≈ 0 closes the
-paired route (the count would then follow the span, set at 0.95 without the
-rows).
+Span first: it is the lever at the σ where the quantity is set, its item is
+already in the recipe table, and it is one band change. Count is the route
+if the span does not move.
 
-**Step 1:** one micro arm (≈ 25 min) on the 57 `sent` singles, warm, CF
-items at 0.8–0.9 beside the seed's own item mix; read on `sent` (dup,
-glyphs per read) and the traj leg (`sigma_split --traj --rows`), glyph count
-at σ 0.9 against the seed's.
+**Step 0 (no training, minutes):** `sigma_split --traj` on the `sent` grid
+with the seed rows, x̂0 at σ 0.95 / 0.9 / 0.85, the same (prompt, seed) under
+three captions — the word, the word with one glyph repeated, a 2–3-glyph
+word — reading `box` / `box h` of the text region per σ. The span tracks the
+caption's glyph count at 0.95 → the caption reaches the span, step 1 trains
+it. The span is the same for 2, 5 and 6 glyphs → it is the base's prior on
+`japanese text`, and the count route is read on the same run's x_t at 0.85:
+caption A vs B, `move` on the region as `cf_sense` reads it — ≥ 0.1 opens
+it, ≈ 0 and the line sits at the base's span.
+
+**Step 1 (≈ 25 min):** one micro arm on the 57 `sent` singles, warm — the
+seed's own item mix plus its `scene_window` items rebanded to 0.85–0.95
+(`experiments/garble_replace`'s `reband` leg, pointed at the seed run's
+items — a source-path knob the leg lacks today; past `windows.SIGMA_MAX`
+0.9, as `short50hb` was). Read on `sent` (dup, glyphs per read) and the traj
+leg (`sigma_split --traj --rows`): span at σ 0.95 and glyph count at 0.9
+against the seed's.

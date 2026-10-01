@@ -44,7 +44,8 @@ A new read that changes a row of the law goes into
 
 | file | what |
 |---|---|
-| [`proposal_length.md`](proposal_length.md) | **the open question** (2026-10-01): the repeats are leftover slots — the concept so far (attack the base's own confused text region), what the garble arms closed, and a counterfactual count pair at σ 0.8–0.9 with a no-training `cf_sense` step first |
+| [`proposal_length.md`](proposal_length.md) | **the open question** (2026-10-01): the repeats are leftover slots — the concept so far (attack the base's own confused text region), what the garble arms closed, and the two levers that follow (span at σ ≥ 0.9 first — the seed's word items rebanded — count-CF at 0.8–0.9 second), with a no-training traj read first |
+| [`findings.md`](findings.md) | (2026-10-01) where the text is decided on the trajectory: identity at σ 0.85–0.7 when the model knows the glyphs (small EN on the base), the base banner's ≈ 6 slots, the `japanese text` tag's text area, ！ in the leftover slot — against b0305 / b0507 |
 | [`retrain_experiments.md`](retrain_experiments.md) | the retrain's record (2026-09-28): why the singles re-seed cold (P1 / P1b), per-glyph routing (P2), the windowed word pool, checks C0–C3, `retrain_kana` trained and read, the code that landed |
 | [`band_experiment_results.md`](band_experiment_results.md) | **the vocab band law** — the verdict, the per-px window table, the training reads, what is left unrun |
 | [`floor_score.md`](floor_score.md) | the floors on sent / target / word / en: the new seed's (`seed_retrain_0930`, what runs read against) and the old seed's (what the retrain was read against) |
