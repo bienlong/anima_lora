@@ -40,6 +40,7 @@ run_mit_mask = true
 mask_path_pattern = "*"
 mit_text_threshold = 0.8
 mit_dilate = 5
+caption_autotag = true
 [[variant.mask_rules]]
 prompts = [ "speech bubble", "text bubble",]
 threshold = 0.7

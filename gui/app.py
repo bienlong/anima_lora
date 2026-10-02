@@ -150,8 +150,14 @@ class MainWindow(QMainWindow):
         # GUI preprocess settings to the selected method before it preprocesses.
         self._preprocess_tab = PreprocessingTab()
 
+        # 快速开始 = 第一次训练的主入口（主次感：它排第一，其余页是高级模式）。
+        from gui.tabs.quickstart_tab import QuickStartTab
+
+        self._quickstart_tab = QuickStartTab(self._preprocess_tab)
+
         self.tabs = QTabWidget()
         # Config = MethodsTab over the shipped LoRA family + Turbo distiller.
+        self.tabs.addTab(self._quickstart_tab, t("tab_quickstart"))
         self.tabs.addTab(
             MethodsTab(
                 tb_panel=self._tb_tab.panel,
@@ -160,6 +166,9 @@ class MainWindow(QMainWindow):
                 preprocess_tab=self._preprocess_tab,
             ),
             t("tab_config"),
+        )
+        self._quickstart_tab._switch_advanced = lambda: self.tabs.setCurrentWidget(
+            self.tabs.widget(1)
         )
         self.tabs.addTab(self._preprocess_tab, t("tab_preprocess"))
         # Every tab after Config is a LazyTabHolder: built on first open, keeping
