@@ -129,7 +129,10 @@ nothing here imports, paths into or configures from `../finished/cjk_renderable_
   has none. Not a window axis.
 - σ is per item: the builder stamps every item with its band (`windows.window`
   of its kind × px × layout) and the trainer draws σ inside it. A band group's
-  gate keeps an item iff the group band is inside its window (or 0.8 of it);
+  gate keeps an item iff the group band is inside its window (or 0.8 of it)
+  — a tier with `gate = "group"` skips it and takes the group's band (a lone
+  glyph's px is its own ink box, so the gate drops ー and the small kana
+  from a small lone tier: `experiments/grid_lone`);
   the ±20 % `px_target` gate reads the tier's **drawn** px, before the band gate
   truncates it. Each band group restarts from the pools' post-build rng state,
   so it draws the item stream its old stage build drew (verified 2026-09-25:

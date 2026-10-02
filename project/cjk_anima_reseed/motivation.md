@@ -1,7 +1,7 @@
 # cjk_anima_reseed — motivation (2026-10-02)
 
-> **Draft of the morning, overtaken the same day** — read
-> `../cjk_anima_scale/reports/band_size_2026_10_02.md` first. § 1 does not
+> **Draft of the morning, overtaken the same day** — `motivation2.md` is the
+> rewrite; read it and `../cjk_anima_scale/reports/band_size_2026_10_02.md` first. § 1 does not
 > stand as worded: the seed's items sat inside the ceiling window of their
 > px, and what is missing is an item that could train above 0.7, which § 4
 > says better. The target is manga-size dialogue in speech bubbles, not the

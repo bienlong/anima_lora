@@ -40,6 +40,21 @@ GRID_FRAMES = {
     "flat": "white background, simple background, no humans, text focus, {lang} text.",
     "bubble": "manga, multiple speech bubbles, {lang} text.",
 }
+# the plain grid caption (user, 2026-10-02 — grid_small's `recap` leg): no
+# `manga`, no language tag, the clause without its language, and the clause's
+# wording one of `GRID_CLAUSES` (`{u}` = the cell's unit)
+GRID_FRAMES_PLAIN = {
+    "flat": "white background, simple background, no humans, text focus.",
+    "bubble": "simple background, no humans, multiple speech bubbles.",
+}
+GRID_CLAUSES = {
+    "reads_as": 'text reads as "{u}".',
+    "says": 'the text says "{u}".',
+    "written": '"{u}" is written.',
+    "bare": '"{u}".',
+    "bubble_reads": 'a speech bubble reads "{u}".',
+}
+GRID_CLAUSES_BUBBLE = {"bubble_reads"}  # true of a bubble cell only
 _GRID_COLS = {1: ("",), 2: ("left", "right"), 3: ("left", "middle", "right")}
 _GRID_ROWS = {1: ("",), 2: ("top", "bottom"), 3: ("top", "middle", "bottom")}
 
@@ -63,14 +78,36 @@ def grid_caption(
     order=None,
     lang: str = "japanese",
     horizontal=(),
+    clause: str | None = None,
 ) -> str:
     """``units[i]`` sits in cell ``i``; ``order`` is the clause sequence
     (default reading order). Cells in ``horizontal`` are marked as a
-    left-to-right line — the unmarked clause is the manga default, a column."""
+    left-to-right line — the unmarked clause is the manga default, a column.
+
+    ``clause`` (a `GRID_CLAUSES` name) asks for the plain caption:
+    `GRID_FRAMES_PLAIN`'s frame and that wording in every cell, no language
+    anywhere. It has no line marker, so it takes no ``horizontal`` cell. A
+    1×1 is one unit with no position to name: one bubble, the bare clause."""
+    cells = order if order is not None else range(len(units))
+    if clause is not None:
+        assert not horizontal, "the plain grid caption has no line marker"
+        assert frame == "bubble" or clause not in GRID_CLAUSES_BUBBLE, (frame, clause)
+        tpl = GRID_CLAUSES[clause]
+        if cols * rows == 1:
+            head = GRID_FRAMES_PLAIN[frame].replace(
+                "multiple speech bubbles", "speech bubble"
+            )
+            said = tpl.format(u=units[0])
+            return f"{head} {said[0].upper()}{said[1:]}"
+        clauses = [
+            f"{grid_cell_header(cols, rows, i)}, {tpl.format(u=units[i])}"
+            for i in cells
+        ]
+        return f"{GRID_FRAMES_PLAIN[frame]} {' '.join(clauses)}"
     clauses = [
         f"{grid_cell_header(cols, rows, i)}, {'horizontal ' if i in horizontal else ''}"
         f'{lang.capitalize()} text reads as "{units[i]}".'
-        for i in (order if order is not None else range(len(units)))
+        for i in cells
     ]
     return f"{GRID_FRAMES[frame].format(lang=lang)} {' '.join(clauses)}"
 

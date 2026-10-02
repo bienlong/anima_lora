@@ -12,6 +12,7 @@ layout)`` at build time — and the trainer draws its σ inside it::
         item = tier.draw()                          # vocab(s), px, layout
         w = window(kind_of(vocabs), px, layout)
         keep iff g.band ⊆ w (or |g.band ∩ w| / |g.band| ≥ MIN_OVERLAP); re-draw otherwise
+        (a tier with ``gate = "group"`` skips the gate: w = g.band)
         item.band = w.band                          # the band the trainer draws σ in
 
 The tiers and their weights are the old stage files' mixes (``_archive/configs/
@@ -39,7 +40,7 @@ from pathlib import Path
 from .config import SEED, RunConfig, dataset_ja_lines, phrase_file
 from .paths import data_dir
 from .recipes import RECIPES, Pools, build_pools, missing_source
-from .windows import covers, kind_of, window
+from .windows import Window, covers, kind_of, window
 
 # forked workers inherit an HF tokenizer; its thread pool must not be live
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -614,7 +615,14 @@ def _draw_loop(g: Group, t: Tier, n: int, pools: Pools, rng, out: Path, first: i
         px_seen.append(px)
         kind = kind_of(item.vocabs, pools.n_tokens)
         w = window(kind, px, item.layout)
-        if not covers(g.band, w, MIN_OVERLAP):
+        if t.params.get("gate") == "group":
+            # a lone glyph's px is its own ink box, so a thin or small one
+            # (ー 0.38 × its font px, っ 0.58; the median glyph 0.83) reads a
+            # band below its font size and the gate drops the row from the
+            # tier (grid_lone, 10-02). Such a tier is drawn at a grid tier's
+            # font px and takes that tier's band — the group's — as it is
+            w = Window(*g.band, "the group's band (tier gate = group)")
+        elif not covers(g.band, w, MIN_OVERLAP):
             rejects["no_window" if w is None else "band"] += 1
             continue
         i = first + len(kept)

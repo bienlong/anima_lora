@@ -29,7 +29,19 @@ alone, the kana run's `read` held out. Old seed underneath, as the kana run.
 
 Legs:
 - ``data`` (CPU) → ``OUT/run1002_grid_small/data``;
-- ``train`` (GPU) → ``OUT/experiments/grid_small_cold_hira``;
+- ``reband`` (CPU) → ``OUT/run1002_grid_small/data_<tag>``: ``data``'s records
+  with every band replaced by ``--band`` (images, latents and the TE cache
+  shared with ``data`` — same files, same captions, same order). The
+  per-px arm is the control; this is the one-band treatment (user, 10-02);
+- ``recap`` (CPU) → the same ``data_<tag>``: every grid item's caption
+  rewritten plain (user, 10-02) — no ``manga``, no ``japanese text``, the
+  clause without its language (``simple background, no humans, multiple
+  speech bubbles. On the top left, text reads as "ご". …`` / ``white
+  background, simple background, no humans, text focus. …``), its wording
+  drawn per item from ``common.prompts.GRID_CLAUSES``. Images, latents and
+  order are ``data``'s; the TE cache is the dir's own (the captions are its
+  key). Scene captions are untouched. Takes ``--band`` with ``reband``;
+- ``train`` (GPU) → ``OUT/experiments/grid_small_cold_hira[_<tag>]``;
 - ``read`` (GPU): ``kana_reband``'s read — `retrain_read`'s grid, 9 hiragana
   words `en` + 8 singles `swap`, paired against ``retrain_kana``'s reads of
   record; C2's words also against the `p1_cold` / `p1_mix` caches.
@@ -37,6 +49,10 @@ Legs:
     ANIMA_VOCAB_PACK=models/vocab_packs/anima_cjk_vocab_pack \\
       make daemon-run ARGS="project/cjk_anima_scale/experiments/grid_small/run_exp.py \\
       --label r0 --legs train read"
+    # the one-band treatment on the same items
+    … --label b7593 --legs reband train read --band 0.75 0.93 --tag b7593
+    # the plain grid captions on the same items (per-px bands)
+    … --label recap --legs recap train read --tag recap
 """
 
 from __future__ import annotations
@@ -45,6 +61,8 @@ import argparse
 import dataclasses
 import json
 import os
+import random
+import shutil
 import sys
 from collections import Counter
 from pathlib import Path
@@ -111,12 +129,12 @@ def run_config():
     ), hira
 
 
-def data(rc, hira: list, workers: int | None) -> dict:
+def data(rc, hira: list, workers: int | None, tbl: tuple | None = None) -> dict:
     import statistics as st
 
     from cjk_scale.builder import build
 
-    dst = build(rc, workers, table())
+    dst = build(rc, workers, tbl or table())
     recs = [
         json.loads(ln) for ln in (dst / "train.jsonl").read_text("utf-8").splitlines()
     ]
@@ -144,11 +162,71 @@ def data(rc, hira: list, workers: int | None) -> dict:
     }
 
 
-def read() -> dict:
+def plain_caption(r: dict, rng: random.Random) -> tuple:
+    """A grid record's caption in the plain frame, its clause drawn from
+    `GRID_CLAUSES` (one wording per item)."""
+    from cjk_scale.recipes import GRIDS as SHAPES
+    from common.prompts import GRID_CLAUSES, GRID_CLAUSES_BUBBLE, grid_caption
+
+    cols, rows, _ = SHAPES[r["grid"]]
+    assert len(r["units"]) == cols * rows and not r["horizontal"], r["file"]
+    frame = "bubble" if r["bubble"] else "flat"
+    clause = rng.choice(
+        [c for c in GRID_CLAUSES if frame == "bubble" or c not in GRID_CLAUSES_BUBBLE]
+    )
+    return grid_caption(frame, cols, rows, r["units"], clause=clause), clause
+
+
+def derive(src: Path, dst: Path, band: tuple | None, recap: bool) -> dict:
+    """``src``'s records at one band (``band``) and / or with the grid
+    captions rewritten plain (``recap``); images and latents shared by
+    symlink, the TE cache too unless the captions changed."""
+    recs = [
+        json.loads(ln) for ln in (src / "train.jsonl").read_text("utf-8").splitlines()
+    ]
+    out: dict = {"from": str(src), "items": len(recs)}
+    note: dict = {"derived_from": str(src)}
+    if band:
+        old = Counter((r["group"], tuple(r["band"])) for r in recs)
+        for r in recs:
+            r["band"] = list(band)
+        out["old_bands"] = {f"{g} {a}-{b}": n for (g, (a, b)), n in sorted(old.items())}
+        out["band"] = note["band"] = list(band)
+    if recap:
+        rng = random.Random(0)
+        for r in recs:
+            if r["recipe"] == "grid_single":  # the grids and the 1×1 (grid_lone)
+                r["caption"], r["clause"] = plain_caption(r, rng)
+        clauses = Counter(
+            f"{'bubble' if r['bubble'] else 'flat'}/{r['clause']}"
+            for r in recs
+            if "clause" in r
+        )
+        out["recap"] = note["recap"] = dict(sorted(clauses.items()))
+    dst.mkdir(parents=True, exist_ok=True)
+    (dst / "train.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in recs), encoding="utf-8"
+    )
+    for f in ("vocabs.json", "eval.json"):
+        shutil.copy2(src / f, dst / f)
+    bj = json.loads((src / "build.json").read_text("utf-8"))
+    (dst / "build.json").write_text(
+        json.dumps(bj | note, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    for d in src.iterdir():
+        shared = d.name.startswith("latents_") or (d.name == "te_cache" and not recap)
+        if d.is_dir() and shared:
+            link = dst / d.name
+            if not link.exists():
+                link.symlink_to(d)
+    return out
+
+
+def read(arm: str) -> dict:
     from cjk_scale import reads as R
 
     KR = load_experiment("kana_reband")
-    out = KR.read(ARM, "hira")
+    out = KR.read(arm, "hira")
     RR = load_experiment("retrain_read")
     c2 = [w for w in out["words"] if w in RR.C2_WORDS]
     print("===== p1_cold · C2 words (cache)", flush=True)
@@ -168,49 +246,75 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--label", required=True)
     p.add_argument(
-        "--legs", nargs="+", default=["data"], choices=["data", "train", "read"]
+        "--legs",
+        nargs="+",
+        default=["data"],
+        choices=["data", "reband", "recap", "train", "read"],
     )
+    p.add_argument("--band", type=float, nargs=2, default=None, help="reband: one band")
+    p.add_argument("--tag", default="", help="suffix for the data dir and the arm")
     p.add_argument("--workers", type=int, default=None)
     p.add_argument("--dry_run", action="store_true")
     args = p.parse_args()
+    derived = {"reband", "recap"} & set(args.legs)
+    assert ("reband" in args.legs) == bool(args.band), "--band is reband's"
+    assert bool(derived) == bool(args.tag), (
+        "reband / recap take --tag; the other legs do not"
+    )
     rc, hira = run_config()
+    arm = ARM + (f"_{args.tag}" if args.tag else "")
+    data_dir = OUT / DATA_RUN / ("data" + (f"_{args.tag}" if args.tag else ""))
     steps = STEPS_PER_ROW * len(hira)
     shares = {g.name: g.share for g in table()}
     print(
-        f"{ARM}: {len(hira)} hiragana rows cold × {STEPS_PER_ROW} = {steps} steps on "
+        f"{arm}: {len(hira)} hiragana rows cold × {STEPS_PER_ROW} = {steps} steps on "
         f"{SEED_ROWS_0921}; groups {shares} (Σ {sum(shares.values()):g}); data "
-        f"{OUT / DATA_RUN / 'data'}",
+        f"{data_dir}" + (f"; one band {args.band}" if args.band else ""),
         flush=True,
     )
     if args.dry_run:
         return
-    metrics: dict = {"rows": len(hira), "steps": steps, "shares": shares}
+    metrics: dict = {
+        "rows": len(hira),
+        "steps": steps,
+        "shares": shares,
+        "arm": arm,
+        "band": args.band,
+    }
     run_dir = make_run_dir(
         NAME, label=args.label, root=LINE / "experiments" / NAME / "results"
     )
     if "data" in args.legs:
         metrics["data"] = data(rc, hira, args.workers)
         print(json.dumps(metrics["data"], ensure_ascii=False, indent=1), flush=True)
+    if derived:
+        metrics["derive"] = derive(
+            OUT / DATA_RUN / "data",
+            data_dir,
+            tuple(args.band) if args.band else None,
+            "recap" in args.legs,
+        )
+        print(json.dumps(metrics["derive"], ensure_ascii=False, indent=1), flush=True)
     if "train" in args.legs:
         from cjk_scale import train as T
 
         T.train(
-            dataclasses.replace(rc, name=ARM),
-            data=OUT / DATA_RUN / "data",
-            out=OUT / "experiments" / ARM,
+            dataclasses.replace(rc, name=arm),
+            data=data_dir,
+            out=OUT / "experiments" / arm,
             cold=True,
             steps_per_row=STEPS_PER_ROW,
             context=SEED_ROWS_0921,
         )
     if "read" in args.legs:
-        metrics["read"] = read()
+        metrics["read"] = read(arm)
     write_result(
         run_dir,
         script=__file__,
         args=args,
         label=args.label,
         metrics=metrics,
-        artifacts=[str(OUT / DATA_RUN / "data"), str(OUT / "experiments" / ARM)],
+        artifacts=[str(data_dir), str(OUT / "experiments" / arm)],
     )
     print(f"→ {run_dir / 'result.json'}", flush=True)
 
