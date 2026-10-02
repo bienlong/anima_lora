@@ -132,7 +132,13 @@ def run_config():
     ), hira
 
 
-def data(rc, hira: list, workers: int | None, tbl: tuple | None = None) -> dict:
+def data(
+    rc,
+    hira: list,
+    workers: int | None,
+    tbl: tuple | None = None,
+    max_px: float | None = 64,
+) -> dict:
     import statistics as st
 
     from cjk_scale.builder import build
@@ -143,7 +149,10 @@ def data(rc, hira: list, workers: int | None, tbl: tuple | None = None) -> dict:
     ]
     drawn = {c for r in recs for c in r["text"].replace(" ", "")}
     assert drawn <= set(hira), drawn - set(hira)
-    assert max(r["px"] for r in recs) <= 64, max(r["px"] for r in recs)
+    # `reseed_recap` draws `bubble1_52` (a fifth of it over 64 px): no cap there
+    assert max_px is None or max(r["px"] for r in recs) <= max_px, max(
+        r["px"] for r in recs
+    )
     by: dict = {}
     for r in recs:
         by.setdefault(r["tier"], []).append(r["px"])

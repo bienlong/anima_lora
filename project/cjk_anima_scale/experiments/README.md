@@ -207,6 +207,22 @@ table is `../README.md` § Item pools, and `builder.tier_of` reads both.
   record `recap_b7593` (every item at 0.75–0.93), trained and read 10-02;
   the read beside `grid_small` / `grid_lone` is
   `../../cjk_anima_reseed/reports/grid_small_lone_2026_10_02.md`.
+- `reseed_recap/` — `grid_44`'s recap at the kana run's rows and budget: the
+  81 hiragana + 85 katakana rows (the kana run's less its punctuation) cold,
+  135 / row = 22 410 steps, 16 600 items; `grid_44`'s table with half of
+  `grid_44` given to `builder.TABLE`'s `bubble1_52` (7.5 % each, `lone_44`
+  5 %), plain grid captions, `--bands hp` (default: `grid_lone`'s `recap_hp`
+  bands + the gradient read's for the 44–50 px tiers, untrained before) or
+  `law`. Read on the kana run's 13 words + 14 singles (`en` / `swap` against
+  its reads of record, and the plain clause against it and `grid_lone`'s
+  recap arms). **Ran 2026-10-03** (`hp`, job `20261003-020144-3cd123`,
+  193.7 min, `results/20261003-0201-hp/`) → under `retrain_kana` on the plain
+  read — words official 15 vs 33 of 104, ≤ 1 edit 42 vs 73, dup 76 vs 52;
+  singles official 30 vs 47 of 112, contained 90 vs 91, repeats 23 vs 7 —
+  and over `grid_lone`'s `recap_hp` (60 / row) on the hiragana keys (words
+  ≤ 2 edits 48 vs 33 of 72, singles official 22 vs 12 of 64). On the sheets
+  both draw a banner; this arm's is longer, with kanji-like glyphs in the
+  extra slots, and its lone single comes out small or not at all.
 - `grad_identity/` — the band law on the training gradient, no training
   (`conflict`'s plumbing): the grid_44 items, the 81 hiragana rows cold at
   the pack rows, σ swept 0.2–0.95 with one ε per item × σ. Pass 1 swaps the

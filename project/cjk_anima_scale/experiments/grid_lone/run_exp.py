@@ -202,10 +202,11 @@ def run_config():
     ), rows
 
 
-def read_plain(arms: dict) -> dict:
+def read_plain(arms: dict, rows: str = "hira") -> dict:
     """``arms`` (name → run dir) on `retrain_read`'s grid under
     ``PLAIN_CLAUSE`` (renders in each dir's ``native_r4_plain/``), every pair
-    of arms paired on the shared prompt × seed."""
+    of arms paired on the shared prompt × seed. ``rows="all"`` adds the
+    katakana words and singles (`reseed_recap`), paired per script as well."""
     from itertools import combinations
 
     from cjk_scale import reads as R
@@ -216,8 +217,8 @@ def read_plain(arms: dict) -> dict:
     RR = load_experiment("retrain_read")
     KR = load_experiment("kana_reband")
     rc = load_run(SRC_RUN)  # its `read` words; the arm is each of `arms`
-    words = [w for w in rc.read if KR.is_hira(w)]
-    singles = list(RR.HIRA)
+    words = [w for w in rc.read if rows == "all" or KR.is_hira(w)]
+    singles = list(RR.HIRA + (RR.KATA if rows == "all" else ()))
     out: dict = {"clause": PLAIN_CLAUSE, "words": words, "singles": singles}
     hits = {}
     for name, arm in arms.items():
@@ -226,9 +227,17 @@ def read_plain(arms: dict) -> dict:
         hits[name] = RR.grid_hits(path, words + singles, "plain")
         print(f"===== {name} · plain", flush=True)
         out[name] = R.tally(hits[name])
+    groups = [("words", words), ("singles", singles)]
+    if rows == "all":
+        groups += [
+            ("words_hira", [w for w in words if KR.is_hira(w)]),
+            ("words_kata", [w for w in words if not KR.is_hira(w)]),
+            ("singles_hira", list(RR.HIRA)),
+            ("singles_kata", list(RR.KATA)),
+        ]
     out["paired"] = {}
     for a, b in combinations(arms, 2):
-        for g, keys in (("words", words), ("singles", singles)):
+        for g, keys in groups:
             pr = R.paired(
                 *({k: v for k, v in hits[x].items() if k[0] in keys} for x in (a, b))
             )
