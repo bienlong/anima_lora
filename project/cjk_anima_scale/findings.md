@@ -265,6 +265,30 @@ are `sigma_split_b0305/b0305_reads.json`, the sheet rebuilt on CPU).
   not for the seed's small JA. As in § 5, uncond drops the scene conditional
   too; `hi` / `unk` there scored the same.
 
+**The mirror (10-02): the base above 0.8, the seed rows below.** Same 16
+renders, two more arms — `garble0.8` (the item's tags with no quote clause
+above the switch) and `unk0.8` (the item's caption under the stock tokenizer,
+no pack). Job `20261002-095155-8eec49`, `results/20261002-0954-b0305_mirror/`,
+sheet `sigma_split_b0305/sheet.png` (train item | 4 arms).
+
+| above 0.8 / below | official | any reader exact | CER (VL) | CER ≤ 0.25 |
+|---|---|---|---|---|
+| seed / seed | 7 / 16 | 7 | 0.29 | 8 |
+| seed / uncond | 0 | 0 | 0.80 | 0 |
+| base garble / seed | 1 | 1 | 0.62 | 2 |
+| no pack / seed | 0 | 2 | 0.55 | 6 |
+
+- The split does not hold on the seed: 0–1 of 16 against 7.
+- The rows below 0.8 do write the word's glyphs into the base's layout
+  (CER 0.80 → 0.55–0.62), into more slots than the word has: `んだだよよウチ`,
+  `んだよよよウチチ`, `なアロロナ`, `っととまおし`, `虚ををつい`. The kanji
+  items read 1 of 8 (`偉いさ`, one seed).
+- On the sheet the two mirror arms keep the base's small bubbles and small
+  glyphs; the seed arm draws the same word large in one sign or bubble
+  (§ 8 above: the renders do not keep the item's px).
+- n = 16 on training captions of 3–5 glyphs; no sentence-length caption is
+  read.
+
 ## Against the earlier reads
 
 No earlier record contradicts § 1–8; where wording differs, the setup does.

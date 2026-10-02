@@ -172,7 +172,7 @@ class Splitter:
         if fn.exists() and x0s is None:
             return
         cap = lambda side: (  # noqa: E731
-            GARBLE.format(p=it["prompt"])
+            it.get("garble") or GARBLE.format(p=it["prompt"])
             if side == "garble"
             else EN_CAPTION.format(p=it["prompt"], k=it["en"])
             if side == "en"
@@ -1263,9 +1263,18 @@ def ja_grid(
 # --b0305: the seed's own b0305 training items (scene_window, 12–24 px dialogue
 # windows at 0.3–0.5) as prompts — 4 from retrain_kana, 4 from
 # retrain_kanji_b4, each at its own shape × 2 seeds; seed rows throughout vs
-# seed rows above 0.8 and the negative embedding below (§ 5's `uncond`).
+# seed rows above 0.8 and the negative embedding below (§ 5's `uncond`), and
+# (10-02) the mirror: the base above 0.8, the seed rows below — the base as
+# its own garble (the item's tags, no quote clause) or as the item's caption
+# under the stock tokenizer (`unk`: no pack, the quote is <unk>).
 B0305_RUNS = ("retrain_kana", "retrain_kanji_b4")
-B0305_ARMS = {"seed": ("seed", 1.0), "uncond0.8": ("uncond", 0.8)}
+# arm → (above the switch, below it, switch)
+B0305_ARMS = {
+    "seed": ("seed", "seed", 1.0),
+    "uncond0.8": ("seed", "uncond", 0.8),
+    "garble0.8": ("garble", "seed", 0.8),
+    "unk0.8": ("unk", "seed", 0.8),
+}
 
 
 def b0305_items() -> list[dict]:
@@ -1279,6 +1288,8 @@ def b0305_items() -> list[dict]:
         ]
         recs = [r for r in recs if r["group"] == "b0305"]
         for k, r in enumerate(random.Random(0).sample(recs, 4)):
+            tags, clause = r["caption"].split(". ", 1)
+            assert f'"{r["text"]}"' in clause, r["caption"]
             for seed in (0, 1):
                 items.append(
                     {
@@ -1286,6 +1297,7 @@ def b0305_items() -> list[dict]:
                         "seed": seed,
                         "text": r["text"],
                         "caption": r["caption"],
+                        "garble": tags + ".",
                         "shape": r["shape"],
                         "px": r["px"],
                         "train_file": r["file"],
@@ -1304,9 +1316,9 @@ def b0305(label: str) -> None:
     sp = Splitter()
     manifest = []
     for it in items:
-        for arm, (below, switch) in B0305_ARMS.items():
+        for arm, (above, below, switch) in B0305_ARMS.items():
             fn = root / arm / f"{it['key']}_s{it['seed']}.png"
-            sp.render(fn, it, "seed", below, switch)
+            sp.render(fn, it, above, below, switch)
             manifest.append(it | {"arm": arm, "file": str(fn)})
         print(f"  b0305 {it['key']} s{it['seed']} {it['text']}", flush=True)
     device = sp.device
@@ -1333,13 +1345,15 @@ def b0305(label: str) -> None:
     rows = []
     by = {(m["key"], m["seed"], m["arm"]): m for m in manifest}
     for it in items:
-        if it["seed"] == 0 and Path(it["train_file"]).exists():  # img/ may be pruned
-            rows.append(
-                (
-                    Image.open(it["train_file"]).convert("RGB"),
-                    [f"{it['key']} train item", it["text"], f"px {it['px']}"],
-                )
+        tf = Path(it["train_file"])  # img/ may be pruned
+        rows.append(
+            (
+                Image.open(tf).convert("RGB")
+                if tf.exists()
+                else Image.new("RGB", tuple(it["shape"]), "white"),
+                [f"{it['key']} train item", it["text"], f"px {it['px']}"],
             )
+        )
         for arm in B0305_ARMS:
             m = by[(it["key"], it["seed"], arm)]
             vl = max(m["vl"] or [""], key=lambda v: len(v or ""))
@@ -1353,7 +1367,7 @@ def b0305(label: str) -> None:
                     ],
                 )
             )
-    contact_sheet(rows, root / "sheet.png", thumb=300, cols=4)
+    contact_sheet(rows, root / "sheet.png", thumb=300, cols=1 + len(B0305_ARMS))
     run_dir = make_run_dir(
         "sigma_split",
         label=label,
@@ -1404,7 +1418,7 @@ def main():
         help="ja_grid: the conditional below --switch",
     )
     ap.add_argument(
-        "--b0305", action="store_true", help="b0305 training items: seed vs uncond<0.8"
+        "--b0305", action="store_true", help="b0305 training items: B0305_ARMS"
     )
     args = ap.parse_args()
     if args.b0305:

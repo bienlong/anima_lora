@@ -48,6 +48,7 @@ A new read that changes a row of the law goes into
 | [`proposal_seed_synthesis.md`](proposal_seed_synthesis.md) | **the open question** (2026-10-01, evening): the rows decide what fills the text region, the base decides the region — `span_reband` (the word-length windows at 0.85–0.95 refill the banner with smaller glyphs), `shared_dir` on it (all of it above 0.8), `inject_count` (the slot count commits between σ 0.95 and 0.9, no `cf_sense`); the size-bias objection and the answer to it (no common size in the item set); the proposal: the seed's own renders with the word redrawn to fill the base's region, at 0.85–0.95 |
 | [`proposal_length.md`](proposal_length.md) | superseded (2026-10-01): the repeats are leftover slots — the concept so far (attack the base's own confused text region), what the garble arms closed, and the two levers that follow (span at σ ≥ 0.9 first — the seed's word items rebanded — count-CF at 0.8–0.9 second), with a no-training traj read first |
 | [`hypothesis.md`](hypothesis.md) | (2026-10-01) a row is one vector at every σ: an item trained above where its glyphs resolve teaches only its layout, which then overrides every caption's — band and px are one choice; three predictions |
+| [`reports/band_size_2026_10_02.md`](reports/band_size_2026_10_02.md) | (2026-10-02) band × glyph size: the seed's bands were right for its sizes and no word item could train above 0.7; `kana_reband` (the kana run's hiragana items at 0.75–0.93, cold: nothing reads, confounded), the `--b0305` mirror (the base above 0.8, the rows below: 0–1 / 16), the P1 arms re-read for rendered size, `grid_small` (running); the target is manga-size dialogue |
 | [`findings.md`](findings.md) | (2026-10-01) where the text is decided on the trajectory: identity at σ 0.85–0.7 when the model knows the glyphs (small EN on the base), the base banner's ≈ 6 slots, the `japanese text` tag's text area, ！ in the leftover slot, 3 × 3 EN / kana / kanji grids, the seed's b0305 captions with uncond below 0.8 — against b0305 / b0507 |
 | [`retrain_experiments.md`](retrain_experiments.md) | the retrain's record (2026-09-28): why the singles re-seed cold (P1 / P1b), per-glyph routing (P2), the windowed word pool, checks C0–C3, `retrain_kana` trained and read, the code that landed |
 | [`band_experiment_results.md`](band_experiment_results.md) | **the vocab band law** — the verdict, the per-px window table, the training reads, what is left unrun |
@@ -64,7 +65,7 @@ A new read that changes a row of the law goes into
 | `_archive/` | gitignored: the retired stage code, and the pre-retrain docs / reports / experiments / run files (see its README) |
 | `runs/` | `ledger.jsonl` — every submitted job |
 
-## Where it stands (2026-10-01)
+## Where it stands (2026-10-02)
 
 `retrain_kana` (174 cold kana rows, routed) composes like `p1_mix` and holds
 the singles; its rows are the kana half of the new seed.
@@ -83,6 +84,14 @@ moved layout but not strings; the repeats are slots the word leaves over
 (`proposal_length.md`). Evening: `span_reband` + `inject_count` — the rows
 fill the base's region, they do not resize it; the count commits between
 σ 0.95 and 0.9 (`proposal_seed_synthesis.md`).
+
+2026-10-02 (`reports/band_size_2026_10_02.md`): the seed's bands were right
+for its glyph sizes — every arm that moved a px above its ceiling window
+lost identity, `kana_reband` (the kana run's hiragana items at 0.75–0.93,
+cold) included — and the target is manga-size dialogue, not the `sent`
+banner. Identity does not need large glyphs (`p1_cold`); `grid_small` (small
+glyphs only, grids 60 %) is training. A reseed draft sits in
+`../cjk_anima_reseed/motivation.md`.
 
 ## Running a run
 

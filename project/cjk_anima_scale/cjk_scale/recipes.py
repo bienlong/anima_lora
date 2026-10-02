@@ -823,6 +823,8 @@ def _grid_item(
     mark_horizontal: bool,
     pad=None,
     size=None,
+    bubble_fit=None,
+    cell_jitter=None,
 ):
     from common.prompts import TPL_BUBBLE, TPL_PLAIN, grid_caption
     from data.grid import WORD_PAD, render_grid
@@ -831,6 +833,10 @@ def _grid_item(
     size = size or gsize or pools.shapes.draw() or (512, 512)
     lines: list = []
     kw = {"box": True, "pad": WORD_PAD} if box else {}
+    if bubble_fit:
+        kw["bubble_fit"] = tuple(bubble_fit)
+    if cell_jitter is not None:
+        kw["cell_jitter"] = float(cell_jitter)
     im, boxes = render_grid(
         got,
         cols,
@@ -914,6 +920,8 @@ def grid_single(pools: Pools, rng: random.Random, p: dict):
         False,
         bool(p.get("mark_horizontal", True)),
         size=size,
+        bubble_fit=p.get("bubble_fit"),  # the bubble sized to the glyph (grid_small)
+        cell_jitter=p.get("cell_jitter"),  # the glyph at its cell's centre ± this
     )
 
 

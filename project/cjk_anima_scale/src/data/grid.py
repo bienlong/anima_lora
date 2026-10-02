@@ -67,6 +67,8 @@ def render_grid(
     sizes=None,
     lines=None,
     horizontal_frac: float = 0.5,
+    bubble_fit=None,
+    cell_jitter=None,
 ):
     """Draw ``units[i]`` in cell ``i`` (row-major). Returns ``(image, boxes)``,
     ``boxes[i]`` the ink bbox of cell i's unit in canvas pixels. ``box`` = the
@@ -75,7 +77,13 @@ def render_grid(
     line. ``horizontal_frac``: each multi-glyph cell is a left-to-right line
     with this probability (drawn per cell, so one grid mixes both), a column
     otherwise; ``_NO_COLUMN`` units are always a line; a single glyph has no
-    orientation."""
+    orientation. ``bubble_fit`` (opt-in, grid_small 2026-10-02; off = what
+    every data dir of record was drawn with): ``(lo, hi)`` — the ellipse is
+    sized to the ink, its inscribed rectangle the ink × a draw in that range,
+    around the ink, instead of filling the cell around a glyph of any size.
+    ``cell_jitter`` (opt-in, same date): the ink sits at the cell's centre ±
+    this share of the cell, instead of anywhere its room allows — a small
+    glyph otherwise lands anywhere in a large cell."""
     from PIL import Image, ImageDraw, ImageFont
 
     W, H = size
@@ -121,9 +129,18 @@ def render_grid(
         # block centre: anywhere the ink stays inside its room
         cx = x0 + cw / 2 + (rng.random() - 0.5) * max(0.0, room_w - tw)
         cy = y0 + ch / 2 + (rng.random() - 0.5) * max(0.0, room_h - th)
+        if cell_jitter is not None:
+            cx = x0 + cw / 2 + (rng.random() - 0.5) * 2 * cell_jitter * cw
+            cy = y0 + ch / 2 + (rng.random() - 0.5) * 2 * cell_jitter * ch
         if bubble:
             frame = (x0 + pad, y0 + pad, x0 + cw - pad, y0 + ch - pad)
             kwb = {"fill": "white", "outline": "black", "width": rng.randint(2, 5)}
+            if bubble_fit and not box:
+                k = rng.uniform(*bubble_fit) * 2**0.5
+                bw = min(tw * k + 6, cw - 2 * pad)
+                bh = min(th * k + 6, ch - 2 * pad)
+                frame = (cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2)
+                kwb["width"] = 1 if min(bw, bh) < 40 else 2
             if box:
                 d.rounded_rectangle(frame, radius=0.18 * min(cw, ch), **kwb)
             else:

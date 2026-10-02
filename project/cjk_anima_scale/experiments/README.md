@@ -170,3 +170,28 @@ their reads are in `../_archive/reports/` and `../hypothesis.md`.
   29 → 19, ≤ 1 edit 92 → 71 (p 0.006); the banner is longer (box 0.156 →
   0.170, long side 401 → 427 px) at the floor's glyph size (78 px), IoU vs
   EN 0.198 → 0.170 (`../proposal_seed_synthesis.md` § Result).
+- `kana_reband/` — `retrain_kana` with the band alone changed: its items, every
+  one at σ 0.75–0.93, cold on the old seed, the kana run's trainer and 135 /
+  row. `--rows hira`: the 81 hiragana rows on the 6 521 all-hiragana items
+  (42 of the 2 314 multi-cell grids survive the filter), 10 935 steps. Read on
+  `retrain_read`'s grid against `retrain_kana`'s reads of record. **Ran
+  2026-10-02** (job `20261002-081557-f90bb5`, `results/20261002-0815-hira_r0/`)
+  → nothing reads: 9 words `en` official 10 → 0 / 72, ≤ 1 edit 33 → 0, ≤ 2
+  edits 53 → 0; 8 singles `swap` official 17 → 0 / 64, contained 44 → 1. The
+  renders take the items' layout (small columns in bubbles and white boxes,
+  sentence-length) with no identity — `garble_replace` cold's picture, and
+  `windows.py`'s "0.8–0.95 dead at 48 px" for the singles. Row norm 204 at
+  the end (the kana run ≈ 250). Sheets `…/kana_reband_cold_hira/sheets_r4/`.
+- `sigma_split --b0305`, the mirror arms (10-02): the base above σ 0.8 (its
+  garble, or the caption with no pack), the seed rows below, on § 8's 16
+  renders → official 1 and 0 of 16 against the seed's 7; the rows write the
+  word into the base's slots with repeats (`../findings.md` § 8).
+- `grid_small/` — does a grid teach identity if its glyphs are small: the 81
+  hiragana rows cold, 135 / row, no lone glyph above 40 px — `grid_single`
+  2×2 – 3×3 at 24–36 px (σ 0.5–0.7) and 12–23 px (0.3–0.5), 60 % of 8 100
+  items, + `builder.TABLE`'s `b0507` / `b0305` word groups; a cell's bubble
+  sized to its glyph and the glyph at the cell's centre ± 8 %
+  (`render_grid(bubble_fit=, cell_jitter=)`). Read as `kana_reband`'s, with
+  the `p1_cold` / `p1_mix` caches on C2's words. **Training 2026-10-02** (job
+  `20261002-112155-8e8225`); the day's reads are
+  `../reports/band_size_2026_10_02.md`.
