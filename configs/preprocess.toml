@@ -1,4 +1,4 @@
-source_image_dir = "image_dataset"
+source_image_dir = "D:/本地整合包/ComfyUI/models/gemma-4-e4b-vision/1_新建文件夹"
 
 target_res = [1024, 896]
 
