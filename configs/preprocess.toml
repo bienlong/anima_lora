@@ -4,7 +4,7 @@ target_res = [1024, 896]
 
 caption_shuffle_variants = 4
 
-caption_tag_dropout_rate = 0.1
+caption_tag_dropout_rate = 0.0
 
 caption_tag_randomize_rate = 0.0
 
