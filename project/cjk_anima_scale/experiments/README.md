@@ -213,5 +213,9 @@ table is `../README.md` § Item pools, and `builder.tier_of` reads both.
   caption's slot glyph (true row vs other rows — null: different rows'
   gradients are near-orthogonal at every σ); pass 2 (`--render`) re-draws
   the item with the slot's glyph swapped and reads one row's gradient on
-  both — f = 1 − cos is the glyph-dependent share. `--analyze <dir>` re-reads
-  a results dir on CPU. Reads 10-02: `../reports/grad_identity_2026_10_02.md`.
+  both — f = 1 − cos is the glyph-dependent share. `--render_tiers
+  bubble1_52 bubble1_32 bubbleN_34 bubbleN_18` runs pass 2 on the bubble
+  tiers (`render_into_scene(ref_text=…)`; `bubble1_52` from `retrain_kana`'s
+  records) and reads a window's other rows from the same backward (f_cross).
+  `--analyze <dir>` re-reads a results dir on CPU. Reads 10-02:
+  `../reports/grad_identity_2026_10_02.md`.

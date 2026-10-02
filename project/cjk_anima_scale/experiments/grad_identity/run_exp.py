@@ -47,8 +47,21 @@ at u's position after the rows (`_SlotGrad`), checked against ∂raw_u. Pass 1
 compares *different rows* (whose gradients are near-orthogonal whatever
 the image: cos ≈ 0.15), pass 2 the *same row* under different glyphs;
 `f_glyph` = 1 − cos between two wrong renders' gradients is the share of the
-row's gradient energy that changes with the glyph drawn. Grid / lone tiers
-only (`RENDER_TIERS`); scenes are not re-drawn.
+row's gradient energy that changes with the glyph drawn. `RENDER_TIERS` are
+the grid / lone tiers.
+
+Pass 2 on the bubble tiers (``--render_tiers bubble1_52 bubble1_32 bubbleN_34
+bubbleN_18``, `SCENE_TIERS`): the record's scene, fill and orientation
+re-drawn by `render_into_scene(ref_text=…)` — one fit, the sibling's glyphs in
+place — with one font and one seeded rng for A and every B_j; a window is kept
+iff each difference spans one glyph pitch at slot k. The loss box is the
+union of the 1 + m ink boxes, the same for every sample. `bubble1_52` is not
+in the grid_44 data: its records are `retrain_kana`'s (hiragana only). For a
+window the same backward also reads **every other row of the window**
+(`_SlotGrad` takes several rows): `f_cross` = the share of a neighbour row's
+gradient that changes when slot k's glyph — not its own — is swapped, against
+`f_glyph` on slot k's own row (`hypothesis.md` H2: the rows of an item share
+one signal).
 
 The magnitude estimator's median (``excess``) runs negative under
 exchangeability: id2's three terms share one denominator ‖g_true‖, null's
@@ -68,6 +81,8 @@ the recap dir's cache (the same images).
     .venv/bin/python project/cjk_anima_scale/experiments/grad_identity/run_exp.py --label x --dry_run
     # pass 2 (renders under <results>/renders/)
     … --label render --render --queue
+    # pass 2, the bubble tiers
+    … --label scene --render --render_tiers bubble1_52 bubble1_32 bubbleN_34 bubbleN_18 --queue
     # CPU: re-read a finished results dir
     … --label x --analyze experiments/grad_identity/results/<stamp>-r0
 """
@@ -127,7 +142,13 @@ TRAINED = {
     "grid_16": (0.3, 0.5),
     "lone_16": (0.3, 0.5),
     "bubbleN_18": (0.3, 0.5),
+    "bubble1_52": (0.7, 0.9),  # builder.TABLE's band; not a grid_44 tier
 }
+# pass 2's bubble tiers; bubble1_52's records are retrain_kana's
+SCENE_TIERS = ("bubble1_52", "bubble1_32", "bubbleN_34", "bubbleN_18")
+SCENE_EXTRA = {"bubble1_52": OUT / "retrain_kana" / "data"}
+EXTRA_I0 = 100_000  # item ids of the SCENE_EXTRA records
+REPORT_TIERS = TIERS + ("bubble1_52",)
 PX_BINS = (0, 18, 24, 32, 40, 56, 1e9)
 _SMALL = dict(zip("ぁぃぅぇぉっゃゅょゎゕゖ", "あいうえおつやゆよわかけ"))
 
@@ -267,6 +288,8 @@ def t5_check(plan: list, modes: list) -> dict:
 
     n = 0
     for it in plan:
+        for c in it.get("cross", ()):  # a window's other rows (pass 2)
+            eid(c)
         for m in modes:
             if m == "clause" and not it["clause"]:
                 continue
@@ -714,17 +737,194 @@ def render_plan(plan: list, recs: dict, tiers, seed: int, out: Path) -> tuple:
     return kept, dropped
 
 
+def scene_render_plan(
+    recs: dict, tiers, items: int, window_items: int, wrong: int, seed: int, out: Path
+) -> tuple:
+    """Pass 2's items for the bubble tiers, drawn until each tier holds its
+    count (``items`` for a ``bubble1`` tier, ``window_items`` for a
+    ``bubbleN``): the record's scene, fill and orientation re-drawn with one
+    font (of those covering every glyph involved) and one seeded rng, once
+    per wrong glyph as `render_into_scene(ref_text=…)` — A is the text, B_j
+    its sibling with slot k's glyph swapped, pixel-identical outside the two
+    text boxes (the renderer's assert). A window is kept iff every A / B_j
+    difference spans at most one glyph pitch along the text axis and sits at
+    slot k. The loss box is the union of the 1 + m boxes. A window's other
+    glyphs (each once in the caption) are its ``cross`` rows. CPU."""
+    import numpy as np
+    from common.render.flat import find_fonts, font_covers
+    from common.render.scene import render_into_scene
+    from data.synth import load_scenes
+    from eval.cf_sense import _diff_boxes
+
+    from cjk_scale.builder import tier_of, tiers as table_tiers
+    from cjk_scale.config import DATA
+
+    assert not DATA["stroke"], "the records were drawn without a stroke"
+    scenes = {
+        (s["pool"], s["i"]): s
+        for s in load_scenes(DATA["scenes"], 0.0, 0, "", DATA["scene_one_bubble"])
+    }
+    hira = hiragana()
+    hset = set(hira)
+    fonts_all = find_fonts()
+    out.mkdir(parents=True, exist_ok=True)
+    pools: dict = defaultdict(list)
+    for i, r in enumerate(recs["plain"]):
+        if r["tier"] in tiers and r["tier"] not in SCENE_EXTRA:
+            pools[r["tier"]].append((i, r))
+    for tier, d in SCENE_EXTRA.items():
+        if tier not in tiers:
+            continue
+        for j, ln in enumerate((d / "train.jsonl").read_text("utf-8").splitlines()):
+            r = json.loads(ln) if ln else None
+            if r and r["src"] == "scene" and tier_of(r) == tier:
+                pools[tier].append((EXTRA_I0 + j, r))
+    kept, dropped = [], Counter()
+    for tier in tiers:
+        (spec,) = table_tiers(tier)
+        min_glyph = int(spec.params["min_glyph"])
+        want = window_items if form_of(tier) == "bubbleN" else items
+        rng = random.Random(seed * 104_729 + SCENE_TIERS.index(tier))
+        pool = list(pools[tier])
+        rng.shuffle(pool)
+        got = 0
+        for i, r in pool:
+            if got >= want:
+                break
+            text, cap = r["text"], r["caption"]
+            n = len(text)
+            once = [c for c in text if text.count(c) == 1 and cap.count(c) == 1]
+            cands = [c for c in once if c in hset]
+            sc = scenes.get((r["scene_pool"], r["scene"]))
+            if not cands or sc is None or cap.count(f'"{text}"') != 1:
+                dropped[f"{tier}/plan"] += 1
+                continue
+            u = rng.choice(cands)
+            k = text.index(u)
+            pool_v = [
+                v
+                for v in hira
+                if v not in text and v not in cap and family(v) != family(u)
+            ]
+            vs = rng.sample(pool_v, wrong)
+            fonts = [
+                f
+                for f in fonts_all
+                if all(font_covers(f, c) for c in set(text) | set(vs))
+            ]
+            font = rng.choice(fonts)
+            horiz = bool(r["horizontal"])
+            ims, boxes, ok = [], [], True
+            for v in vs:
+                drawn = render_into_scene(
+                    scene=sc,
+                    text=text,
+                    font_path=font,
+                    rng=random.Random(seed * 7919 + i),
+                    min_glyph=min_glyph,
+                    stroke=False,
+                    fill_frac=float(r["fill"]),
+                    max_lines=1,
+                    vertical_only=not horiz,
+                    horizontal=horiz,
+                    ref_text=text[:k] + v + text[k + 1 :],
+                )
+                if drawn is None:
+                    ok = False
+                    break
+                im_a, box_a, im_b, box_b = drawn
+                if ims and (np.array(ims[0]) != np.array(im_a)).any():
+                    ok = False  # A must be one image whatever the sibling
+                    break
+                if not ims:
+                    ims.append(im_a)
+                    boxes.append(box_a)
+                ims.append(im_b)
+                boxes.append(box_b)
+            if not ok:
+                dropped[f"{tier}/draw"] += 1
+                continue
+            x0, y0, x1, y1 = boxes[0]
+            ax = (
+                0 if horiz or n == 1 else 1
+            )  # the text axis: x of a line, y of a column
+            lo, ext_ = (x0, x1 - x0) if ax == 0 else (y0, y1 - y0)
+            pitch = ext_ / n
+            for j in range(1, len(ims)):
+                d = _diff_boxes(ims[0], ims[j])[0]
+                if d[2] <= d[0]:
+                    ok = False
+                    break
+                if n > 1:
+                    a, b = d[ax], d[ax + 2]
+                    mid = ((a + b) / 2 - lo) / pitch
+                    if b - a > 1.3 * pitch or not (k - 0.25 <= mid <= k + 1.25):
+                        ok = False
+                        break
+            if not ok:
+                dropped[f"{tier}/slot"] += 1
+                continue
+            files = []
+            for j, im in enumerate(ims):
+                f = out / f"{i:06d}_{j}.png"
+                im.save(f)
+                files.append(str(f))
+            union = [
+                min(b[0] for b in boxes),
+                min(b[1] for b in boxes),
+                max(b[2] for b in boxes),
+                max(b[3] for b in boxes),
+            ]
+            px = round(math.sqrt(max(x1 - x0, 1) * max(y1 - y0, 1) / n), 1)
+            kept.append(
+                {
+                    "i": i,
+                    "tier": tier,
+                    "form": form_of(tier),
+                    "src": "scene",
+                    "px": float(r["px"]),
+                    "slot_px": px,
+                    "glyphs": n,
+                    "shape": r["shape"],
+                    "u": u,
+                    "wrong": vs,
+                    "clause": False,
+                    "captions": {"plain": [cap] + [cap.replace(u, v) for v in vs]},
+                    "cross": [c for c in once if c != u],
+                    "slot": k,
+                    "horizontal": horiz,
+                    "render": {
+                        "files": files,
+                        "slot_px": px,
+                        "font": Path(font).name,
+                        "n_fonts": len(fonts),
+                        "boxes": boxes,
+                        "rec": {
+                            "src": "scene",
+                            "layout": "scene",
+                            "text": text,
+                            "box": union,
+                        },
+                    },
+                }
+            )
+            got += 1
+        assert got == want, f"{tier}: {got} of {want} items ({dict(dropped)})"
+    return kept, dropped
+
+
 class _SlotGrad:
-    """A zero ``(B, D)`` tensor added to ``llm_adapter.embed``'s output at the
-    one position per sample that holds ``ext`` (after the pack and the rows'
-    ``ExtDelta``): its gradient is each sample's own gradient on that row,
-    from one backward over the batch (row units: × ``row_scale``)."""
+    """A zero ``(R, B, D)`` tensor added to ``llm_adapter.embed``'s output at
+    the one position per sample that holds each of the ``R`` rows ``exts``
+    (after the pack and the rows' ``ExtDelta``): its gradient is each
+    sample's own gradient on each row, from one backward over the batch (row
+    units: × ``row_scale``)."""
 
     def __init__(self, anima, device, dim):
         import torch
 
         self.torch = torch
-        self.ext = None
+        self.exts = None
         self.z = None
         self.ids = None
         embed = anima.llm_adapter.embed
@@ -735,10 +935,11 @@ class _SlotGrad:
         def post(module, args, output):
             if self.z is None or self.ids is None:
                 return None
-            mask = self.ids == self.ext
-            assert bool((mask.sum(1) == 1).all()), "the row is not once per caption"
             out = output.clone()
-            out[mask] = out[mask] + self.z.to(out.dtype)
+            for r, ext in enumerate(self.exts):
+                mask = self.ids == ext
+                assert bool((mask.sum(1) == 1).all()), "a row is not once per caption"
+                out[mask] = out[mask] + self.z[r].to(out.dtype)
             return out
 
         self.handles = [
@@ -749,7 +950,8 @@ class _SlotGrad:
 
 def run_render(args, plan_r: list, run_dir: Path) -> dict:
     """Pass 2: per item × σ, row u's gradient under the true caption on
-    render A and on each B_j — one batch of 1 + m latents, one ε."""
+    render A and on each B_j — one batch of 1 + m latents, one ε. A window's
+    ``cross`` rows are read from the same backward (``X``)."""
     import torch
 
     from common.models import dit_forward, encode_images, load_vae
@@ -780,15 +982,28 @@ def run_render(args, plan_r: list, run_dir: Path) -> dict:
     m1 = 1 + args.wrong
     G = torch.zeros(len(plan_r), len(sigmas), m1, D)
     L = torch.zeros(len(plan_r), len(sigmas), m1)
+    x_items = [it["i"] for it in plan_r if it.get("cross")]
+    x_at = {i: n for n, i in enumerate(x_items)}
+    n_cross = max((len(it.get("cross", ())) for it in plan_r), default=0)
+    X = torch.zeros(len(x_items), len(sigmas), n_cross, m1, D)
     checks = []
     t0 = time.time()
     for n, it in enumerate(plan_r):
-        r = dict(P.recs[it["i"]])
-        r["boxes"] = it["render"]["boxes"]  # A's cells, the one loss box for all
+        if it["src"] == "scene":
+            r = it["render"]["rec"]  # the union of the 1 + m ink boxes
+        else:
+            r = dict(P.recs[it["i"]])
+            r["boxes"] = it["render"]["boxes"]  # A's cells, the one loss box for all
         cap = it["captions"]["plain"][0]
-        hook.ext = T5_TABLE_SIZE + ext[it["u"]]
+        glyphs = [it["u"], *it.get("cross", ())]
+        hook.exts = [T5_TABLE_SIZE + ext[c] for c in glyphs]
         lat = lats[it["i"]].to(P.device)
-        bs = T.BOX_SHARE if (T.GRID_BOX and r["src"] == "grid") else 0.0
+        # train.train's rule: a scene item takes the box share, a grid under GRID_BOX
+        bs = (
+            T.BOX_SHARE
+            if r["src"] == "scene" or (T.GRID_BOX and r["src"] == "grid")
+            else 0.0
+        )
         for s_i, sigma in enumerate(sigmas):
             g = torch.Generator(device=P.device).manual_seed(
                 args.seed * 1_000_003 + it["i"] * 101 + s_i
@@ -804,7 +1019,9 @@ def run_render(args, plan_r: list, run_dir: Path) -> dict:
                 t_min=sigma,
                 t_max=sigma,
             )
-            hook.z = torch.zeros(m1, D, device=P.device, requires_grad=True)
+            hook.z = torch.zeros(
+                len(glyphs), m1, D, device=P.device, requires_grad=True
+            )
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 pred = dit_forward(P.anima, noisy, ts, P.cache, [cap] * m1, P.device)
             losses = [
@@ -821,10 +1038,13 @@ def run_render(args, plan_r: list, run_dir: Path) -> dict:
             ]
             gz, graw = torch.autograd.grad(sum(losses), [hook.z, P.raw])
             gz = gz.float() * P.rows.row_scale
-            if len(checks) < 20:
-                a, b = gz.sum(0), graw[P.row[it["u"]]].float()
-                checks.append(float((a - b).norm() / b.norm().clamp(min=1e-30)))
-            G[n, s_i] = gz.cpu()
+            if len(checks) < 20 or (len(glyphs) > 1 and len(checks) < 40):
+                for q, c in enumerate(glyphs):
+                    a, b = gz[q].sum(0), graw[P.row[c]].float()
+                    checks.append(float((a - b).norm() / b.norm().clamp(min=1e-30)))
+            G[n, s_i] = gz[0].cpu()
+            if len(glyphs) > 1:
+                X[x_at[it["i"]], s_i, : len(glyphs) - 1] = gz[1:].cpu()
             L[n, s_i] = torch.tensor([float(x) for x in losses])
             hook.z = None
         if (n + 1) % 10 == 0 or n + 1 == len(plan_r):
@@ -839,10 +1059,10 @@ def run_render(args, plan_r: list, run_dir: Path) -> dict:
         flush=True,
     )
     assert max(checks) < 1e-2, checks
-    torch.save(
-        {"G": G, "L": L, "items": [it["i"] for it in plan_r], "sigmas": sigmas},
-        run_dir / "grads_render.pt",
-    )
+    save = {"G": G, "L": L, "items": [it["i"] for it in plan_r], "sigmas": sigmas}
+    if x_items:
+        save.update(X=X, x_items=x_items)  # (item, σ, cross row, 1 + m, D)
+    torch.save(save, run_dir / "grads_render.pt")
     return {"render_items": len(plan_r), "slot_check_rel_max": max(checks)}
 
 
@@ -910,6 +1130,49 @@ def metrics_of(g, losses) -> dict:
     }
 
 
+def cross_of(it: dict, x, f_own: float) -> dict:
+    """A window's other rows under the same swap of slot k: ``x`` is
+    (cross row, 1 + m, D). Per row, f = 1 − cos between two wrong renders'
+    gradients (``metrics_of``'s ``f_glyph``, on a row whose own glyph did not
+    change) and ‖I‖ = ‖g‖·√f; means over the rows, and over the rows next to
+    slot k / further off."""
+    import torch.nn.functional as F
+
+    text, k = it["render"]["rec"]["text"], it["slot"]
+    fs, norms, dist = [], [], []
+    for q, c in enumerate(it["cross"]):
+        gw = x[q, 1:].double()
+        m = gw.shape[0]
+        cos = [
+            float(F.cosine_similarity(gw[a], gw[b], dim=0))
+            for a in range(m)
+            for b in range(a + 1, m)
+        ]
+        fs.append(1.0 - st.mean(cos))
+        norms.append(st.mean(float(v.norm()) for v in gw))
+        dist.append(abs(text.index(c) - k))
+    adj = [f for f, dd in zip(fs, dist) if dd == 1]
+    far = [f for f, dd in zip(fs, dist) if dd > 1]
+    return {
+        "f_cross": st.mean(fs),
+        "f_cross_adj": st.mean(adj) if adj else None,
+        "f_cross_far": st.mean(far) if far else None,
+        "g_cross": st.mean(norms),
+        "i_cross": st.mean(g * math.sqrt(max(0.0, f)) for g, f in zip(norms, fs)),
+        "own_minus_cross": f_own - st.mean(fs),
+    }
+
+
+CROSS = (
+    "f_cross",
+    "f_cross_adj",
+    "f_cross_far",
+    "g_cross",
+    "i_cross",
+    "own_minus_cross",
+)
+
+
 def _q(xs, p):
     xs = sorted(xs)
     if not xs:
@@ -939,11 +1202,18 @@ def analyze(run_dir: Path) -> dict:
         if not f.exists():
             continue
         d = torch.load(f)
+        x_at = {i: n for n, i in enumerate(d.get("x_items", ()))}
         for n, i in enumerate(d["items"]):
             it = by_i[i]
             spx = it["render"]["slot_px"] if mode == "render" else it["slot_px"]
             for s_i, sigma in enumerate(d["sigmas"]):
                 rec = metrics_of(d["G"][n, s_i], d["L"][n, s_i].tolist())
+                if i in x_at:
+                    rec.update(cross_of(it, d["X"][x_at[i], s_i], rec["f_glyph"]))
+                    rec["splits"] = [
+                        f"{it['tier']} · {'2–3' if it['glyphs'] <= 3 else '4–6'} glyphs",
+                        f"{it['tier']} · {'line' if it['horizontal'] else 'column'}",
+                    ]
                 rec.update(
                     mode=mode,
                     i=i,
@@ -998,6 +1268,16 @@ def cell(rs) -> dict:
         k = sum(r[key] > 0 for r in rs)
         out[f"{key}_pos"] = k
         out[f"{key}_p"] = sign_p(k, len(rs))
+    for key in CROSS:  # a window's other rows (pass 2, bubbleN)
+        xs = [r[key] for r in rs if r.get(key) is not None]
+        if xs:
+            out[key] = [_q(xs, 0.25), _q(xs, 0.5), _q(xs, 0.75)]
+            out[f"{key}_n"] = len(xs)
+    xs = [r["own_minus_cross"] for r in rs if r.get("own_minus_cross") is not None]
+    if xs:
+        k = sum(x > 0 for x in xs)
+        out["own_minus_cross_pos"] = k
+        out["own_minus_cross_p"] = sign_p(k, len(xs))
     return out
 
 
@@ -1006,6 +1286,8 @@ def summarize(per) -> dict:
     for r in per:
         groups[(r["mode"], "tier", r["tier"], r["sigma"])].append(r)
         groups[(r["mode"], "bin", f"{r['form']} {r['pxbin']}", r["sigma"])].append(r)
+        for label in r.get("splits", ()):
+            groups[(r["mode"], "split", label, r["sigma"])].append(r)
     out: dict = defaultdict(lambda: defaultdict(dict))
     for (mode, kind, key, sigma), rs in groups.items():
         out[f"{mode}/{kind}"].setdefault(key, {})[f"{sigma:g}"] = cell(rs)
@@ -1038,7 +1320,7 @@ def _tier_table(summ, per, mode, sigmas, fmt, key) -> list:
         "|---|---|---|" + "---|" * len(sigmas) + "---|",
     ]
     tab = summ[f"{mode}/tier"]
-    for tier in TIERS:
+    for tier in REPORT_TIERS:
         c = tab.get(tier)
         if not c:
             continue
@@ -1051,6 +1333,98 @@ def _tier_table(summ, per, mode, sigmas, fmt, key) -> list:
             + " | ".join(cells)
             + f" | {', '.join(f'{s:g}' for s in sep) or 'none'} |"
         )
+    return lines
+
+
+def _window_tables(summ, mode, sigmas) -> list:
+    """Pass 2 on windows: slot k's own row against the window's other rows,
+    and the own row by window length / orientation."""
+    tab = summ[f"{mode}/tier"]
+    head = ["| " + " | ".join(f"σ {s:g}" for s in sigmas) + " |"]
+    rule = "---|" * len(sigmas)
+    win = [
+        t for t in REPORT_TIERS if any("f_cross" in x for x in tab.get(t, {}).values())
+    ]
+    if not win:
+        return []
+
+    def opt(x, key, scale=1.0, fmt=".2f"):
+        return format(x[key][1] * scale, fmt) if key in x else "–"
+
+    def f_cross(x):
+        if "f_cross" not in x:
+            return "–"
+        mark = "" if x["own_minus_cross_p"] >= 0.01 else "*"
+        return (
+            f"{x['f_glyph'][1]:.2f} · {x['f_cross'][1]:.2f} "
+            f"({opt(x, 'f_cross_adj')} / {opt(x, 'f_cross_far')}) · "
+            f"{x['own_minus_cross_pos']}/{x['f_cross_n']}{mark}"
+        )
+
+    def i_cross(x):
+        if "f_cross" not in x:
+            return "–"
+        return (
+            f"{x['g_ident'][1] * 1e3:.1f} · {x['i_cross'][1] * 1e3:.1f} · "
+            f"{x['g_true'][1] * 1e3:.0f} · {x['g_cross'][1] * 1e3:.0f}"
+        )
+
+    lines = [
+        f"## {mode} — a window's other rows under the same swap",
+        "",
+        "Slot k's glyph is swapped in the image; `own` is slot k's row, `cross` "
+        "every other row of the window (its own glyph unchanged), read from "
+        "the same backward. Cell: f_own · f_cross (rows next to slot k / "
+        "further off) · items with f_own > f_cross (`*` = sign test p < 0.01).",
+        "",
+        "| tier " + head[0],
+        "|---|" + rule,
+    ]
+    for t in win:
+        c = tab[t]
+        lines.append(
+            f"| {t} | "
+            + " | ".join(f_cross(c.get(f"{s:g}", {})) for s in sigmas)
+            + " |"
+        )
+    lines += [
+        "",
+        "Cell: ‖I_own‖ · ‖I_cross‖ · ‖g_own‖ · ‖g_cross‖ (× 1e3, per row).",
+        "",
+        "| tier " + head[0],
+        "|---|" + rule,
+    ]
+    for t in win:
+        c = tab[t]
+        lines.append(
+            f"| {t} | "
+            + " | ".join(i_cross(c.get(f"{s:g}", {})) for s in sigmas)
+            + " |"
+        )
+    split = summ.get(f"{mode}/split", {})
+    if split:
+        lines += [
+            "",
+            f"## {mode} — windows by length and orientation",
+            "",
+            "Cell: f_own · f_cross · ‖I_own‖ × 1e3 (items).",
+            "",
+            "| tier · split " + head[0],
+            "|---|" + rule,
+        ]
+        for label in sorted(split):
+            c = split[label]
+            cells = []
+            for s in sigmas:
+                x = c.get(f"{s:g}")
+                cells.append(
+                    "–"
+                    if not x
+                    else f"{x['f_glyph'][1]:.2f} · {opt(x, 'f_cross')} · "
+                    f"{x['g_ident'][1] * 1e3:.1f} ({x['n']})"
+                )
+            lines.append(f"| {label} | " + " | ".join(cells) + " |")
+    lines.append("")
     return lines
 
 
@@ -1182,8 +1556,25 @@ def report(run_dir: Path, plan: dict, per: list, summ: dict) -> None:
                 + f" | {', '.join(f'{s:g}' for s in sep) or 'none'} |"
             )
         lines.append("")
+        lines += _window_tables(summ, mode, sigmas)
     (run_dir / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines), flush=True)
+
+
+def render_both(args, plan: list, recs: dict, out: Path) -> tuple:
+    """Pass 2's items: the grid / lone tiers of ``--render_tiers`` from the
+    pass-1 plan, the bubble tiers drawn by ``scene_render_plan``."""
+    scene = [t for t in SCENE_TIERS if t in args.render_tiers]
+    grid = [t for t in args.render_tiers if t not in SCENE_TIERS]
+    kept, dropped = (
+        render_plan(plan, recs, grid, args.seed, out) if grid else ([], Counter())
+    )
+    if scene:
+        k2, d2 = scene_render_plan(
+            recs, scene, args.items, args.window_items, args.wrong, args.seed, out
+        )
+        kept, dropped = kept + k2, dropped + d2
+    return kept, dropped
 
 
 def main():
@@ -1203,6 +1594,9 @@ def main():
         "--render", action="store_true", help="pass 2 (image swap) instead of pass 1"
     )
     p.add_argument("--render_tiers", nargs="+", default=list(RENDER_TIERS))
+    p.add_argument(
+        "--window_items", type=int, default=60, help="items per bubbleN tier (pass 2)"
+    )
     p.add_argument("--dry_run", action="store_true")
     p.add_argument("--analyze", type=Path, help="re-read a finished results dir (CPU)")
     args = p.parse_args()
@@ -1239,7 +1633,7 @@ def main():
             else None
         )
         if args.dry_run:
-            plan_r, dropped = render_plan(plan, recs, args.render_tiers, args.seed, out)
+            plan_r, dropped = render_both(args, plan, recs, out)
             print(
                 f"render: {len(plan_r)} items kept "
                 f"({dict(Counter(it['tier'] for it in plan_r))}), dropped "
@@ -1251,9 +1645,7 @@ def main():
         run_dir = make_run_dir(
             NAME, label=args.label, root=LINE / "experiments" / NAME / "results"
         )
-        plan_r, dropped = render_plan(
-            plan, recs, args.render_tiers, args.seed, run_dir / "renders"
-        )
+        plan_r, dropped = render_both(args, plan, recs, run_dir / "renders")
         print(
             f"render: {len(plan_r)} items kept "
             f"({dict(Counter(it['tier'] for it in plan_r))}), dropped {dict(dropped)}",

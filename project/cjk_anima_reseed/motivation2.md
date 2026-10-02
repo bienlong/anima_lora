@@ -266,10 +266,13 @@ Open after it (`band_size_2026_10_02.md` § Open):
 - Kanji at 18 px: every small-only read is hiragana.
 - Scene colour and lettering (§ 5) as cold variables, one at a time, only
   after the recipe's bands and sizes are fixed.
-- The band's lower edge and peak for small text are still a training read
-  (`reports/grad_identity_2026_10_02.md` prices the draws, not the run): the
-  same 15–28 px items at two low bands, e.g. the law's (0.3–0.5 / 0.5–0.7)
-  against windows on the identity peak (0.3–0.5 / 0.4–0.6; 44 px grid
-  0.5–0.7, one step under the law). Also open from that read: whether a
-  lone 1×1 should take the box share, and pass 2 on trained rows and on the
-  bubble tiers.
+- The band's lower edge and peak for small text, trained
+  (`reports/grad_bands_2026_10_03.md`): the `grid_lone recap` items rebanded
+  from the gradient read (`reports/grad_identity_2026_10_02.md`). With no
+  lower edge the arm reads under the law's bands (singles official 1 vs 12
+  of 64); with the lower edge at half the identity peak it ties them
+  (12 vs 12; words ≤ 1 edit 16 vs 14 of 72). The law's bands stand for
+  15–36 px. Still open from the gradient read: the 44 px tiers, which it
+  puts 0.1–0.15 under the law's 0.7–0.9; whether a lone 1×1 should take the
+  box share; pass 2 on trained rows (the bubble tiers are read: the same px
+  law, and a window pays every row for every slot).

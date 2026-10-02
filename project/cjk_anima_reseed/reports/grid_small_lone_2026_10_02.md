@@ -25,6 +25,15 @@ same prompts × seeds, on words and on singles.
   reads better than under its clause of record — `retrain_kana` most:
   words ≤ 1 edit 33 → 45, singles official 17 → 34. The training caption
   did not matter; the asking clause did (§ The plain read).
+- `grid_lone recap_h0` (10-03; `recap`'s items, every tier at σ from 0 up to
+  its identity half point, no lower edge): **under `recap`** on the plain
+  read — singles official 1 vs 12, contained 26 vs 44 of 64; words ≤ 2 edits
+  20 vs 35 of 72 (`grad_bands_2026_10_03.md`).
+- `grid_lone recap_hp` (10-03; the same upper edges, the lower edge where
+  the identity gradient is half its peak): **ties `recap`** — singles
+  official 12 vs 12, contained 40 vs 44; words ≤ 1 edit 16 vs 14, ≤ 2 edits
+  33 vs 35 — and reads over `recap_h0`. The bands read off the gradient buy
+  nothing over the law's; the lower edge is what `recap_h0` lacked.
 - The scene is kept: EN-reference cos equals the kana run's on words and is
   higher on singles. What is lost is the glyph, not the picture.
 
@@ -45,6 +54,8 @@ record.
 | `grid_small b7593` | 81 hiragana | 10 935 | one band 0.75–0.93 | `20261002-121029-24622c` (84.9 min) | `grid_small/results/20261002-1249-b7593` |
 | `grid_lone r0` | 81 hiragana + `ー` | 60 / row = 4 920 | per px | `20261002-143355-1c397b` (45.9 min) | `grid_lone/results/20261002-1433-r0` |
 | `grid_lone recap` | as `r0` | 4 920 | per px | `20261002-143355-beb03c` (44.0 min) | `grid_lone/results/20261002-1519-recap` |
+| `grid_lone recap_h0` | as `r0` | 4 920 | per tier: 0 – half point | `20261002-231259-a6db0c` (54.0 min, with both reads) | `grid_lone/results/20261002-2312-recap_h0` |
+| `grid_lone recap_hp` | as `r0` | 4 920 | per tier: ‖I‖ half peak – half point | `20261003-001816-dbca3d` (51.9 min, with both reads) | `grid_lone/results/20261003-0018-recap_hp` |
 
 ### Data
 
@@ -257,6 +268,8 @@ bands (`b7593` is measured at σ 0.75–0.93), only the move inside a run.
 | `grid_small b7593` | 0.185 → 0.160 (−13 %) | 0.104 → 0.104 | 243 | 1.28 |
 | `grid_lone r0` | 0.162 → 0.108 (−34 %) | 0.070 → 0.071 | 195 | 1.03 |
 | `grid_lone recap` | 0.162 → 0.112 (−31 %) | 0.070 → 0.071 | 197 | 1.04 |
+| `grid_lone recap_h0` | 0.136 → 0.118 (−13 %) | 0.094 → 0.098 | 183 | 0.96 |
+| `grid_lone recap_hp` | 0.155 → 0.108 (−30 %) | 0.072 → 0.073 | 196 | 1.03 |
 
 - `b7593`'s rows moved as far as `r0`'s (Δ norm 243 vs 240) while its in-box
   loss fell a third as much; it sat at ≈ 0.175 from step 1 000 to 2 500.
@@ -295,6 +308,13 @@ clause's language, and the clause's wording varies per item.
 its own. `grid_lone recap` is the only arm trained on it; a
 `grid_small` arm with the plain captions at 0.75–0.93 was started and
 stopped 8 min in, unread (its control, `b7593`, read 0).
+
+## The bands read off the gradient (`recap_h0`, `recap_hp`, 10-03)
+
+Two `reband` arms on `recap`'s items, bands from `grad_identity`'s pass 2:
+`grad_bands_2026_10_03.md` holds the bands, reads and pairs. `recap_h0`
+(0 – the identity half point, no lower edge) reads under `recap`;
+`recap_hp` (the lower edge at half the identity peak) ties it.
 
 ## Open
 

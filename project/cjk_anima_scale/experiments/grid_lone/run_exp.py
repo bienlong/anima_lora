@@ -37,6 +37,18 @@ Legs:
 - ``recap`` (CPU) → ``OUT/run1002_grid_lone/data_<tag>``: `grid_small`'s
   plain captions on every grid and lone item, the 1×1 with one bubble and no
   position header (``… no humans, speech bubble. Text reads as "ご".``);
+- ``reband`` (CPU) → ``OUT/run1002_grid_lone/data_<tag>``: ``data_recap``'s
+  records with each tier's band replaced by ``BANDS[<tag>]``, from
+  `reports/grad_identity_2026_10_02.md`. Same items, captions, latents and
+  TE cache; the arm against ``recap`` (the law's per-px bands) is the band
+  alone (user, 10-02 / 10-03):
+  ``recap_h0`` — σ from 0 up to the tier's identity half point (where the
+  glyph-dependent share f of a cold row's gradient is half its plateau), no
+  lower edge: read under ``recap`` (the draws below the identity peak are
+  draws the rows did not get);
+  ``recap_hp`` — the same upper edge, the lower edge where the identity
+  gradient's size ‖I‖ is half its peak on the low side (0.2, the lowest σ
+  read, where a 15–19 px tier's ‖I‖ is still over half its peak);
 - ``train`` (GPU) → ``OUT/experiments/grid_lone_cold_hira[_<tag>]``;
 - ``read`` (GPU): `grid_small`'s (the hiragana words `en` + singles `swap`
   against ``retrain_kana``'s reads of record);
@@ -52,6 +64,10 @@ Legs:
       --label r0 --legs data"
     … --label recap --legs recap train read --tag recap
     … --label plain --legs read_plain
+    # the half-point caps on the recap items, no lower edge
+    … --label recap_h0 --legs reband train read read_plain --tag recap_h0
+    # … with the lower edge at half the identity peak
+    … --label recap_hp --legs reband train read read_plain --tag recap_hp
 """
 
 from __future__ import annotations
@@ -83,6 +99,70 @@ STEPS_PER_ROW = 60
 LONE = "1x1:1"
 EXTRA_ROWS = "ー"  # the long-vowel mark, beside the hiragana
 PLAIN_CLAUSE = '{p}. Text reads as "{k}".'  # the recap's wording on a scene prompt
+# `reband`, by tag: the tier's band from grad_identity's pass 2. Upper edge =
+# f's half point (0.62 / 0.72 / 0.53 / 0.66 / 0.52 / 0.68 / 0.60); `recap_hp`'s
+# lower edge = ‖I‖ at half its peak, low side
+BANDS = {
+    "recap_h0": {
+        "grid_16": (0.0, 0.6),
+        "grid_29": (0.0, 0.7),
+        "lone_16": (0.0, 0.5),
+        "lone_28": (0.0, 0.65),
+        "bubbleN_18": (0.0, 0.5),
+        "bubbleN_34": (0.0, 0.7),
+        "bubble1_32": (0.0, 0.6),
+    },
+    "recap_hp": {
+        "grid_16": (0.2, 0.6),
+        "grid_29": (0.4, 0.7),
+        "lone_16": (0.2, 0.5),  # no ‖I‖ peak: grid_16's lower edge
+        "lone_28": (0.35, 0.65),
+        "bubbleN_18": (0.2, 0.5),
+        "bubbleN_34": (0.45, 0.7),
+        "bubble1_32": (0.35, 0.6),
+    },
+}
+
+
+def reband(src: Path, dst: Path, bands: dict) -> dict:
+    """``src``'s records with every tier's band set to ``bands[tier]``;
+    images, latents and the TE cache shared by symlink (captions unchanged)."""
+    import shutil
+    from collections import Counter
+
+    from cjk_scale.builder import tier_of
+
+    recs = [
+        json.loads(ln) for ln in (src / "train.jsonl").read_text("utf-8").splitlines()
+    ]
+    old = Counter((tier_of(r), tuple(r["band"])) for r in recs)
+    for r in recs:
+        r["band"] = list(bands[tier_of(r)])
+    new = Counter((tier_of(r), tuple(r["band"])) for r in recs)
+    dst.mkdir(parents=True, exist_ok=True)
+    (dst / "train.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in recs), encoding="utf-8"
+    )
+    for f in ("vocabs.json", "eval.json"):
+        shutil.copy2(src / f, dst / f)
+    bj = json.loads((src / "build.json").read_text("utf-8"))
+    note = {
+        "derived_from": str(src),
+        "tier_bands": {t: list(b) for t, b in bands.items()},
+    }
+    (dst / "build.json").write_text(
+        json.dumps(bj | note, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    for d in src.iterdir():
+        if d.is_dir() and (d.name.startswith("latents_") or d.name == "te_cache"):
+            link = dst / d.name
+            if not link.exists():
+                link.symlink_to(d.resolve())
+
+    def fmt(c):
+        return {f"{t} {a:g}-{b:g}": n for (t, (a, b)), n in sorted(c.items())}
+
+    return {"from": str(src), "items": len(recs), "old": fmt(old), "new": fmt(new)}
 
 
 def table(GS) -> tuple:
@@ -164,13 +244,17 @@ def main():
         "--legs",
         nargs="+",
         default=["data"],
-        choices=["data", "recap", "train", "read", "read_plain"],
+        choices=["data", "recap", "reband", "train", "read", "read_plain"],
     )
-    p.add_argument("--tag", default="", help="recap: suffix for the data dir and arm")
+    p.add_argument(
+        "--tag", default="", help="recap / reband: suffix for the data dir and arm"
+    )
     p.add_argument("--workers", type=int, default=None)
     p.add_argument("--dry_run", action="store_true")
     args = p.parse_args()
-    assert ("recap" in args.legs) == bool(args.tag), "recap takes --tag, alone"
+    assert bool({"recap", "reband"} & set(args.legs)) == bool(args.tag), (
+        "recap / reband take --tag, alone"
+    )
     GS = load_experiment("grid_small")
     rc, rows = run_config()
     tbl = table(GS)
@@ -196,6 +280,12 @@ def main():
     if "recap" in args.legs:
         metrics["derive"] = GS.derive(OUT / DATA_RUN / "data", data_dir, None, True)
         print(json.dumps(metrics["derive"], ensure_ascii=False, indent=1), flush=True)
+    if "reband" in args.legs:
+        assert args.tag in BANDS, f"reband: --tag is one of {sorted(BANDS)}"
+        metrics["reband"] = reband(
+            OUT / DATA_RUN / "data_recap", data_dir, BANDS[args.tag]
+        )
+        print(json.dumps(metrics["reband"], ensure_ascii=False, indent=1), flush=True)
     if "train" in args.legs:
         from cjk_scale import train as T
 
@@ -210,13 +300,20 @@ def main():
     if "read" in args.legs:
         metrics["read"] = GS.read(arm)
     if "read_plain" in args.legs:
-        metrics["read_plain"] = read_plain(
-            {
-                f"{ARM}_recap": OUT / "experiments" / f"{ARM}_recap",
-                ARM: OUT / "experiments" / ARM,
-                SRC_RUN: OUT / SRC_RUN,
+        arms = {
+            f"{ARM}_recap": OUT / "experiments" / f"{ARM}_recap",
+            ARM: OUT / "experiments" / ARM,
+            SRC_RUN: OUT / SRC_RUN,
+        }
+        if "reband" in args.legs:  # the reband arm first: its pairs lead
+            others = {
+                f"{ARM}_{t}": OUT / "experiments" / f"{ARM}_{t}"
+                for t in BANDS
+                if t != args.tag
+                and (OUT / "experiments" / f"{ARM}_{t}" / "trained.pt").exists()
             }
-        )
+            arms = {arm: OUT / "experiments" / arm} | arms | others
+        metrics["read_plain"] = read_plain(arms)
     write_result(
         run_dir,
         script=__file__,
