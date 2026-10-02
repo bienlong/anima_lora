@@ -386,6 +386,8 @@ STRINGS: dict[str, str] = {
     "new_variant_exists": "バリアント '{name}' は既に存在します。",
     "basic_section": "基本",
     "advanced_section": "詳細 (クリックして展開)",
+    "train_empty_dataset": "現在のブループリントの画像ディレクトリが空です：\n{dirs}\n\nこのままでは 'No data found' で中断します。先に対応する前処理を実行するか、Preprocess タブの「基本ブループリントに戻す」で通常データセットへ戻してください。",
+    "train_partial_empty_dataset": '一部のディレクトリが空です：\n{dirs}\n\nそれでも学習しますか？（空ティアはスキップされます。マルチ解像度前処理が未実行の可能性があります。）',
     "multires_section_title": "マルチ解像度学習（多重分辨率）",
     "multires_section_hint": "有効にすると、選択した各解像度で全画像を個別に前処理・学習します。各解像度の学習時間の割合 = 重み（num_repeats）。",
     "multires_tier_hint": "学習する解像度ティアを選択。各画像は選択中の各ティアで1回ずつ学習されます。",

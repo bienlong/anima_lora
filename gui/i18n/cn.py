@@ -366,6 +366,8 @@ STRINGS: dict[str, str] = {
     "new_variant_exists": "变体 '{name}' 已存在。",
     "basic_section": "基本",
     "advanced_section": "高级 (点击展开)",
+    "train_empty_dataset": "当前蓝图指向的图片目录是空的：\n{dirs}\n\n直接训练会报 'No data found'。请先运行对应的预处理（像 *_t512 这类分档目录用 Preprocess 页的“多分辨率预处理”按钮），或者点“恢复基础蓝图”回到普通数据集。",
+    "train_partial_empty_dataset": '部分蓝图目录是空的：\n{dirs}\n\n仍要继续训练吗？（空档位会被跳过——这通常说明多分辨率预处理还没跑。）',
     "multires_section_title": "多分辨率训练（多重分辨率）",
     "multires_section_hint": "开启后：所选的每个分辨率都会对每张图各预处理并各训练一遍；每档训练时长占比 = 它的权重（num_repeats）。",
     "multires_tier_hint": "勾选要训练的分辨率档位，每张图会在每个勾选的档位各训一遍。",

@@ -1259,6 +1259,8 @@ class ConfigTab(DaemonJobMixin, DirtyTrackingMixin, QWidget):
         variant = self._current_variant()
         merged, _ = merged_gui_variant_preset(variant, self._current_preset())
         merged = self._gui_scoped_paths(merged)
+        if not self._warn_empty_dataset(merged):
+            return
         if not confirm_resumable_checkpoint(self, merged):
             return
 
@@ -1334,12 +1336,69 @@ class ConfigTab(DaemonJobMixin, DirtyTrackingMixin, QWidget):
         # until the Queue tab's "Start Queue", and attaching now would show a
         # perpetual "starting…" spinner. Watched and started from the Queue tab.
 
+    def _warn_empty_dataset(self, merged) -> bool:
+        """True = OK to submit. Guards the 'No data found' trap: when every
+        ``[[datasets.subsets]]`` image_dir in the active blueprint is missing
+        or holds no images, training would burn a preprocess pass (or worse,
+        chain straight into 0-image training) — block with an actionable
+        message instead. Partial-empty blueprints warn but allow."""
+        datasets = merged.get("datasets")
+        if not isinstance(datasets, list):
+            return True
+        scalars = {
+            k: str(v)
+            for k, v in merged.items()
+            if isinstance(v, (str, int, float))
+        }
+        empty, total = [], 0
+        for ds in datasets:
+            if not isinstance(ds, dict):
+                continue
+            for sub in ds.get("subsets") or []:
+                d = str((sub or {}).get("image_dir") or "")
+                if not d:
+                    continue
+                total += 1
+                expanded = d.format(**scalars) if "{" in d else d
+                p = Path(expanded)
+                if not p.is_absolute():
+                    p = ROOT / expanded
+                n = (
+                    sum(
+                        1
+                        for f in p.rglob("*")
+                        if f.suffix.lower()
+                        in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+                    )
+                    if p.is_dir()
+                    else 0
+                )
+                if n == 0:
+                    empty.append(expanded)
+        if not empty:
+            return True
+        if total and len(empty) == total:
+            QMessageBox.warning(
+                self,
+                t("error"),
+                t("train_empty_dataset").format(dirs=chr(10).join(empty[:5])),
+            )
+            return False
+        reply = QMessageBox.question(
+            self,
+            t("error"),
+            t("train_partial_empty_dataset").format(dirs=chr(10).join(empty[:5])),
+        )
+        return reply == QMessageBox.Yes
+
     def _launch_training(self, variant: str) -> None:
         """Submit a training job to the local daemon (spawns ``accelerate
         launch … train.py`` detached, so training survives the GUI closing).
         The caller owns all pre-launch confirmations."""
         merged, _ = merged_gui_variant_preset(variant, self._current_preset())
         merged = self._gui_scoped_paths(merged)
+        if not self._warn_empty_dataset(merged):
+            return
         logging_dir = merged.get("logging_dir")
         if logging_dir and self._tb_panel is not None:
             self._tb_panel.set_log_dir(logging_dir)

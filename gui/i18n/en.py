@@ -440,6 +440,8 @@ STRINGS: dict[str, str] = {
     "new_variant_exists": "Variant '{name}' already exists.",
     "basic_section": "Basic",
     "advanced_section": "Advanced (click to expand)",
+    "train_empty_dataset": "The active blueprint points at empty/missing image dirs:\n{dirs}\n\nTraining would abort with 'No data found'. Run the matching preprocess first (use the Multires button for tiered dirs like *_t512), or click 'Restore base blueprint' on the Preprocess tab.",
+    "train_partial_empty_dataset": "Some blueprint dirs are empty:\n{dirs}\n\nTrain anyway? (Empty tiers will be skipped by the trainer, but this usually means the multires preprocess hasn't run yet.)",
     "multires_section_title": "Multi-resolution training (多重分辨率)",
     "multires_section_hint": "Enable to preprocess AND train every image at each selected resolution. Each tier's share of training time = its weight (num_repeats).",
     "multires_tier_hint": "Select every resolution tier to train on. Each selected image is trained once per tier.",

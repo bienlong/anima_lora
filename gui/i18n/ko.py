@@ -425,6 +425,8 @@ STRINGS: dict[str, str] = {
     "new_variant_exists": "Variant '{name}'이(가) 이미 존재합니다.",
     "basic_section": "기본 설정",
     "advanced_section": "고급 설정 (클릭하여 펼치기)",
+    "train_empty_dataset": "현재 블루프린트의 이미지 디렉터리가 비어 있습니다:\n{dirs}\n\n그대로 실행하면 'No data found'로 중단됩니다. 해당 전처리를 먼저 실행하거나 Preprocess 탭의 '기본 블루프린트로 복원'으로 돌아가세요.",
+    "train_partial_empty_dataset": '일부 디렉터리가 비어 있습니다:\n{dirs}\n\n그래도 학습할까요? (빈 티어는 건너뛰어집니다. 멀티 해상도 전처리가 아직 안 됐을 수 있습니다.)',
     "multires_section_title": "멀티 해상도 학습 (多重分辨率)",
     "multires_section_hint": "활성화하면 선택한 각 해상도에서 모든 이미지를 개별 전처리·학습합니다. 각 티어의 학습 시간 비율 = 가중치(num_repeats).",
     "multires_tier_hint": "학습할 해상도 티어를 선택하세요. 각 이미지는 선택된 각 티어로 한 번씩 학습됩니다.",
