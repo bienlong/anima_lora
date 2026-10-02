@@ -1,0 +1,20 @@
+[[datasets]]
+batch_size = 1
+[[datasets.subsets]]
+image_dir = "post_image_dataset/resized_t512"
+cache_dir = "post_image_dataset/lora_t512"
+num_repeats = 1
+
+[[datasets.subsets]]
+image_dir = "post_image_dataset/resized_t768"
+cache_dir = "post_image_dataset/lora_t768"
+num_repeats = 1
+
+[[datasets.subsets]]
+image_dir = "post_image_dataset/resized_t1024"
+cache_dir = "post_image_dataset/lora_t1024"
+num_repeats = 3
+
+
+[general]
+batch_size = 1

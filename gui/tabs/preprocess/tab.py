@@ -27,6 +27,7 @@ import yaml
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QFrame,
     QApplication,
     QComboBox,
     QLabel,
@@ -66,6 +67,7 @@ from gui.progress import TQDM_RE, TqdmProgressTracker, make_progress_bar
 from gui.tabs.config_tab import ConfigTab, SplitButtonStyle
 from gui.tabs.preprocess.captions import AutotagSection, CaptionEditingSection
 from gui.tabs.preprocess.multires_section import MultiResSection
+from gui.tabs.preprocess.quickstart import QuickStartCard, pipeline_status
 from gui.tabs.preprocess.image_prep import ImagePrepSection
 from gui.tabs.preprocess.knobs import (
     DEFAULT_MASK_PATH_PATTERN,
@@ -316,6 +318,9 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         help_cb = self._show_field_help
 
         self.image_section = ImagePrepSection(help_cb, pp_cfg=pp_cfg)
+        # 快速开始卡片：四步流水线状态 + 一键补齐（主流程可视化，主次感）。
+        self.quickstart = QuickStartCard()
+        self.quickstart.run_all_requested.connect(self._run_quickstart)
         self.text_section = TextCachingSection(help_cb, settings=settings)
         # Auto-tagging runs first and is the only stage that can create a caption
         # from nothing; the caption-editing box below edits text that already exists.
@@ -350,12 +355,32 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         host = QWidget()
         layout = QVBoxLayout(host)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.quickstart)
+        line_sep = QLabel()
+        line_sep.setFrameShape(QFrame.HLine)
+        line_sep.setStyleSheet(f"color:{tok('panel')};")
+        layout.addWidget(line_sep)
         for section in self.sections:
             layout.addWidget(section)
         layout.addWidget(self.multires_section)
         layout.addStretch()
         scroll.setWidget(host)
+        self._refresh_quickstart()
         return scroll
+
+    def _refresh_quickstart(self) -> None:
+        """Recompute the four-step pipeline status from the current fields."""
+        try:
+            src = self.source_dir_edit.text().strip() or str(
+                _load_preprocess_toml().get("source_image_dir") or "image_dataset"
+            )
+            p = Path(src)
+            if not p.is_absolute():
+                p = ROOT / p
+            cache = default_lora_cache_dir()
+            self.quickstart.refresh(pipeline_status(p, cache))
+        except Exception:
+            pass
 
     def __getattr__(self, name: str):
         # Legacy ``tab.<widget>`` access → the owning section's widget (see
@@ -918,6 +943,18 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
             config_snapshot=snapshot,
             attach=not queue,
         )
+
+    def _run_quickstart(self) -> None:
+        """一键补齐：确保勾选自动打标（缺字幕时）并提交完整预处理链。"""
+        try:
+            status = self.quickstart._status
+        except AttributeError:
+            return
+        if status.get("missing_captions"):
+            self.caption_autotag_chk.setChecked(True)
+        if self._dirty:
+            self._save_preset(silent=True)
+        self._run_te()
 
     def _multires_selection_or_warn(self):
         from library.preprocess.multires import parse_tiers
