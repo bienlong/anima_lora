@@ -13,6 +13,13 @@
 # save the standard lora_down/up/alpha keys plus the magnitude vector as
 # ``<name>.dora_scale`` — the key ComfyUI's native DoRA path consumes, so the
 # saved file loads in stock ComfyUI without a converter.
+#
+# SPEED REALITY (measured, RTX 5060 Ti, 2.9B DiT, rank 8): plain LoRA
+# ~1.5 s/step; this DoRA ~30-40 s/step. The per-module full-weight norm
+# (out×in reduction + checkpoint recompute ×280 modules) is inherent to
+# eager DoRA — closing the gap needs fused kernels (LyCORIS triton route).
+# Use plain LoRA for day-to-day runs; DoRA when convergence quality is
+# worth an overnight run.
 
 import logging
 from typing import Dict
@@ -80,44 +87,77 @@ class DoRALoRAModule(LoRAModule):
 
     # -- weight math --------------------------------------------------------
 
-    def _dora_delta_fn(self, up_w: torch.Tensor, down_w: torch.Tensor) -> torch.Tensor:
-        """``W' − W0`` in fp32 from the (graph-carrying) up/down weights.
+    def _norm_scale_fn(self, up_w: torch.Tensor, down_w: torch.Tensor) -> torch.Tensor:
+        """Row-wise ``s = m / ‖W0 + scale·(up@down)‖`` → (out, 1).
 
-        W' = m ⊙ V / ‖V‖_row with V = W0 + scale·(up @ down); W0 and m are
-        frozen buffers/weights closed over, so the checkpoint only needs to
-        save the two rank matrices, not the (out × in) intermediates.
+        Runs in the model dtype (bf16 on GPU) with an fp32-accumulated norm —
+        LyCORIS-style. The fp32 casts of the full W0 this replaces cost a
+        16MB allocation per module per step (280 modules → multi-GB of pure
+        cast traffic per step) and dominated the whole step time.
         """
-        W0 = self.org_module_ref[0].weight.to(torch.float)
-        V = W0 + self.scale * (up_w.to(torch.float) @ down_w.to(torch.float))
-        norms = V.norm(p=2, dim=1, keepdim=True).clamp_min(1e-12)
-        W_prime = (self.dora_scale.to(torch.float).unsqueeze(1) / norms) * V
-        return W_prime - W0
+        W0 = self.org_module_ref[0].weight
+        V = W0 + self.scale * (up_w @ down_w)
+        norms = V.norm(p=2, dim=1, keepdim=True, dtype=torch.float32).clamp_min(1e-12)
+        return self.dora_scale.to(V.dtype).unsqueeze(1) / norms
 
-    def _dora_delta(self, *, grad: bool) -> torch.Tensor:
+    def _norm_scale(self, *, grad: bool) -> torch.Tensor:
         up_w = self.lora_up.weight if grad else self.lora_up.weight.detach()
         down_w = self.lora_down.weight if grad else self.lora_down.weight.detach()
         if grad and torch.is_grad_enabled():
+            # Checkpoint the norm: backward recomputes the rank-r GEMM + norm
+            # instead of retaining the (out × in) V intermediate. Only the
+            # small (out, 1) result rides the graph — "显存略增" kept honest.
             return torch.utils.checkpoint.checkpoint(
-                self._dora_delta_fn, up_w, down_w, use_reentrant=False
+                self._norm_scale_fn, up_w, down_w, use_reentrant=False
             )
-        return self._dora_delta_fn(up_w, down_w)
+        return self._norm_scale_fn(up_w, down_w)
 
     def get_weight(self, multiplier=None):
         """Return the DoRA delta (W' − W0) matching org_module.weight shape.
 
-        merge semantics: baking this delta into the base weight reproduces
+        Merge semantics: baking this delta into the base weight reproduces
         W' exactly (W0 + delta == W'), matching pre_calculation's add.
         """
         if multiplier is None:
             multiplier = self.multiplier
-        return self._dora_delta(grad=False) * multiplier
+        with torch.no_grad():
+            W0 = self.org_module_ref[0].weight.to(torch.float)
+            V = W0 + self.scale * (
+                self.lora_up.weight.to(torch.float)
+                @ self.lora_down.weight.to(torch.float)
+            )
+            norms = V.norm(p=2, dim=1, keepdim=True).clamp_min(1e-12)
+            W_prime = (self.dora_scale.to(torch.float).unsqueeze(1) / norms) * V
+            return (W_prime - W0) * multiplier
 
     # -- forward ------------------------------------------------------------
 
+    def _activation_delta(self, x, org_forwarded, work, *, grad: bool):
+        """DoRA output delta via the activation-side identity (no full delta
+        weight, no second full GEMM):
+
+            W'·x = s⊙(W0x) + s⊙scale·B(Ax)
+                 = org(x) + (s−1)⊙org(x) + s⊙lora(x)
+
+        ``org(x)`` is the already-computed frozen path — the only new compute
+        vs plain LoRA is the small (out, 1) norm scale and elementwise multiplies.
+        """
+        s = self._norm_scale(grad=grad).squeeze(-1).to(work)
+        x_lora = self._rebalance(x.to(work))
+        lx = self._down(x_lora, work)
+        lx = self._gate(lx, work)
+        if self.dropout is not None:
+            lx = torch.nn.functional.dropout(lx, p=self.dropout)
+        lx = self._up(lx.to(work), work)
+        lora_out = lx * self.scale
+        return (s - 1.0) * org_forwarded.to(work) + s * lora_out
+
     def _eval_delta(self, x, org_forwarded):
-        return self.multiplier * torch.nn.functional.linear(
-            self._rebalance(x), self._dora_delta(grad=False)
-        )
+        work = org_forwarded.dtype
+        with torch.no_grad():
+            return self.multiplier * self._activation_delta(
+                x, org_forwarded, work, grad=False
+            )
 
     def forward(self, x):
         if not self.enabled or getattr(self, "_fused", False):
@@ -134,11 +174,8 @@ class DoRALoRAModule(LoRAModule):
             return org_forwarded
 
         work = org_forwarded.dtype
-        delta = self._dora_delta(grad=True).to(work)
-        x_lora = self._rebalance(x.to(work))
-        return org_forwarded + self.multiplier * torch.nn.functional.linear(
-            x_lora, delta
-        ).to(org_forwarded.dtype)
+        delta_out = self._activation_delta(x, org_forwarded, work, grad=True)
+        return org_forwarded + self.multiplier * delta_out.to(org_forwarded.dtype)
 
     # -- merge --------------------------------------------------------------
 
