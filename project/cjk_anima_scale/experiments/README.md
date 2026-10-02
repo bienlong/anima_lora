@@ -207,3 +207,11 @@ table is `../README.md` § Item pools, and `builder.tier_of` reads both.
   record `recap_b7593` (every item at 0.75–0.93), trained and read 10-02;
   the read beside `grid_small` / `grid_lone` is
   `../../cjk_anima_reseed/reports/grid_small_lone_2026_10_02.md`.
+- `grad_identity/` — the band law on the training gradient, no training
+  (`conflict`'s plumbing): the grid_44 items, the 81 hiragana rows cold at
+  the pack rows, σ swept 0.2–0.95 with one ε per item × σ. Pass 1 swaps the
+  caption's slot glyph (true row vs other rows — null: different rows'
+  gradients are near-orthogonal at every σ); pass 2 (`--render`) re-draws
+  the item with the slot's glyph swapped and reads one row's gradient on
+  both — f = 1 − cos is the glyph-dependent share. `--analyze <dir>` re-reads
+  a results dir on CPU. Reads 10-02: `../reports/grad_identity_2026_10_02.md`.

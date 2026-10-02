@@ -24,7 +24,14 @@ The large glyphs in the seed's data were for identity.
 2. **A row is one vector at every σ.** The band decides what gradient a row
    sees, not where it acts. An item trained above where its glyphs resolve
    teaches its layout alone, and that layout overrides every caption the row
-   appears in (§ 2). Confirmed three times on warm arms and once cold.
+   appears in (§ 2). Confirmed three times on warm arms and once cold, and
+   measured on the gradient itself (`reports/grad_identity_2026_10_02.md`):
+   at 0.75–0.93 a 15–28 px item's gradient on a cold row is ≥ 90 % the same
+   whichever glyph is drawn. The glyph-dependent share falls with σ, earlier
+   the smaller the glyph, and its half point is the EN ceiling's upper edge
+   for that px; the identity gradient peaks at σ 0.4 / 0.5 / 0.6 for
+   15 / 28 / 44 px, and below the peak it is exposure, not identity, that
+   runs out.
 3. **Where identity is written depends on rendered size.** Layout and slot
    count at σ ≥ 0.9; identity at 0.85–0.7 for large glyphs, below 0.8 for the
    seed's small JA; nothing moves below 0.5 (§ 1).
@@ -128,6 +135,17 @@ What follows, and what read it:
   the canvases' bubbles (white blobs at σ 1.0 / 0.95) and no string
   (≤ 1 edit 7 / 184; strokes only form at σ ≤ 0.5). At its own band
   (0.6–0.85) the same items keep the banner and read 18.
+- **The gradient, no training** (`reports/grad_identity_2026_10_02.md`; the
+  grid_44 items, the 81 hiragana rows cold at the pack rows): with the row
+  and caption fixed and the glyph drawn in its slot swapped, the share of
+  the row's gradient that depends on the glyph is 0.31 / 0.32 / 0.36 at the
+  top of the law's band for 15 / 28 / 44 px grid cells, 0.09 / 0.19 / 0.36 at
+  σ 0.7, and ≤ 0.16 everywhere in 0.75–0.93 for 15–28 px. Its half point
+  (0.62 / 0.72 / 0.76) is the EN ceiling's upper edge (0.6 / 0.7 / 0.8); the
+  identity gradient's size peaks at 0.4 / 0.5 / 0.6. Below the peak the
+  share holds and the gradient collapses (50× at σ 0.2 for 44 px). A lone
+  1×1 under the plain canvas loss gets 3–10× less identity per draw than a
+  grid cell of the same px. Step 0 only — necessary, not sufficient.
 
 ## 3. The seed's data, measured against the law
 
@@ -248,3 +266,10 @@ Open after it (`band_size_2026_10_02.md` § Open):
 - Kanji at 18 px: every small-only read is hiragana.
 - Scene colour and lettering (§ 5) as cold variables, one at a time, only
   after the recipe's bands and sizes are fixed.
+- The band's lower edge and peak for small text are still a training read
+  (`reports/grad_identity_2026_10_02.md` prices the draws, not the run): the
+  same 15–28 px items at two low bands, e.g. the law's (0.3–0.5 / 0.5–0.7)
+  against windows on the identity peak (0.3–0.5 / 0.4–0.6; 44 px grid
+  0.5–0.7, one step under the law). Also open from that read: whether a
+  lone 1×1 should take the box share, and pass 2 on trained rows and on the
+  bubble tiers.
