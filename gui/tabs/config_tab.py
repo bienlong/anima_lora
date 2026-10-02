@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import re
 import sys
 from pathlib import Path
@@ -1232,6 +1233,12 @@ class ConfigTab(DaemonJobMixin, DirtyTrackingMixin, QWidget):
         )
         if decision is False:
             return
+        if decision is True and not self._dataset_cache_complete(merged):
+            # PARTIAL cache (e.g. 5 of 121 images) used to fall through to
+            # training and die on 'Latent cache is incomplete'. Treat it as
+            # missing: the auto-chain preprocess tops the cache up first —
+            # Train becomes self-healing instead of a manual detour.
+            decision = None
 
         # Resume prompt up-front for both paths: the daemon owns the
         # preprocess->train chain and can't pause to ask later (GUI may be
@@ -1390,6 +1397,55 @@ class ConfigTab(DaemonJobMixin, DirtyTrackingMixin, QWidget):
             t("train_partial_empty_dataset").format(dirs=chr(10).join(empty[:5])),
         )
         return reply == QMessageBox.Yes
+
+    def _dataset_cache_complete(self, merged) -> bool:
+        """True when every resized image has VAE + TE caches (or there are no
+        images yet, which the empty-dataset guard owns). Turns the 'Latent
+        cache is incomplete' dead-end into an auto-preprocess chain: a PARTIAL
+        cache (5 of 121 images, say) now behaves like a missing one — Train
+        just tops the cache up first, no manual preprocess detour."""
+        imgs = merged.get("datasets")
+        if not isinstance(imgs, list):
+            return True
+        scalars = {
+            k: str(v) for k, v in merged.items() if isinstance(v, (str, int, float))
+        }
+
+        def _expand(raw: str) -> Path:
+            expanded = raw.format(**scalars) if "{" in raw else raw
+            p = Path(expanded)
+            return p if p.is_absolute() else ROOT / expanded
+
+        n_imgs = 0
+        for ds in imgs:
+            if isinstance(ds, dict):
+                for sub in ds.get("subsets") or []:
+                    d = str((sub or {}).get("image_dir") or "")
+                    if d:
+                        p = _expand(d)
+                        n_imgs += sum(
+                            1
+                            for f in p.rglob("*")
+                            if f.suffix.lower()
+                            in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+                        )
+        cache_dir = _expand(str(merged.get("lora_cache_dir") or "post_image_dataset/lora"))
+        n_npz = sum(1 for f in cache_dir.rglob("*.npz")) if cache_dir.is_dir() else 0
+        n_te = (
+            sum(1 for f in cache_dir.rglob("*_anima_te.safetensors"))
+            if cache_dir.is_dir()
+            else 0
+        )
+        if n_imgs == 0:
+            return True
+        complete = n_npz >= n_imgs and n_te >= n_imgs
+        if not complete:
+            logging.getLogger(__name__).info(
+                "cache partial: VAE %s/%s, TE %s/%s — chaining a preprocess "
+                "pass before training",
+                n_npz, n_imgs, n_te, n_imgs,
+            )
+        return complete
 
     def _launch_training(self, variant: str) -> None:
         """Submit a training job to the local daemon (spawns ``accelerate
