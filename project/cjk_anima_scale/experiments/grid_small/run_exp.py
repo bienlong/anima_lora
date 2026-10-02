@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """grid_small — the hiragana rows cold on small glyphs only, grids the larger share
 
-The seed's lone tier is large (`b0709`: bubble singles ≈ 52 px, grid cells
-52–232 px at σ 0.7–0.9), drawn large for identity. `p1_cold` (36 hiragana,
+The seed's lone tiers are large (`bubble1_52`, `grid_82`, `lone_190`, at
+σ 0.7–0.9), drawn large for identity. `p1_cold` (36 hiragana,
 cold, in-word items at 0.3–0.7 only) says identity does not need it: words
 ≤ 1 edit 65 / 128 with no large glyph (retrain_experiments § 4). This arm
 asks it of grids: the 81 hiragana rows cold, **no lone glyph above 40 px**
@@ -10,12 +10,16 @@ asks it of grids: the 81 hiragana rows cold, **no lone glyph above 40 px**
 replaced by multi-cell grids of small glyphs at the band law's bands for
 their px.
 
-| group | σ | share | tiers |
+| tier | σ | share | |
 |---|---|---|---|
-| `g0507` | 0.5–0.7 | 0.45 | `grid_single` 2×2 – 3×3, glyph 28–42 font px |
-| `g0305` | 0.3–0.5 | 0.45 | `grid_single` 2×2 – 3×3, glyph 14–26 font px |
-| `b0507` | 0.5–0.7 | 0.3 | `builder.TABLE`'s: `scene_window` 0.7, `scene_single_small` 0.3 |
-| `b0305` | 0.3–0.5 | 0.3 | `builder.TABLE`'s: `scene_window` |
+| `grid_29` | 0.5–0.7 | 0.45 | `grid` 2×2 – 3×3, glyph 28–42 font px |
+| `grid_16` | 0.3–0.5 | 0.45 | `grid` 2×2 – 3×3, glyph 14–26 font px |
+| `bubbleN_34` + `bubble1_32` | 0.5–0.7 | 0.3 | `builder.TABLE`'s, 0.7 : 0.3 |
+| `bubbleN_18` | 0.3–0.5 | 0.3 | `builder.TABLE`'s |
+
+(The data dir of record was built before the tiers were named by px,
+2026-10-02: its records say `g0507` / `g0305` / `b0507` / `b0305` and
+`grid_single` / `scene_window` / `scene_single_small` — `builder.tier_of`.)
 
 Σ shares 1.5 as `builder.TABLE`'s single kind, so the items (≈ 8 100) and
 the budget (135 / row = 10 935 steps) are the kana run's per row; grids are
@@ -90,14 +94,13 @@ CELL_JITTER = 0.08  # the glyph at its cell's centre ± this share of the cell
 
 
 def table() -> tuple:
-    from cjk_scale.builder import TABLE, Group, Tier
+    from cjk_scale.builder import Group, Tier, tiers
 
-    words = {g.name: g for g in TABLE if g.kind == "single"}
-
-    def grid(px: list) -> tuple:
+    def grid(name: str, px: list) -> tuple:
         return (
             Tier(
-                "grid_single",
+                name,
+                "grid",
                 1.0,
                 {
                     "grids": GRIDS,
@@ -111,10 +114,10 @@ def table() -> tuple:
         )
 
     return (
-        Group("g0507", "single", (0.5, 0.7), 0.45, grid([28, 42])),
-        Group("g0305", "single", (0.3, 0.5), 0.45, grid([14, 26])),
-        Group("b0507", "single", (0.5, 0.7), 0.3, words["b0507"].tiers),
-        Group("b0305", "single", (0.3, 0.5), 0.3, words["b0305"].tiers),
+        Group("single", (0.5, 0.7), 0.45, grid("grid_29", [28, 42])),
+        Group("single", (0.3, 0.5), 0.45, grid("grid_16", [14, 26])),
+        Group("single", (0.5, 0.7), 0.3, tiers("bubbleN_34", "bubble1_32")),
+        Group("single", (0.3, 0.5), 0.3, tiers("bubbleN_18")),
     )
 
 
@@ -143,7 +146,7 @@ def data(rc, hira: list, workers: int | None, tbl: tuple | None = None) -> dict:
     assert max(r["px"] for r in recs) <= 64, max(r["px"] for r in recs)
     by: dict = {}
     for r in recs:
-        by.setdefault(f"{r['group']}/{r['recipe']}", []).append(r["px"])
+        by.setdefault(r["tier"], []).append(r["px"])
     return {
         "items": len(recs),
         "rows_drawn": len(drawn),
@@ -181,13 +184,15 @@ def derive(src: Path, dst: Path, band: tuple | None, recap: bool) -> dict:
     """``src``'s records at one band (``band``) and / or with the grid
     captions rewritten plain (``recap``); images and latents shared by
     symlink, the TE cache too unless the captions changed."""
+    from cjk_scale.builder import tier_of
+
     recs = [
         json.loads(ln) for ln in (src / "train.jsonl").read_text("utf-8").splitlines()
     ]
     out: dict = {"from": str(src), "items": len(recs)}
     note: dict = {"derived_from": str(src)}
     if band:
-        old = Counter((r["group"], tuple(r["band"])) for r in recs)
+        old = Counter((tier_of(r), tuple(r["band"])) for r in recs)
         for r in recs:
             r["band"] = list(band)
         out["old_bands"] = {f"{g} {a}-{b}": n for (g, (a, b)), n in sorted(old.items())}
@@ -195,7 +200,8 @@ def derive(src: Path, dst: Path, band: tuple | None, recap: bool) -> dict:
     if recap:
         rng = random.Random(0)
         for r in recs:
-            if r["recipe"] == "grid_single":  # the grids and the 1×1 (grid_lone)
+            # the grids and the 1×1 (grid_lone); `grid_single` in the data of record
+            if r["recipe"] in ("grid", "grid_single"):
                 r["caption"], r["clause"] = plain_caption(r, rng)
         clauses = Counter(
             f"{'bubble' if r['bubble'] else 'flat'}/{r['clause']}"
@@ -265,7 +271,7 @@ def main():
     arm = ARM + (f"_{args.tag}" if args.tag else "")
     data_dir = OUT / DATA_RUN / ("data" + (f"_{args.tag}" if args.tag else ""))
     steps = STEPS_PER_ROW * len(hira)
-    shares = {g.name: g.share for g in table()}
+    shares = {g.label: g.share for g in table()}
     print(
         f"{arm}: {len(hira)} hiragana rows cold × {STEPS_PER_ROW} = {steps} steps on "
         f"{SEED_ROWS_0921}; groups {shares} (Σ {sum(shares.values()):g}); data "

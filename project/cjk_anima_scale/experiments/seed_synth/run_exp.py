@@ -181,7 +181,7 @@ def word_pool(lens: list) -> tuple[dict, dict]:
     for ln in (OUT / WORD_RUN / "data" / "train.jsonl").read_text("utf-8").splitlines():
         if ln:
             r = json.loads(ln)
-            if r["recipe"] == "scene_window":
+            if r["recipe"] in ("bubbleN", "scene_window"):  # its name of record
                 texts.add(r["text"])
     why, pool = Counter(), {n: [] for n in lens}
     for t in sorted(texts):

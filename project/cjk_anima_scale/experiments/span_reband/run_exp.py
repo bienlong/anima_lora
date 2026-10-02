@@ -60,6 +60,7 @@ os.environ.setdefault("ANIMA_VOCAB_PACK", "models/vocab_packs/anima_cjk_vocab_pa
 
 LINE = Path(__file__).resolve().parents[2]  # project/cjk_anima_scale
 sys.path.insert(0, str(LINE))
+from cjk_scale.builder import tier_of  # noqa: E402
 from cjk_scale.paths import OUT, SEED_ROWS, bootstrap, load_experiment  # noqa: E402
 
 bootstrap()
@@ -68,7 +69,7 @@ from bench._common import make_run_dir, write_result  # noqa: E402
 NAME = "span_reband"
 SRC_RUN = "retrain_kana"
 SRC = OUT / SRC_RUN / "data"
-GROUP, RECIPE = "b0507", "scene_window"
+TIER = "bubbleN_34"  # the records of record: group b0507, recipe scene_window
 BAND = (0.85, 0.95)
 MU = 0.02
 STEPS_PER_ROW = 23  # × 174 kana rows ≈ 4 000 steps (b0305_reband)
@@ -122,7 +123,7 @@ def data(dst: Path, band: tuple, repeat: int) -> dict:
     sc = scenes()
     out, moved, dropped = [], [], Counter()
     for r in recs:
-        if r["group"] == GROUP and r["recipe"] == RECIPE:
+        if tier_of(r) == TIER:
             why = keep(r, sc[(r["scene_pool"], r["scene"])])
             if why is None:
                 r = r | {"band": list(band), "reband": True}
@@ -144,8 +145,7 @@ def data(dst: Path, band: tuple, repeat: int) -> dict:
             | {
                 "reband_from": str(SRC),
                 "reband": {
-                    "group": GROUP,
-                    "recipe": RECIPE,
+                    "tier": TIER,
                     "band": list(band),
                     "repeat": repeat,
                     "max_lines": MAX_LINES,
@@ -216,7 +216,7 @@ def main():
     vocabs = json.loads((SRC / "vocabs.json").read_text("utf-8"))
     steps = args.steps_per_row * len(vocabs)
     print(
-        f"{name}: {GROUP} {RECIPE} filtered → band {args.band}, ×{1 + args.repeat}, "
+        f"{name}: {TIER} filtered → band {args.band}, ×{1 + args.repeat}, "
         f"{len(vocabs)} rows × {args.steps_per_row} = {steps} steps, μ {args.mu}, "
         f"warm from {SEED_ROWS}",
         flush=True,

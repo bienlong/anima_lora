@@ -56,6 +56,7 @@ os.environ.setdefault("ANIMA_VOCAB_PACK", "models/vocab_packs/anima_cjk_vocab_pa
 
 LINE = Path(__file__).resolve().parents[2]  # project/cjk_anima_scale
 sys.path.insert(0, str(LINE))
+from cjk_scale.builder import tier_of  # noqa: E402
 from cjk_scale.paths import OUT, SEED_ROWS, bootstrap  # noqa: E402
 
 bootstrap()
@@ -1286,7 +1287,7 @@ def b0305_items() -> list[dict]:
             json.loads(ln)
             for ln in (OUT / run / "data" / "train.jsonl").open(encoding="utf-8")
         ]
-        recs = [r for r in recs if r["group"] == "b0305"]
+        recs = [r for r in recs if tier_of(r) == "bubbleN_18"]  # group b0305 of record
         for k, r in enumerate(random.Random(0).sample(recs, 4)):
             tags, clause = r["caption"].split(". ", 1)
             assert f'"{r["text"]}"' in clause, r["caption"]

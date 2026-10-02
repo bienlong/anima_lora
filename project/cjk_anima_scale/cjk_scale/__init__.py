@@ -10,7 +10,7 @@ one loss, one trainer, σ per item from the band law (``../plan.md``).
     loss       the box-share FM loss, log in the glyph count
     train      the fixed trainer: the vocabs' rows, σ per item
     eval       floor + trained arms on the automatic rulers → sheet.png + reads.json
-    conflict   do the run's band groups pull a row the same way (no training)
+    conflict   do the run's bands pull a row the same way (no training)
     ledger     runs/ledger.jsonl
     reads      the experiments' per-render scoring + McNemar pairing (Stage B's)
 

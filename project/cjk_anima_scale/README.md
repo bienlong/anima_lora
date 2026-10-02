@@ -106,10 +106,10 @@ export ANIMA_VOCAB_PACK=models/vocab_packs/anima_cjk_vocab_pack   # MANGA109S co
 
 A run is `configs/runs/<run>.toml` = `vocabs` (a vocabs file: one vocab per
 line) + `read` (the `native_sent` strings). `data` draws the items by the
-vocabs' kinds (singles → `scene_single` + `grid_single` at 0.7–0.9; pieces →
-`scene_piece` at two px tiers, `grid_string`, `scene_short`,
-`scene_sentence` at 0.5–0.7 / 0.3–0.5), ≈ 67 items per vocab, every item
-stamped with its band; `train` trains the vocabs' rows from the seed rows
+vocabs' kinds, from the item pools of § Item pools (singles → the six
+`lone` / `grid` / `bubble1` / `bubbleN` tiers; pieces → the six `piece_*` /
+`line_*` tiers), ≈ 67 items per vocab, every item stamped with its tier and
+its band; `train` trains the vocabs' rows from the seed rows
 with every other row frozen at them, and saves `trained.pt` as the whole
 merged rows — the seed's rows with the run's on top (μ 0, lr 1e-3, batch 4,
 cosine, warmup 10 %, grid box, 90 steps/row — `cjk_scale/train.py`); `eval`
@@ -122,6 +122,58 @@ captions, and writes one `sheet.png` + `reads.json`. Everything lands in
 `output/cjk_anima_scale/<run>/`; `--submit` records the job in
 `runs/ledger.jsonl`. The stage-shaped runs before 2026-09-25 stay on disk
 as `{data,rows}_<stage>_<tag>/` records.
+
+## Item pools
+
+An item pool is a **tier** of `builder.TABLE`, named `<form>_<px>`: what is
+drawn, and the median ink px (√(box area / glyphs)) its items were built at
+on the kana run. The number is a fixed label (`builder.TIER_PX`), not
+recomputed per build — a kanji run draws the large tiers larger
+(`retrain_kanji_b4`: `grid_82` → 100, `lone_190` → 235); each build's own
+px is `build.json` `tiers.<tier>.px_kept`. The name is the image prefix,
+the record's `tier` and the `build.json` key.
+
+Forms: **`lone`** one glyph alone on its canvas (1×1, bare or one bubble);
+**`grid`** 2×2 – 3×3 cells, one glyph per cell; **`bubble1`** one glyph in a
+bubble of a generated scene; **`bubbleN`** a 2–6 glyph window in one,
+routed per glyph. Piece kind: `piece_bubble`, `piece_grid` (word cells),
+`line_bubble` (a corpus line).
+
+| tier | px p10 / median / p90 | σ band | recipe | name until 2026-10-02 (group / recipe) |
+|---|---|---|---|---|
+| `lone_190` | 119 / 191 / 268 | 0.7–0.9 | `grid` (its 1×1 deals) | `b0709` / `grid_single`, 1×1 |
+| `grid_82` | 55 / 82 / 118 | 0.7–0.9 | `grid` | `b0709` / `grid_single`, 2×2 – 3×3 |
+| `bubble1_52` | 42 / 52 / 75 | 0.7–0.9 | `bubble1` | `b0709` / `scene_single` |
+| `grid_44` | 41 / 44 / 49 | 0.7–0.9 | `grid` | — (`grid_44`, 10-02) |
+| `lone_44` | 34 / 44 / 52 | 0.7–0.9 | `grid`, 1×1 | — (`grid_44`) |
+| `bubbleN_34` | 29 / 34 / 45 | 0.5–0.7 | `bubbleN` | `b0507` / `scene_window` |
+| `bubble1_32` | 27 / 32 / 38 | 0.5–0.7 | `bubble1` | `b0507` / `scene_single_small` |
+| `bubbleN_18` | 14 / 18 / 22 | 0.3–0.5 | `bubbleN` | `b0305` / `scene_window` |
+| `grid_29` | 25 / 29 / 33 | 0.5–0.7 | `grid` | `g0507` / `grid_single` (`grid_small`, `grid_lone`) |
+| `lone_28` | 22 / 28 / 35 | 0.5–0.7 | `grid`, 1×1 | `l0507` / `grid_single` (`grid_lone`) |
+| `grid_16` | 13 / 16 / 20 | 0.3–0.5 | `grid` | `g0305` / `grid_single` |
+| `lone_16` | 12 / 16 / 21 | 0.3–0.5 | `grid`, 1×1 | `l0305` / `grid_single` |
+| `piece_bubble_38` | 30 / 38 / 53 | 0.5–0.7 | `scene_piece` | `b0507` / `scene_piece` |
+| `line_bubble_32` | 29 / 32 / 39 | 0.5–0.7 | `scene_short` | `b0507` / `scene_short` |
+| `piece_grid_29` | 26 / 29 / 32 | 0.5–0.7 | `grid_string` | `b0507` / `grid_string` |
+| `piece_bubble_19` | 15 / 19 / 23 | 0.3–0.5 | `scene_piece` | `b0305` / `scene_piece` |
+| `line_bubble_19` | 16 / 19 / 23 | 0.3–0.5 | `scene_sentence` | `b0305` / `scene_sentence` |
+| `piece_grid_17` | 13 / 17 / 21 | 0.3–0.5 | `grid_string` | `b0305` / `grid_string` |
+
+The six `grid` / `lone` tiers under 50 px are the experiments' (`grid_small`,
+`grid_lone`, `grid_44`), not `TABLE`'s. Px sources: `retrain_kana/data`,
+`run1002_grid_lone/data`, and `run0925_300f`'s build log for the piece kind.
+
+Until 2026-10-02 an item was named by its band group and its recipe, and
+the recipes were `scene_single` + `scene_single_small` (now one,
+`bubble1`), `scene_window` (`bubbleN`) and `grid_single` (`grid`). Every
+data dir, report and result of record carries those names;
+`builder.tier_of(record)` gives a record's tier either way. The band is an
+attribute of the group a tier is drawn in (one kind, one band, one rng
+restart — the draw unit, unnamed) and of each item; `lone_190` and
+`grid_82` are one draw (a deck that deals 1×1 beside the grids), named per
+item. The rename left the draws alone: the kana run's table built before
+and after it gives the same 17 400 records and pixels.
 
 ## Scene pools
 

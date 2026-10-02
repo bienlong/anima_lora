@@ -8,6 +8,11 @@ experiments (influence, 300f pieces, line mode, stage_i, plan_2900's micros,
 the hypothesis probes) moved to `../_archive/experiments/` on 2026-09-28;
 their reads are in `../_archive/reports/` and `../hypothesis.md`.
 
+The entries below name item pools as their data of record does — band group
++ recipe (`b0507` `scene_window`, `g0305` `grid_single`). Since 2026-10-02
+the code names them by form and glyph px (`bubbleN_34`, `grid_16`); the
+table is `../README.md` § Item pools, and `builder.tier_of` reads both.
+
 ## Contract
 
 - `<exp>/run_exp.py` — the entry point, a thin argparse script. `--dry_run`
@@ -195,3 +200,10 @@ their reads are in `../_archive/reports/` and `../hypothesis.md`.
   the `p1_cold` / `p1_mix` caches on C2's words. **Training 2026-10-02** (job
   `20261002-112155-8e8225`); the day's reads are
   `../reports/band_size_2026_10_02.md`.
+- `grid_44/` — `grid_lone` with a 44 px tier: half of `grid_29` moved to
+  `grid_44` (0.7–0.9, the law's band for a single ≥ 40 px) with a `lone_44`
+  twin, the lone share split over three sizes; `recap` legs as `grid_lone`'s
+  (plain captions, `--band lo hi` to put every item at one σ band). Arm of
+  record `recap_b7593` (every item at 0.75–0.93), trained and read 10-02;
+  the read beside `grid_small` / `grid_lone` is
+  `../../cjk_anima_reseed/reports/grid_small_lone_2026_10_02.md`.

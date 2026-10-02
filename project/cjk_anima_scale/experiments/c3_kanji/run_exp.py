@@ -220,14 +220,16 @@ def scene_window(pools, rng, p: dict):
 
 
 def table() -> tuple:
-    """``p1_mix``'s table with its in-word tier drawing windows."""
+    """``p1_mix``'s table with its in-word tier drawing windows (the tiers
+    that became ``bubbleN_34`` / ``bubbleN_18``, on this arm's own draw)."""
     import dataclasses
 
+    name = {(0.5, 0.7): "bubbleN_34", (0.3, 0.5): "bubbleN_18"}
     return tuple(
         dataclasses.replace(
             g,
             tiers=tuple(
-                dataclasses.replace(t, recipe="scene_window")
+                dataclasses.replace(t, name=name[g.band], recipe="bubbleN")
                 if t.recipe == "scene_spelled"
                 else t
                 for t in g.tiers
@@ -280,7 +282,7 @@ def main():
     name = NAME if args.steps == STEPS else f"{NAME}_{args.steps}"
     from cjk_scale import recipes
 
-    recipes.RECIPES["scene_window"] = scene_window
+    recipes.RECIPES["bubbleN"] = scene_window  # this arm's draw, kanji-first
     recipes.RECIPES["scene_single_small"] = SB.scene_single_small
     fixed_budget()
     ws = windows()
@@ -308,7 +310,7 @@ def main():
     if args.dry_run:
         print(" ".join(ok[:80]), flush=True)
         for g in P1.mix_table():
-            print(g.name, g.band, g.share, [t.recipe for t in g.tiers], flush=True)
+            print(g.label, g.band, g.share, [t.recipe for t in g.tiers], flush=True)
         return
     run_dir = make_run_dir(
         "c3_kanji", label=args.label, root=LINE / "experiments" / "c3_kanji" / "results"
@@ -322,7 +324,7 @@ def main():
 
         build(rc_of(DATA), workers=args.workers, table=table())
         items = Counter(
-            json.loads(ln)["group"] + "/" + json.loads(ln)["recipe"]
+            json.loads(ln)["tier"]
             for ln in (OUT / DATA / "data" / "train.jsonl").open(encoding="utf-8")
         )
         metrics["items"] = dict(items)

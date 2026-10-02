@@ -684,7 +684,7 @@ def mix(src: Path, sing: list, frac: float, band: tuple, seed: int = 0) -> dict:
     import shutil
     from types import SimpleNamespace
 
-    from cjk_scale.recipes import grid_single
+    from cjk_scale.recipes import grid as grid_single  # its name until 2026-10-02
 
     from common.render.flat import find_fonts
 

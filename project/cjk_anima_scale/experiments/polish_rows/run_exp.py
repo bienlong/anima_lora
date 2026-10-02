@@ -97,14 +97,14 @@ def table():
 
     common = {"fill": 1.0, "min_glyph": 28, "glyph_px": list(JITTER)}
     return (
+        # tier names: the file prefixes of the data of record (builder.tier_of)
         Group(
-            "b0010",
             "single",
             (0.0, 1.0),
             1.0,
             (
-                Tier("scene_single", SINGLE_SHARE, dict(common)),
-                Tier("scene_window", 1 - SINGLE_SHARE, dict(common)),
+                Tier("b0010_scene_single", "bubble1", SINGLE_SHARE, dict(common)),
+                Tier("b0010_scene_window", "bubbleN", 1 - SINGLE_SHARE, dict(common)),
             ),
         ),
     )
@@ -127,7 +127,10 @@ def patch_build(n_items: int) -> None:
 
     def fill_for_en_px(region, n_glyphs, jitter, vertical, fill_max, max_lines=1):
         target = px_of[tuple(region)] * jitter
-        return max(0.15, min(1.0, target / max(fit(region, n_glyphs, vertical, max_lines), 1e-6)))
+        return max(
+            0.15,
+            min(1.0, target / max(fit(region, n_glyphs, vertical, max_lines), 1e-6)),
+        )
 
     recipes._fill_for_px = fill_for_en_px
     builder.window = lambda kind, px, layout: Window(0.0, 1.0, "polish: full σ")
@@ -144,7 +147,11 @@ def rc_of(name: str):
 
 
 def data_report(d: Path, sc_px: dict) -> dict:
-    recs = [json.loads(ln) for ln in (d / "train.jsonl").read_text("utf-8").splitlines() if ln]
+    recs = [
+        json.loads(ln)
+        for ln in (d / "train.jsonl").read_text("utf-8").splitlines()
+        if ln
+    ]
     ratio: dict = {}
     for x in recs:
         ratio.setdefault(x["recipe"], []).append(x["px"] / sc_px[x["scene"]])
@@ -158,7 +165,9 @@ def data_report(d: Path, sc_px: dict) -> dict:
             k: round(statistics.median(x["px"] for x in recs if x["recipe"] == k), 1)
             for k in ratio
         },
-        "px_over_en_median": {k: round(statistics.median(v), 2) for k, v in ratio.items()},
+        "px_over_en_median": {
+            k: round(statistics.median(v), 2) for k, v in ratio.items()
+        },
         "px_over_en_below_0.7": {k: sum(x < 0.7 for x in v) for k, v in ratio.items()},
     }
     print(f"data report: {json.dumps(out, ensure_ascii=False)}", flush=True)
@@ -168,7 +177,9 @@ def data_report(d: Path, sc_px: dict) -> dict:
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--label", required=True)
-    p.add_argument("--legs", nargs="+", default=["data"], choices=["data", "train", "read"])
+    p.add_argument(
+        "--legs", nargs="+", default=["data"], choices=["data", "train", "read"]
+    )
     p.add_argument("--workers", type=int)
     p.add_argument("--dry_run", action="store_true")
     args = p.parse_args()
@@ -194,10 +205,14 @@ def main():
     }
     if args.dry_run:
         for s in sc[:12]:
-            print(f"  {s['i']:4d} {s['anchor']!r:22s} box {s['box']} EN px {sc_px[s['i']]:.0f}")
+            print(
+                f"  {s['i']:4d} {s['anchor']!r:22s} box {s['box']} EN px {sc_px[s['i']]:.0f}"
+            )
         return
     run_dir = make_run_dir(
-        "polish_rows", label=args.label, root=LINE / "experiments" / "polish_rows" / "results"
+        "polish_rows",
+        label=args.label,
+        root=LINE / "experiments" / "polish_rows" / "results",
     )
     data = OUT / DATA / "data"
     if "data" in args.legs:
@@ -210,7 +225,11 @@ def main():
         from cjk_scale.train import train
 
         assert CONTEXT.exists(), CONTEXT
-        recs = [json.loads(ln) for ln in (data / "train.jsonl").read_text("utf-8").splitlines() if ln]
+        recs = [
+            json.loads(ln)
+            for ln in (data / "train.jsonl").read_text("utf-8").splitlines()
+            if ln
+        ]
         assert len(recs) == n_items, (len(recs), n_items)
         RK.patch_native(recs)
         train(
@@ -230,7 +249,11 @@ def main():
         h = {
             "target": (
                 RK.read_target(rc, arm, data),
-                scoring.hits(base / "target" / "native_reads.json", ["はい", "こんにちは"], "verbatim"),
+                scoring.hits(
+                    base / "target" / "native_reads.json",
+                    ["はい", "こんにちは"],
+                    "verbatim",
+                ),
             ),
             "words": (
                 RR.grid_hits(RR.ensure(rc, arm, words, "en"), words, "en"),
@@ -238,7 +261,9 @@ def main():
             ),
             "singles": (
                 RR.grid_hits(RR.ensure(rc, arm, singles, "swap"), singles, "swap"),
-                RR.grid_hits(base / "native_r4_swap" / "native_reads.json", singles, "swap"),
+                RR.grid_hits(
+                    base / "native_r4_swap" / "native_reads.json", singles, "swap"
+                ),
             ),
         }
         for grp, (mine, ref) in h.items():

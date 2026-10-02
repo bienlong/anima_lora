@@ -13,13 +13,17 @@ singles groups with the grid dropped, plus whole dialogue lines (the
 sentence tier step 2 had; ``plan_retrain`` § 4 doubling asks windows 2–6 vs
 whole lines):
 
-    group  band      tier                share of items
-    p0709  0.7–0.9   scene_single        0.30
-    p0507  0.5–0.7   scene_window        0.20
-                     scene_single_small  0.05
-                     scene_line          0.15   (26–36 px)
-    p0305  0.3–0.5   scene_window        0.10
-                     scene_line          0.20   (14–22 px)
+    band      tier             share of items
+    0.7–0.9   bubble1_52       0.30
+    0.5–0.7   bubbleN_34       0.20
+              bubble1_32       0.05
+              line_bubble_31   0.15   (26–36 px)
+    0.3–0.5   bubbleN_18       0.10
+              line_bubble_18   0.20   (14–22 px)
+
+(The data of record names its items ``p0709`` / ``p0507`` / ``p0305`` +
+``scene_single`` / ``scene_window`` / ``scene_single_small`` /
+``scene_line``; the tiers were named by px on 2026-10-02.)
 
 Lone 0.35 (step 2's next-arm share after the 30 k run's length collapse),
 windows 0.30, lines 0.35. The singles / window tiers take TABLE's params.
@@ -99,37 +103,29 @@ def patch_workers(workers: int) -> None:
     builder._worker = _slot_worker
 
 
-def _tier(group: str, recipe: str) -> dict:
-    from cjk_scale.builder import TABLE
+def _tier(name: str, weight: float):
+    """``builder.TABLE``'s tier ``name`` at this table's weight."""
+    import dataclasses
 
-    for g in TABLE:
-        if g.kind == "single" and g.name == group:
-            for t in g.tiers:
-                if t.recipe == recipe:
-                    return dict(t.params)
-    raise KeyError((group, recipe))
+    from cjk_scale.builder import tiers
+
+    return dataclasses.replace(tiers(name)[0], weight=weight)
 
 
 def table():
     from cjk_scale.builder import Group, Tier
 
     return (
+        Group("single", (0.7, 0.9), 0.30, (_tier("bubble1_52", 0.30),)),
         Group(
-            "p0709",
-            "single",
-            (0.7, 0.9),
-            0.30,
-            (Tier("scene_single", 0.30, _tier("b0709", "scene_single")),),
-        ),
-        Group(
-            "p0507",
             "single",
             (0.5, 0.7),
             0.40,
             (
-                Tier("scene_window", 0.20, _tier("b0507", "scene_window")),
-                Tier("scene_single_small", 0.05, _tier("b0507", "scene_single_small")),
+                _tier("bubbleN_34", 0.20),
+                _tier("bubble1_32", 0.05),
                 Tier(
+                    "line_bubble_31",
                     "scene_line",
                     0.15,
                     {
@@ -143,13 +139,13 @@ def table():
             ),
         ),
         Group(
-            "p0305",
             "single",
             (0.3, 0.5),
             0.30,
             (
-                Tier("scene_window", 0.10, _tier("b0305", "scene_window")),
+                _tier("bubbleN_18", 0.10),
                 Tier(
+                    "line_bubble_18",
                     "scene_line",
                     0.20,
                     {
@@ -331,7 +327,7 @@ def set_lines(lines: list) -> dict:
 def plan_rows(groups) -> list:
     return [
         {
-            "group": g.name,
+            "tier": t.name,
             "band": list(g.band),
             "recipe": t.recipe,
             "items": round(N_ITEMS * t.weight),
@@ -371,7 +367,7 @@ def main():
     )
     for r in plan:
         print(
-            f"  {r['group']} σ {r['band'][0]}–{r['band'][1]}  {r['recipe']:<18} "
+            f"  {r['tier']:<15} σ {r['band'][0]}–{r['band'][1]}  {r['recipe']:<11} "
             f"{r['items']:>6}  px {r['px']}",
             flush=True,
         )
@@ -415,7 +411,7 @@ def main():
         ]
         metrics["data"] = {
             "n": len(recs),
-            "by_tier": dict(Counter(f"{r['group']}/{r['recipe']}" for r in recs)),
+            "by_tier": dict(Counter(r["tier"] for r in recs)),
             "bands": dict(Counter(json.dumps(r["band"]) for r in recs)),
             "lines_distinct": len(
                 {r["text"] for r in recs if r["recipe"] == "scene_line"}

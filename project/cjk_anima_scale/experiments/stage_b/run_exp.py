@@ -203,36 +203,38 @@ def scene_single_small(pools, rng, p: dict):
 
 def table() -> tuple:
     """spell_b's two piece-band ``scene_piece`` tiers drawing the donor words,
-    brought in by the single kind; b0507 adds the count tier."""
-    from cjk_scale.builder import TABLE, Group, Tier
+    brought in by the single kind; the 0.5–0.7 group adds the count tier.
+    The tier names are the file prefixes of the data of record
+    (``builder.tier_of``); the count tier is what became ``bubble1_32``."""
+    from cjk_scale.builder import Group, Tier, tiers
 
-    tiers = {
-        g.name: next(t for t in g.tiers if t.recipe == "scene_piece")
-        for g in TABLE
-        if g.kind == "piece"
-    }
+    large, small = tiers("piece_bubble_38", "piece_bubble_19")
     count = Tier(
+        "bubble1_32",
         "scene_single_small",
         COUNT_WEIGHT,
         {"glyph_px": [28, 40], "fill": [0.2, 0.4], "min_glyph": 12},
     )
     return (
         Group(
-            "b0507",
             "single",
             (0.5, 0.7),
             0.5,
             (
-                Tier("scene_spelled", 1 - COUNT_WEIGHT, tiers["b0507"].params),
+                Tier(
+                    "b0507_scene_spelled",
+                    "scene_spelled",
+                    1 - COUNT_WEIGHT,
+                    large.params,
+                ),
                 count,
             ),
         ),
         Group(
-            "b0305",
             "single",
             (0.3, 0.5),
             0.5,
-            (Tier("scene_spelled", 1.0, tiers["b0305"].params),),
+            (Tier("b0305_scene_spelled", "scene_spelled", 1.0, small.params),),
         ),
     )
 
@@ -457,7 +459,7 @@ def main():
     tb = table()
     for g in tb:
         print(
-            f"{g.name} σ {g.band}: {[(t.recipe, t.weight, t.params) for t in g.tiers]}",
+            f"{g.label} σ {g.band}: {[(t.recipe, t.weight, t.params) for t in g.tiers]}",
             flush=True,
         )
     ext = encoder()

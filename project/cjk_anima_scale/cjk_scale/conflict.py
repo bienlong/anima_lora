@@ -1,4 +1,4 @@
-"""conflict — do a run's band groups pull a row the same way? Read without training.
+"""conflict — do a run's bands pull a row the same way? Read without training.
 
 A row is its own parameter: the only thing stage B can do to what stage A
 bought is push the same row somewhere else. So "chain the bands" vs "one run
@@ -7,9 +7,10 @@ and it can be read at one point of the rows with no optimizer step — the
 boxprobe primitive with a different split.
 
 ``scale.py <run> conflict`` (2026-09-25: the run's own data, no flags). A
-"stage" below is one of the run's **band groups** (``builder.TABLE``:
-``b0709`` / ``b0507`` / ``b0305`` — the old stages' data, now one dir with a
-band per item). For every group, on a sample of its items, this draws σ
+"stage" below is one of the run's **bands** — the items stamped with one
+σ band, named by it (``0.7-0.9``; until 2026-10-02 by the band group's name,
+``b0709``, which the reports of record carry): the old stages' data, now
+one dir with a band per item. For every band, on a sample of its items, this draws σ
 inside the group's band, backprops the *trained* loss (the box-share FM
 loss on scene items and — ``train.GRID_BOX`` — grid items' cells, plain MSE
 on flat) onto the seed rows, and accumulates per row, per group, the mean per-draw
@@ -94,8 +95,8 @@ def probe(
     draws: int = 1,
     seed: int = 0,
 ) -> Path:
-    """Per band group of the run's data, ``items`` items × ``draws`` σ draws
-    (the 2026-09-25 reads: 600 × 1). Per (group, recipe) reads go in the
+    """Per band of the run's data, ``items`` items × ``draws`` σ draws
+    (the 2026-09-25 reads: 600 × 1). Per (band, tier) reads go in the
     report's price table."""
     from common.models import checkpoints, dit_forward, gen_args
     from data.inventory import qwen_pieces
@@ -107,6 +108,7 @@ def probe(
     from train.stage import LatentStore, _encode_text
 
     from . import train as T
+    from .builder import tier_of
     from .loss import box_share_fm_loss
     from .train import load_items, vocab_idx
 
@@ -118,16 +120,11 @@ def probe(
     band_of: dict[str, tuple] = {}
     by_group: dict[str, list] = defaultdict(list)
     for i, r in enumerate(all_recs):
-        g = r.get("group") or f"{r['band'][0]:g}-{r['band'][1]:g}"
+        g = f"{r['band'][0]:g}-{r['band'][1]:g}"
         by_group[g].append(i)
-        band_of.setdefault(g, tuple(r["band"]))
-        assert band_of[g] == tuple(r["band"]), f"group {g}: two bands"
-    stages = [g for g in ("b0709", "b0507", "b0305") if g in by_group] + sorted(
-        g for g in by_group if g not in ("b0709", "b0507", "b0305")
-    )
-    assert len(stages) >= 2, (
-        f"{rc.name}: a conflict needs two band groups, got {stages}"
-    )
+        band_of[g] = tuple(r["band"])
+    stages = sorted(by_group, key=lambda g: band_of[g], reverse=True)
+    assert len(stages) >= 2, f"{rc.name}: a conflict needs two bands, got {stages}"
     out = probe_dir(rc.name)
     out.mkdir(parents=True, exist_ok=True)
     args = gen_args(512, T.GEN_STEPS, 4.0, out)
@@ -178,7 +175,7 @@ def probe(
     G = {s: torch.zeros(2, R, D, device=device) for s in stages}  # Σg per half
     N = {s: torch.zeros(R, device=device) for s in stages}  # draws touching the row
     S = {s: torch.zeros(R, device=device) for s in stages}  # Σ‖g_row‖
-    GR: dict = {}  # (key, recipe) → [Σg half0, Σg half1, N, Σ‖g‖]
+    GR: dict = {}  # (band, tier) → [Σg half0, Σg half1, N, Σ‖g‖]
     kind_of: dict[int, Counter] = defaultdict(Counter)
     g = torch.Generator(device=device).manual_seed(seed)
     t0 = time.time()
@@ -219,7 +216,7 @@ def probe(
                 G[s][k % 2] += gr
                 N[s] += touched.float()
                 S[s] += nrm
-                rk = (s, r.get("recipe") or "?")
+                rk = (s, tier_of(r))
                 if rk not in GR:
                     GR[rk] = [
                         torch.zeros(R, D, device=device),
@@ -451,12 +448,12 @@ def report(
     if by_recipe:
         lines += [
             "",
-            "## By recipe (medians over rows with n ≥ min_n) — the price table",
+            "## By tier (medians over rows with n ≥ min_n) — the price table",
             "",
-            "`‖ḡ‖·coh` = coherent movement per draw: what one draw of this recipe at this "
+            "`‖ḡ‖·coh` = coherent movement per draw: what one draw of this tier at this "
             "band buys the row, noise removed.",
             "",
-            "| stage | recipe | kind | rows | n | ‖ḡ‖ | coh | half | ‖ḡ‖·coh |",
+            "| stage | tier | kind | rows | n | ‖ḡ‖ | coh | half | ‖ḡ‖·coh |",
             "|---|---|---|---|---|---|---|---|---|",
         ]
         groups: dict = defaultdict(list)

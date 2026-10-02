@@ -49,6 +49,7 @@ os.environ.setdefault("ANIMA_VOCAB_PACK", "models/vocab_packs/anima_cjk_vocab_pa
 
 LINE = Path(__file__).resolve().parents[2]  # project/cjk_anima_scale
 sys.path.insert(0, str(LINE))
+from cjk_scale.builder import tier_of  # noqa: E402
 from cjk_scale.paths import OUT, SEED_ROWS_0921, bootstrap, load_experiment  # noqa: E402
 
 bootstrap()
@@ -109,7 +110,7 @@ def source(rows: str) -> tuple[list, list]:
 
 def data(dst: Path, band: tuple, rows: str) -> dict:
     recs, vocabs = source(rows)
-    old = Counter((r["group"], tuple(r["band"])) for r in recs)
+    old = Counter((tier_of(r), tuple(r["band"])) for r in recs)
     for r in recs:
         r["band"] = list(band)
     dst.mkdir(parents=True, exist_ok=True)
@@ -133,7 +134,7 @@ def data(dst: Path, band: tuple, rows: str) -> dict:
         "from": str(SRC),
         "items": len(recs),
         "rows": len(vocabs),
-        "recipes": dict(Counter(f"{r['group']}/{r['recipe']}" for r in recs)),
+        "tiers": dict(Counter(tier_of(r) for r in recs)),
         "old_bands": {f"{g} {a}-{b}": n for (g, (a, b)), n in sorted(old.items())},
         "band": list(band),
         "glyph_route": bj.get("glyph_route"),

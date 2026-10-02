@@ -48,6 +48,15 @@ record.
 
 ### Data
 
+The tables name the pools as the data dirs do (band group / recipe). The
+tiers' names since the evening of 10-02, by form and median glyph px:
+`g0507` → `grid_29`, `g0305` → `grid_16`, `l0507` → `lone_28`, `l0305` →
+`lone_16`, `b0507` `scene_window` → `bubbleN_34`, `b0507`
+`scene_single_small` → `bubble1_32`, `b0305` `scene_window` →
+`bubbleN_18`; `retrain_kana`'s `b0709` → `bubble1_52` (`scene_single`),
+`grid_82` (grids), `lone_190` (flat 1×1). Table:
+`../../cjk_anima_scale/README.md` § Item pools.
+
 `grid_small` (8 100 items, `run1002_grid_small/data`; `b7593` is the same
 records with every band replaced):
 

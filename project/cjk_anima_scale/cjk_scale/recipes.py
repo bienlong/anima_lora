@@ -6,27 +6,36 @@ A recipe draws one item — vocab(s), px, layout — and returns an ``Item`` or
 measures the item's px, looks up its window, keeps or re-draws it and
 stamps the item with its band.
 
-    scene_single    one glyph in a bubble; px = the bubble fit (fill 0.7 → 48–53)
-                    or a ``glyph_px`` range that sets the fill per item;
-                    ``fill_min`` (any scene recipe with ``glyph_px``) keeps only
-                    scenes whose bubble the text fills to that share
-    grid_single     1×1 … 3×3 grid, one glyph per cell, one fill draw per item
+    bubble1         one glyph in a scene bubble; px = the bubble fit (fill 0.7
+                    → 48–53) or a ``glyph_px`` range that sets the fill per
+                    item; ``fill_min`` (any scene recipe with ``glyph_px``)
+                    keeps only scenes whose bubble the text fills to that
+                    share. ``fill = [lo, hi]``: the glyph at line px in a
+                    bubble whose one-glyph fit it fills lo–hi of (the count
+                    tier beside the windows, Stage B)
+    bubbleN         a window of a dialogue line in a scene bubble (the singles'
+                    in-word tier, retrain_experiments § 3): unspaced on the
+                    image and in the caption, routed per glyph at encode;
+                    drawn glyph-first
+    grid            1×1 … 3×3 grid, one glyph per cell, one fill draw per item
                     or a ``glyph_px`` range (fill = px / cell, as grid_string);
-                    1×1 is the flat single (bare or ellipse, plain template)
+                    1×1 is the lone glyph (layout ``flat``: bare or ellipse,
+                    plain template)
     scene_piece     one piece (one token, 2+ glyphs) in a bubble, fill 0.7–1.0
     scene_short     a 2–5-piece corpus line (multi), one column
     scene_sentence  a Manga109-s dialogue line, ``min_glyph`` drawn per item
     grid_string     pieces / short lines in 2×2 … 3×2 word cells at a target px
-    scene_window    a window of a dialogue line in a bubble (the singles' in-word
-                    tier, retrain_experiments § 3): unspaced on the image and in the
-                    caption, routed per glyph at encode; drawn glyph-first
-    scene_single_small  one glyph at line px in a bubble it fills 0.2–0.4 of
-                    (the count tier beside the windows, Stage B)
+
+The single kind's three were ``scene_single`` + ``scene_single_small``
+(→ ``bubble1``), ``scene_window`` (→ ``bubbleN``) and ``grid_single``
+(→ ``grid``) until 2026-10-02; the data dirs of record carry those names
+(``builder.tier_of`` reads both).
 
 Records follow the probe's ``train.jsonl`` schema (``file`` / ``text`` /
 ``caption`` / ``src`` / ``kind`` / ``shape`` / ``box`` or ``boxes`` /
 ``units`` — the on-disk key for the item's vocabs), plus ``recipe`` /
-``layout`` / ``px`` / ``window`` (design § 4).
+``tier`` (the builder's name for the item's pool) / ``layout`` / ``px`` /
+``window`` (design § 4).
 """
 
 from __future__ import annotations
@@ -87,7 +96,7 @@ class Pools:
     vertical: bool
     stroke: float
     horizontal_frac: float  # share of multi-glyph items / grid cells drawn as lines
-    windows: dict = field(default_factory=dict)  # glyph → its windows (scene_window)
+    windows: dict = field(default_factory=dict)  # glyph → its windows (bubbleN)
     window_keys: list = field(
         default_factory=list
     )  # weighted glyph pool over ``windows``
@@ -547,24 +556,45 @@ def _balanced_line(pools: Pools, rng: random.Random, kind: str) -> str | None:
     return t
 
 
-def scene_single(pools: Pools, rng: random.Random, p: dict):
+def bubble1(pools: Pools, rng: random.Random, p: dict):
+    """One glyph in a scene bubble, captioned alone. ``fill`` a number: the
+    bubble fit (was ``scene_single``). ``fill = [lo, hi]`` with ``glyph_px``:
+    the glyph at line px, in a bubble whose one-glyph fit it fills lo–hi of
+    (was ``scene_single_small``, the count tier — Stage B, byte-faithful).
+    One rng order for both: the glyph, then the px."""
     # `digraphs = true`: the small-kana digraphs ride along (kind multi — the
     # gate keeps them only where a multi row holds the stage band)
     pool = pools.singles + (pools.digraphs if p.get("digraphs") else [])
     vocab = rng.choice(pool)
-    px = p.get("glyph_px")
-    target = rng.uniform(*px) if px else None
+    target = _target(rng, p)
+    f = p.get("fill", 0.7)
+    if isinstance(f, list):
+        import dataclasses
+
+        lo, hi = (float(x) for x in f)
+        ok = {
+            j
+            for j in pools.single_idx
+            if lo
+            <= target / max(_fit_px(pools.scenes[j]["region"], 1, True), 1e-6)
+            <= hi
+        }
+        if not ok:
+            return None
+        pools, min_glyph = dataclasses.replace(pools, single_idx=ok), 12
+    else:
+        lo, hi, min_glyph = float(p.get("fill_min", 0)), float(f), 28
     return _draw_scene(
         pools,
         rng,
         vocab,
-        min_glyph=int(p.get("min_glyph", 28)),
-        fill=float(p.get("fill", 0.7)),
+        min_glyph=int(p.get("min_glyph", min_glyph)),
+        fill=hi,
         max_lines=1,
         singles_only=True,
         target_px=target,
-        fill_max=float(p.get("fill", 0.7)),
-        fill_min=float(p.get("fill_min", 0)),
+        fill_max=hi,
+        fill_min=lo,
     )
 
 
@@ -635,12 +665,13 @@ def scene_sentence(pools: Pools, rng: random.Random, p: dict):
     )
 
 
-def scene_window(pools: Pools, rng: random.Random, p: dict):
-    """A window in one bubble, unspaced on the image and in the caption
+def bubbleN(pools: Pools, rng: random.Random, p: dict):
+    """A window in one scene bubble, unspaced on the image and in the caption
     (routed per glyph at encode: every glyph trains its single row). A draw
     picks a glyph uniformly, then one of its windows, so exposure is per row
-    (Stage B's ``scene_spelled``, C3's ``scene_window``) — per budget, when
-    ``pools.window_keys`` repeats a glyph by its draw weight."""
+    (Stage B's ``scene_spelled``, C3's ``scene_window``, this recipe's name
+    until 2026-10-02) — per budget, when ``pools.window_keys`` repeats a
+    glyph by its draw weight."""
     keys = pools.window_keys or list(pools.windows)
     word = rng.choice(pools.windows[rng.choice(keys)])
     f = p.get("fill", [0.7, 1.0])
@@ -661,35 +692,6 @@ def scene_window(pools: Pools, rng: random.Random, p: dict):
         return None
     assert item.caption.count(f'"{word}"') == 1, item.caption
     return item
-
-
-def scene_single_small(pools: Pools, rng: random.Random, p: dict):
-    """The count tier: one glyph at line px, in a bubble whose one-glyph fit
-    it fills ``fill`` (0.2–0.4) of, captioned alone (Stage B, byte-faithful)."""
-    import dataclasses
-
-    glyph = rng.choice(pools.singles)
-    target = _target(rng, p)
-    lo, hi = (float(x) for x in p["fill"])
-    ok = {
-        j
-        for j in pools.single_idx
-        if lo <= target / max(_fit_px(pools.scenes[j]["region"], 1, True), 1e-6) <= hi
-    }
-    if not ok:
-        return None
-    return _draw_scene(
-        dataclasses.replace(pools, single_idx=ok),
-        rng,
-        glyph,
-        min_glyph=int(p.get("min_glyph", 12)),
-        fill=hi,
-        max_lines=1,
-        singles_only=True,
-        target_px=target,
-        fill_max=hi,
-        fill_min=lo,
-    )
 
 
 # ----------------------------------------------------------------------------
@@ -885,7 +887,9 @@ def _fillable_grids(grids: list, n_distinct: int) -> list:
     return [(g, w) for g, w in grids if GRIDS[g][0] * GRIDS[g][1] <= n_distinct]
 
 
-def grid_single(pools: Pools, rng: random.Random, p: dict):
+def grid(pools: Pools, rng: random.Random, p: dict):
+    """One glyph per cell (``grid_single`` until 2026-10-02); ``grids =
+    "1x1"`` is the lone glyph."""
     if p.get("digraphs"):
         pool = pools.singles + pools.digraphs
         deck = _deck(pools, "singles+digraphs", pool, rng)
@@ -895,7 +899,7 @@ def grid_single(pools: Pools, rng: random.Random, p: dict):
     grids = _fillable_grids(
         parse_grids(p.get("grids", "1x1:2,2x2,3x3,2x3,3x2")), len(set(pool))
     )
-    assert grids, "grid_single: no grid the singles can fill"
+    assert grids, "grid: no grid the singles can fill"
     name = rng.choices([g for g, _ in grids], weights=[w for _, w in grids])[0]
     cols, rows, size = GRIDS[name]
     got = deck.deal(cols * rows)
@@ -975,11 +979,11 @@ def missing_source(name: str, p: dict, pools: Pools) -> str | None:
     no 2×2 grid)."""
     if name == "scene_piece" and not pools.pieces:
         return "no pieces"
-    if name == "scene_single" and not (
+    if name == "bubble1" and not (
         pools.singles + (pools.digraphs if p.get("digraphs") else [])
     ):
         return "no singles"
-    if name == "scene_window" and not pools.windows:
+    if name == "bubbleN" and not pools.windows:
         return "no windows"
     if name == "scene_short" and not pools.phrase.get("short"):
         return "no short lines"
@@ -994,7 +998,7 @@ def missing_source(name: str, p: dict, pools: Pools) -> str | None:
         )
         if len(set(_grid_string_pool(pools, p))) < cells:
             return f"fewer strings than the smallest grid's {cells} cells"
-    if name == "grid_single":
+    if name == "grid":
         pool = pools.singles + (pools.digraphs if p.get("digraphs") else [])
         if not _fillable_grids(
             parse_grids(p.get("grids", "1x1:2,2x2,3x3,2x3,3x2")), len(set(pool))
@@ -1004,12 +1008,11 @@ def missing_source(name: str, p: dict, pools: Pools) -> str | None:
 
 
 RECIPES = {
-    "scene_single": scene_single,
-    "grid_single": grid_single,
+    "bubble1": bubble1,
+    "bubbleN": bubbleN,
+    "grid": grid,
     "scene_piece": scene_piece,
     "scene_short": scene_short,
     "scene_sentence": scene_sentence,
     "grid_string": grid_string,
-    "scene_window": scene_window,
-    "scene_single_small": scene_single_small,
 }

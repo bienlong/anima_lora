@@ -243,30 +243,32 @@ def test_front_door_parser():
 
 
 def test_recipe_table_by_kind():
-    from cjk_scale.builder import ITEMS_PER_VOCAB, TABLE, plan_groups
+    from cjk_scale.builder import ITEMS_PER_VOCAB, TABLE, TIER_PX, plan_groups, tiers
     from cjk_scale.recipes import RECIPES
     from cjk_scale.windows import ROWS
 
     law = {(k, (r.lo, r.hi)) for r in ROWS for k in r.kinds}
     for g in TABLE:
-        assert (g.kind, g.band) in law, (g.name, g.kind, g.band)
+        assert (g.kind, g.band) in law, (g.label, g.kind, g.band)
         for t in g.tiers:
-            assert t.recipe in RECIPES, (g.name, t.recipe)
-    assert {g.name: g.band for g in TABLE} == {
-        "b0709": (0.7, 0.9),
-        "b0507": (0.5, 0.7),
-        "b0305": (0.3, 0.5),
+            assert t.recipe in RECIPES, (t.name, t.recipe)
+    # a tier is named <form>_<px>, the px its items were built at; a name is one tier
+    names = [n for g in TABLE for t in g.tiers for n in t.names]
+    assert len(set(names)) == len(names)
+    for n in names:
+        assert abs(int(n.rsplit("_", 1)[1]) - TIER_PX[n][1]) <= 1, n
+    assert tiers("bubbleN_18", "bubble1_32")[1].recipe == "bubble1"
+    assert {(g.kind, g.band): g.label for g in TABLE} == {
+        ("single", (0.7, 0.9)): "bubble1_52 + grid_82 + lone_190",
+        ("single", (0.5, 0.7)): "bubbleN_34 + bubble1_32",
+        ("single", (0.3, 0.5)): "bubbleN_18",
+        ("piece", (0.5, 0.7)): "piece_bubble_38 + piece_grid_29 + line_bubble_32",
+        ("piece", (0.3, 0.5)): "line_bubble_19 + piece_bubble_19 + piece_grid_17",
     }
     single = [t.recipe for g in TABLE if g.kind == "single" for t in g.tiers]
     piece = [t.recipe for g in TABLE if g.kind == "piece" for t in g.tiers]
-    # lone b0709 + the in-word groups (retrain_experiments § 3): windows + the count tier
-    assert single == [
-        "scene_single",
-        "grid_single",
-        "scene_window",
-        "scene_single_small",
-        "scene_window",
-    ]
+    # the lone group + the in-word groups (retrain_experiments § 3): windows + the count tier
+    assert single == ["bubble1", "grid", "bubbleN", "bubble1", "bubbleN"]
     assert sorted(set(piece)) == [
         "grid_string",
         "scene_piece",
@@ -279,15 +281,43 @@ def test_recipe_table_by_kind():
         assert abs(sum(g.share for g in TABLE if g.kind == kind) - total) < 1e-9
     # which groups run is which kinds the vocabs hold; the volume is one rule
     pieces_only = plan_groups({"single": [], "piece": ["p"] * 300, "multi": []})
-    assert [(g.name, n) for g, n in pieces_only] == [("b0507", 10000), ("b0305", 10000)]
-    both = plan_groups({"single": ["s"] * 3, "piece": ["p"] * 6, "multi": []})
-    assert [(g.kind, g.name, n) for g, n in both] == [
-        ("single", "b0709", round(1.5 * ITEMS_PER_VOCAB)),
-        ("single", "b0507", round(1.5 * ITEMS_PER_VOCAB)),
-        ("single", "b0305", round(1.5 * ITEMS_PER_VOCAB)),
-        ("piece", "b0507", round(3 * ITEMS_PER_VOCAB)),
-        ("piece", "b0305", round(3 * ITEMS_PER_VOCAB)),
+    assert [(g.band, n) for g, n in pieces_only] == [
+        ((0.5, 0.7), 10000),
+        ((0.3, 0.5), 10000),
     ]
+    both = plan_groups({"single": ["s"] * 3, "piece": ["p"] * 6, "multi": []})
+    assert [(g.kind, g.band, n) for g, n in both] == [
+        ("single", (0.7, 0.9), round(1.5 * ITEMS_PER_VOCAB)),
+        ("single", (0.5, 0.7), round(1.5 * ITEMS_PER_VOCAB)),
+        ("single", (0.3, 0.5), round(1.5 * ITEMS_PER_VOCAB)),
+        ("piece", (0.5, 0.7), round(3 * ITEMS_PER_VOCAB)),
+        ("piece", (0.3, 0.5), round(3 * ITEMS_PER_VOCAB)),
+    ]
+
+
+def test_tier_of_reads_the_records_of_record():
+    """A record built before 2026-10-02 carries its band group and recipe;
+    ``tier_of`` gives the tier that pair became."""
+    from cjk_scale.builder import tier_of
+
+    old = {"group": "b0709", "recipe": "grid_single", "band": [0.7, 0.9]}
+    assert tier_of(old | {"layout": "grid"}) == "grid_82"
+    assert tier_of(old | {"layout": "flat"}) == "lone_190"
+    assert tier_of(old | {"recipe": "scene_single", "layout": "scene"}) == "bubble1_52"
+    mid = {"group": "b0507", "band": [0.5, 0.7], "layout": "scene"}
+    assert tier_of(mid | {"recipe": "scene_window"}) == "bubbleN_34"
+    assert tier_of(mid | {"recipe": "scene_single_small"}) == "bubble1_32"
+    assert tier_of(mid | {"recipe": "scene_piece"}) == "piece_bubble_38"
+    # the experiments' small tiers (grid_small, grid_lone)
+    assert (
+        tier_of({"group": "l0305", "recipe": "grid_single", "band": [0.3, 0.5]})
+        == "lone_16"
+    )
+    # a pre-collapse stage record: no group, its stage was its band
+    assert tier_of({"kind": "scene_sentence", "band": [0.3, 0.5]}) == "line_bubble_19"
+    # an experiment's own table, and a record that says its tier
+    assert tier_of(mid | {"recipe": "scene_spelled"}) == "b0507_scene_spelled"
+    assert tier_of(mid | {"tier": "grid_29"}) == "grid_29"
 
 
 def test_counts_split_a_group_by_weight():
@@ -305,7 +335,7 @@ def test_counts_split_a_group_by_weight():
 
 
 def test_restart_puts_the_draw_state_back():
-    """Every band group restarts from the pools' post-build state — the rng
+    """Every group restarts from the pools' post-build state — the rng
     a stage build of record continued with, the canvas rng, empty counters."""
     from collections import Counter
     from types import SimpleNamespace as NS
@@ -340,13 +370,13 @@ def test_missing_source_reads_the_pools():
     assert missing_source("scene_sentence", {}, full) == "no sentence lines"
     assert missing_source("scene_piece", {}, empty) == "no pieces"
     nosingle = NS(pieces=["それを"], singles=[], digraphs=[], phrase={})
-    assert missing_source("scene_single", {}, nosingle) == "no singles"
-    assert missing_source("scene_single", {}, empty) is None
+    assert missing_source("bubble1", {}, nosingle) == "no singles"
+    assert missing_source("bubble1", {}, empty) is None
     assert missing_source("scene_piece", {}, full) is None
     assert missing_source("grid_string", {"source": "both"}, full) is None
     assert missing_source("grid_string", {"source": "short"}, empty)
-    assert missing_source("grid_single", {"grids": "3x3"}, empty)
-    assert missing_source("grid_single", {"grids": "1x1,3x3"}, empty) is None
+    assert missing_source("grid", {"grids": "3x3"}, empty)
+    assert missing_source("grid", {"grids": "1x1,3x3"}, empty) is None
 
 
 def test_fit_px_is_the_bubble_capacity():
@@ -901,7 +931,11 @@ def test_plan_groups_take_the_budget():
 
     got = plan_groups({"single": ["s"] * 3, "piece": [], "multi": []}, budget=150 / 90)
     n = round(3 * ITEMS_PER_VOCAB * 150 / 90 * 0.5)
-    assert [(g.name, n) for g, n in got] == [("b0709", n), ("b0507", n), ("b0305", n)]
+    assert [(g.band, n) for g, n in got] == [
+        ((0.7, 0.9), n),
+        ((0.5, 0.7), n),
+        ((0.3, 0.5), n),
+    ]
     # per vocab: a kind's items are Σ of its vocabs' factors
     got = plan_groups(
         {"single": ["a", "b"], "piece": [], "multi": []},

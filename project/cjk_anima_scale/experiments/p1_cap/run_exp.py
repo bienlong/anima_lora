@@ -82,29 +82,30 @@ def mix_table() -> tuple:
 
     from cjk_scale.builder import TABLE
 
-    lone = next(g for g in TABLE if g.name == "b0709")
-    assert lone.kind == "single"
+    lone = next(g for g in TABLE if (g.kind, g.band) == ("single", (0.7, 0.9)))
     return (*SB.table(), dataclasses.replace(lone, share=MIX_SHARE))
 
 
 def check_mix(data: Path) -> dict:
-    """The mix's in-word items are Stage B's: same (group, text, caption,
-    shape) per group, as a multiset (worker order may differ)."""
+    """The mix's in-word items are Stage B's: same (tier, text, caption,
+    shape) per tier, as a multiset (worker order may differ)."""
     import json
+
+    from cjk_scale.builder import tier_of
 
     def by_group(d: Path) -> dict:
         out: dict = {}
         for ln in (d / "train.jsonl").read_text(encoding="utf-8").splitlines():
             if ln:
                 r = json.loads(ln)
-                out.setdefault(r["group"], []).append(
+                out.setdefault(tier_of(r), []).append(
                     (r["text"], r["caption"], tuple(r["shape"]))
                 )
         return out
 
     mix, sb = by_group(data), by_group(SB_DIR / "data")
     for g, items in sb.items():
-        assert sorted(mix.get(g, [])) == sorted(items), f"group {g} differs"
+        assert sorted(mix.get(g, [])) == sorted(items), f"tier {g} differs"
     return {g: len(v) for g, v in mix.items()}
 
 
@@ -161,7 +162,7 @@ def main():
         SB.set_words(SB.donor_words())
         build(rc_of(MIX_DATA), workers=args.workers, table=mix_table())
         metrics["mix_items"] = check_mix(OUT / MIX_DATA / "data")
-        print(f"mix items by group {metrics['mix_items']} (in-word = Stage B's)")
+        print(f"mix items by tier {metrics['mix_items']} (in-word = Stage B's)")
     if "train" in args.legs:
         from cjk_scale.train import train
 

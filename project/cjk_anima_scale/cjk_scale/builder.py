@@ -1,22 +1,31 @@
 """builder — a run's vocabs → ``<run>/data/`` (``img/``, ``train.jsonl``,
-``eval.json``, ``vocabs.json``, ``build.json``, ``sheet_<group>_<recipe>.png``).
+``eval.json``, ``vocabs.json``, ``build.json``, ``sheet_<tier>.png``).
 
 The recipe table is by kind (plan.md § 2): which tiers run is decided by
-which kinds the run's vocabs hold — no shares to set, no stage. A tier is a
-recipe drawn for one band; a **band group** is the tiers of one kind at one
-band. Every item is stamped with its band — ``windows.window(kind, px,
-layout)`` at build time — and the trainer draws its σ inside it::
+which kinds the run's vocabs hold — no shares to set, no stage. A **tier** is
+an item pool: a recipe at one glyph size, named ``<form>_<px>`` — the form
+(``lone`` a glyph alone on its canvas, ``grid`` one glyph per cell,
+``bubble1`` one glyph in a scene bubble, ``bubbleN`` a 2–6 glyph window in
+one; ``piece_*`` / ``line_*`` for the piece kind) and the median ink px its
+items were built at (``TIER_PX``). The name is the file prefix, the record's
+``tier`` and the ``build.json`` key; until 2026-10-02 an item was named by
+its band group and recipe (``b0507/scene_window``) — ``tier_of`` reads those
+records. A **group** is the tiers of one kind drawn at one band from one rng
+restart; it has no name. Every item is stamped with its band —
+``windows.window(kind, px, layout)`` at build time — and the trainer draws
+its σ inside it::
 
-    for each band group g of the vocabs' kinds (n = ITEMS_PER_VOCAB × vocabs of
+    for each group g of the vocabs' kinds (n = ITEMS_PER_VOCAB × vocabs of
     the kind × g.share, split over g's tiers by weight):
         item = tier.draw()                          # vocab(s), px, layout
         w = window(kind_of(vocabs), px, layout)
         keep iff g.band ⊆ w (or |g.band ∩ w| / |g.band| ≥ MIN_OVERLAP); re-draw otherwise
         (a tier with ``gate = "group"`` skips the gate: w = g.band)
+        item.tier = tier.name                       # a 1×1 from a mixed deck: tier.flat
         item.band = w.band                          # the band the trainer draws σ in
 
 The tiers and their weights are the old stage files' mixes (``_archive/configs/
-stage0709|0507|0305.toml``) with the stage gone, so a band group draws the
+stage0709|0507|0305.toml``) with the stage gone, so a group draws the
 item stream that stage's build drew: each group restarts from the same pool
 state and the same ``Random(SEED)`` state (the stage builds each started
 from ``Random(seed)`` + a fresh ``build_pools``). Rendering forks over
@@ -54,18 +63,34 @@ MIN_OVERLAP = 0.8
 
 @dataclass(frozen=True)
 class Tier:
+    name: str  # the item pool, <form>_<px>: file prefix, the record's `tier`, build.json key
     recipe: str
     weight: float  # within the group, as the stage file's share (renormalised over the group)
     params: dict = field(default_factory=dict)
+    # the name the tier's 1×1 items take when its deck deals 1×1 beside the
+    # grids (one draw, two pools: splitting the draw would change the stream)
+    flat: str = ""
+
+    def name_of(self, layout: str) -> str:
+        return self.flat if self.flat and layout == "flat" else self.name
+
+    @property
+    def names(self) -> tuple:
+        return (self.name, self.flat) if self.flat else (self.name,)
 
 
 @dataclass(frozen=True)
 class Group:
-    name: str  # file prefix + build.json key
+    """The tiers of one kind drawn at one band, from one rng restart."""
+
     kind: str  # the vocab kind that brings the group in
     band: tuple
     share: float  # of the kind's items
     tiers: tuple
+
+    @property
+    def label(self) -> str:
+        return " + ".join(n for t in self.tiers for n in t.names)
 
 
 TABLE = (
@@ -74,14 +99,19 @@ TABLE = (
     # tier at share 0.5 beside the two in-word groups below: P1b's 1 : 2
     # (retrain_experiments § 3; C1: lone alone composes nothing)
     Group(
-        "b0709",
         "single",
         (0.7, 0.9),
         0.5,
         (
-            Tier("scene_single", 0.5, {"fill": 0.7, "min_glyph": 28, "px_target": 50}),
             Tier(
-                "grid_single",
+                "bubble1_52",
+                "bubble1",
+                0.5,
+                {"fill": 0.7, "min_glyph": 28, "px_target": 50},
+            ),
+            Tier(
+                "grid_82",
+                "grid",
                 0.5,
                 {
                     "grids": "1x1:1,2x2:1,3x3:1,2x3:1,3x2:1",
@@ -92,39 +122,41 @@ TABLE = (
                     "bubble_frac": 0.5,
                     "mark_horizontal": True,
                 },
+                flat="lone_190",  # a fifth of the deck's deals
             ),
         ),
     ),
     # single vocabs in words (retrain_experiments § 3, P1b / C2 / C3): windows of
     # dialogue lines at the piece tiers' px and bands (Stage B's
     # ``scene_spelled`` took the piece ``scene_piece`` params), routed
-    # captions; b0507 carries the count tier at 0.3 (Stage B)
+    # captions; the 0.5–0.7 group carries the count tier at 0.3 (Stage B)
     Group(
-        "b0507",
         "single",
         (0.5, 0.7),
         0.5,
         (
             Tier(
-                "scene_window",
+                "bubbleN_34",
+                "bubbleN",
                 0.7,
                 {"fill": [0.7, 1.0], "min_glyph": 28, "px_target": 40},
             ),
             Tier(
-                "scene_single_small",
+                "bubble1_32",
+                "bubble1",
                 0.3,
                 {"glyph_px": [28, 40], "fill": [0.2, 0.4], "min_glyph": 12},
             ),
         ),
     ),
     Group(
-        "b0305",
         "single",
         (0.3, 0.5),
         0.5,
         (
             Tier(
-                "scene_window",
+                "bubbleN_18",
+                "bubbleN",
                 1.0,
                 {
                     "glyph_px": [12, 24],
@@ -141,17 +173,18 @@ TABLE = (
     # grid cells: user 2026-09-24). stage0507's small-single tiers are gone
     # with the single kind's own band (plan.md § 2).
     Group(
-        "b0507",
         "piece",
         (0.5, 0.7),
         0.5,
         (
             Tier(
+                "piece_bubble_38",
                 "scene_piece",
                 0.4,
                 {"fill": [0.7, 1.0], "min_glyph": 28, "px_target": 40},
             ),
             Tier(
+                "piece_grid_29",
                 "grid_string",
                 0.15,
                 {
@@ -165,7 +198,12 @@ TABLE = (
                     "bubble_frac": 0.5,
                 },
             ),
-            Tier("scene_short", 0.2, {"min_glyph": 28, "fill": 0.7, "max_lines": 1}),
+            Tier(
+                "line_bubble_32",
+                "scene_short",
+                0.2,
+                {"min_glyph": 28, "fill": 0.7, "max_lines": 1},
+            ),
         ),
     ),
     # piece vocabs, the small tier: stage0305 — 12–24 px text: dialogue lines,
@@ -173,12 +211,12 @@ TABLE = (
     # The two scene_piece px tiers stay two tiers (plan.md "Open": the small
     # tier priced ≥ the large — grid_box report § 2).
     Group(
-        "b0305",
         "piece",
         (0.3, 0.5),
         0.5,
         (
             Tier(
+                "line_bubble_19",
                 "scene_sentence",
                 0.4,
                 {
@@ -190,6 +228,7 @@ TABLE = (
                 },
             ),
             Tier(
+                "piece_bubble_19",
                 "scene_piece",
                 0.3,
                 {
@@ -201,6 +240,7 @@ TABLE = (
                 },
             ),
             Tier(
+                "piece_grid_17",
                 "grid_string",
                 0.3,
                 {
@@ -214,6 +254,77 @@ TABLE = (
         ),
     ),
 )
+
+# The number in a tier's name: the ink px (√(box area / glyphs)) its items were
+# built at, p10 / median / p90, on the kana run — a fixed label, not
+# recomputed per build (a kanji run draws the large tiers larger:
+# retrain_kanji_b4 grid_82 → 100, lone_190 → 235; ``build.json`` ``tiers``
+# has every build's own ``px_kept``). Single kind: ``retrain_kana/data``,
+# and ``run1002_grid_lone/data`` for the small grid / lone tiers the
+# experiments draw (``experiments/grid_small``, ``grid_lone``), and
+# ``experiments/grid_44``'s build for its 44 px pair; piece kind:
+# ``run0925_300f``'s stage builds (median, p10–p90 from its build log).
+TIER_PX = {
+    "lone_190": (119, 191, 268),
+    "grid_82": (55, 82, 118),
+    "bubble1_52": (42, 52, 75),
+    "grid_44": (41, 44, 49),
+    "lone_44": (34, 44, 52),
+    "bubbleN_34": (29, 34, 45),
+    "bubble1_32": (27, 32, 38),
+    "grid_29": (25, 29, 33),
+    "lone_28": (22, 28, 35),
+    "bubbleN_18": (14, 18, 22),
+    "grid_16": (13, 16, 20),
+    "lone_16": (12, 16, 21),
+    "piece_bubble_38": (30, 38, 53),
+    "line_bubble_32": (29, 32, 39),
+    "piece_grid_29": (26, 29, 32),
+    "piece_bubble_19": (15, 19, 23),
+    "line_bubble_19": (16, 19, 23),
+    "piece_grid_17": (13, 17, 21),
+}
+
+# (group, recipe) of a record built before 2026-10-02 → its tier
+LEGACY_TIERS = {
+    ("b0709", "scene_single"): "bubble1_52",
+    ("b0709", "grid_single"): "grid_82",  # its 1×1 (layout flat): lone_190
+    ("b0507", "scene_window"): "bubbleN_34",
+    ("b0507", "scene_single_small"): "bubble1_32",
+    ("b0305", "scene_window"): "bubbleN_18",
+    ("g0507", "grid_single"): "grid_29",
+    ("g0305", "grid_single"): "grid_16",
+    ("l0507", "grid_single"): "lone_28",
+    ("l0305", "grid_single"): "lone_16",
+    ("b0507", "scene_piece"): "piece_bubble_38",
+    ("b0507", "grid_string"): "piece_grid_29",
+    ("b0507", "scene_short"): "line_bubble_32",
+    ("b0305", "scene_sentence"): "line_bubble_19",
+    ("b0305", "scene_piece"): "piece_bubble_19",
+    ("b0305", "grid_string"): "piece_grid_17",
+}
+
+
+def tier_of(rec: dict) -> str:
+    """A ``train.jsonl`` record's tier: its ``tier``, or — a record built
+    before 2026-10-02 — the tier its ``group`` / ``recipe`` became
+    (``<group>_<recipe>``, its file prefix, when an experiment's own table
+    drew it)."""
+    if "tier" in rec:
+        return rec["tier"]
+    lo, hi = rec["band"]
+    # a pre-collapse stage record has no group: its stage was its band
+    group = rec.get("group") or f"b{round(lo * 10):02d}{round(hi * 10):02d}"
+    key = (group, rec.get("recipe") or rec.get("kind"))
+    if key == ("b0709", "grid_single") and rec.get("layout") == "flat":
+        return "lone_190"
+    return LEGACY_TIERS.get(key) or f"{key[0]}_{key[1]}"
+
+
+def tiers(*names: str, table: tuple | None = None) -> tuple:
+    """``table``'s (``TABLE``'s) tiers of these names, in the order asked."""
+    by = {t.name: t for g in (TABLE if table is None else table) for t in g.tiers}
+    return tuple(by[n] for n in names)
 
 
 def default_workers() -> int:
@@ -322,11 +433,9 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
     pools.singles = _weigh(pools.singles, weights)
     groups = plan_groups(kinds, table, budget)
     assert groups, f"{rc.path}: no single or piece vocab — nothing to draw"
-    names = [g.name for g, _n in groups]
-    assert len(set(names)) == len(names), (
-        f"{rc.path}: two kinds bring a group of one name ({names}) — split the run"
-    )
-    route = any(t.recipe == "scene_window" for g, _n in groups for t in g.tiers)
+    names = [n for g, _n in groups for t in g.tiers for n in t.names]
+    assert len(set(names)) == len(names), f"{rc.path}: two tiers of one name ({names})"
+    route = any(t.recipe == "bubbleN" for g, _n in groups for t in g.tiers)
     win = _windows(rc, pools, out, weights) if route else {}
     if kinds["multi"]:
         print(
@@ -338,7 +447,7 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
         f"build {rc.name} → {out}: {sum(len(v) for v in kinds.values())} vocabs "
         f"({', '.join(f'{k} {len(v)}' for k, v in kinds.items() if v)}); "
         + ", ".join(
-            f"{g.name} σ {g.band[0]:.1f}–{g.band[1]:.1f} {n}" for g, n in groups
+            f"{g.label} σ {g.band[0]:.1f}–{g.band[1]:.1f} {n}" for g, n in groups
         )
         + (
             f"; budget {_budget_summary(budget)}"
@@ -358,17 +467,17 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
         for t in g.tiers:
             why = missing_source(t.recipe, t.params, pools)
             if why:
-                skipped[f"{g.name}/{t.recipe}"] = why
-                print(f"  {g.name}/{t.recipe}: skipped — {why}", flush=True)
+                skipped[t.name] = why
+                print(f"  {t.name}: skipped — {why}", flush=True)
             else:
                 live.append(t)
-        counts = _counts([(t.recipe, t.weight) for t in g.tiers], n)
+        counts = _counts([(t.name, t.weight) for t in g.tiers], n)
         for t in live:
             got, rep = _build_tier(
-                g, t, counts[t.recipe], pools, rng, out, len(recs), workers
+                g, t, counts[t.name], pools, rng, out, len(recs), workers
             )
             recs += got
-            report[f"{g.name}/{t.recipe}"] = rep
+            report[t.name] = rep
     assert recs, "no item survived the gate"
     stats = _ink_stats(recs)
     _px_gate(groups, report)
@@ -408,18 +517,24 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
         "glyph_route": route,  # train.py routes the run's captions per glyph
         "windows": win,
         "min_overlap": MIN_OVERLAP,
-        "groups": {
-            g.name: {
+        "groups": [
+            {
                 "kind": g.kind,
                 "band": list(g.band),
                 "n_items": n,
                 "tiers": [
-                    {"recipe": t.recipe, "weight": t.weight, **t.params}
+                    {
+                        "name": t.name,
+                        **({"flat": t.flat} if t.flat else {}),
+                        "recipe": t.recipe,
+                        "weight": t.weight,
+                        **t.params,
+                    }
                     for t in g.tiers
                 ],
             }
             for g, n in groups
-        },
+        ],
         "skipped": skipped,
         "workers": workers,
         "tiers": report,
@@ -435,7 +550,7 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
     )
     print(
         f"data: {len(recs)} train items "
-        f"{dict(Counter(r['group'] + '/' + r['recipe'] for r in recs))}; bands {build['bands']}; "
+        f"{dict(Counter(r['tier'] for r in recs))}; bands {build['bands']}; "
         f"eval {len(ev)} prompts {dict(build['eval'])}; {build['minutes']} min",
         flush=True,
     )
@@ -568,7 +683,7 @@ def _build_tier(
             px_seen += px
             tries += tr
         pools.used.update(Counter(r["scene"] for r in kept if "scene" in r))
-    name = f"{g.name}/{t.recipe}"
+    name = t.name
     if len(kept) < n:
         print(
             f"  {name}: WARNING {len(kept)}/{n} items after {tries} tries "
@@ -586,6 +701,7 @@ def _build_tier(
         "px_drawn": drawn,
         "px_target": t.params.get("px_target"),
         "windows": dict(Counter(json.dumps(r["window"]) for r in kept)),
+        **({"items": dict(Counter(r["tier"] for r in kept))} if t.flat else {}),
         "horizontal": _n_horizontal(kept),
         "minutes": round((time.time() - t0) / 60, 1),
     }
@@ -594,7 +710,7 @@ def _build_tier(
         f"px kept {_fmt(q)} (drawn {_fmt(drawn)}); windows {rep['windows']}",
         flush=True,
     )
-    _sheet(rng, kept, out / f"sheet_{g.name}_{t.recipe}.png")
+    _sheet(rng, kept, out / f"sheet_{t.name}.png")
     return kept, rep
 
 
@@ -626,7 +742,8 @@ def _draw_loop(g: Group, t: Tier, n: int, pools: Pools, rng, out: Path, first: i
             rejects["no_window" if w is None else "band"] += 1
             continue
         i = first + len(kept)
-        fn = out / "img" / f"{g.name}_{t.recipe}_{i:06d}.png"
+        name = t.name_of(item.layout)
+        fn = out / "img" / f"{name}_{i:06d}.png"
         item.image.save(fn)
         rec = {
             "file": str(fn),
@@ -635,7 +752,7 @@ def _draw_loop(g: Group, t: Tier, n: int, pools: Pools, rng, out: Path, first: i
             "src": item.src,
             "kind": t.recipe,
             "recipe": t.recipe,
-            "group": g.name,
+            "tier": name,
             "layout": item.layout,
             "units": item.vocabs,  # on-disk key, frozen
             "shape": list(item.shape),
@@ -681,7 +798,7 @@ def _px_gate(groups, report):
     bad = []
     for g, _n in groups:
         for t in g.tiers:
-            key = f"{g.name}/{t.recipe}"
+            key = t.name
             target = t.params.get("px_target")
             if key not in report or not target or not report[key]["px_drawn"]:
                 continue

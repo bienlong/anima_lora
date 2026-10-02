@@ -5,23 +5,28 @@
 12 vs 33 of 72, singles contained 31 vs 44 of 64); its one-band arm
 (`b7593`, every item at σ 0.75–0.93) read 0. This arm (user, 10-02) puts the
 lone glyph back **at the grids' px** — a 1×1 canvas, bare or one bubble,
-15 % of the items, taken from ``g0305`` (30 → 15 %) — on the 81 hiragana
+15 % of the items, taken from ``grid_16`` (30 → 15 %) — on the 81 hiragana
 rows + ``ー`` (82), at 60 steps / row (4 920).
 
-| group | σ | share | tiers |
+| tier | σ | share | |
 |---|---|---|---|
-| `g0507` | 0.5–0.7 | 0.45 | `grid_single` 2×2 – 3×3, glyph 28–42 font px |
-| `g0305` | 0.3–0.5 | 0.225 | `grid_single` 2×2 – 3×3, glyph 14–26 font px |
-| `l0507` | 0.5–0.7 | 0.1125 | `grid_single` 1×1, glyph 28–42 font px |
-| `l0305` | 0.3–0.5 | 0.1125 | `grid_single` 1×1, glyph 14–26 font px |
-| `b0507` | 0.5–0.7 | 0.3 | `builder.TABLE`'s: `scene_window` 0.7, `scene_single_small` 0.3 |
-| `b0305` | 0.3–0.5 | 0.3 | `builder.TABLE`'s: `scene_window` |
+| `grid_29` | 0.5–0.7 | 0.45 | `grid` 2×2 – 3×3, glyph 28–42 font px |
+| `grid_16` | 0.3–0.5 | 0.225 | `grid` 2×2 – 3×3, glyph 14–26 font px |
+| `lone_28` | 0.5–0.7 | 0.1125 | `grid` 1×1, glyph 28–42 font px |
+| `lone_16` | 0.3–0.5 | 0.1125 | `grid` 1×1, glyph 14–26 font px |
+| `bubbleN_34` + `bubble1_32` | 0.5–0.7 | 0.3 | `builder.TABLE`'s, 0.7 : 0.3 |
+| `bubbleN_18` | 0.3–0.5 | 0.3 | `builder.TABLE`'s |
+
+(The data dirs of record were built before the tiers were named by px,
+2026-10-02: their records say `g0507` / `g0305` / `l0507` / `l0305` /
+`b0507` / `b0305` and `grid_single` / `scene_window` /
+`scene_single_small` — `builder.tier_of`.)
 
 Σ shares 1.5, as `grid_small`. The 1×1's 15 % is split evenly over the two
 font-px ranges, each at its grid twin's band **ungated** (`gate = "group"`):
 a lone glyph's px is its own ink box, so the first build's gate dropped
 ``ー`` from both tiers (0.38 × its font px) and most small kana from
-`l0507` (っ 0.58, ぅ 0.60; the median glyph 0.83) — a grid item averages
+`lone_28` (っ 0.58, ぅ 0.60; the median glyph 0.83) — a grid item averages
 its cells and keeps them. Bubble fit and jitter are `grid_small`'s: the
 bubble is sized to its glyph, and the glyph sits at the canvas centre ± 8 %.
 Windows are drawn from the 82 rows alone, the kana run's `read` held out.
@@ -30,7 +35,7 @@ Old seed underneath, as the kana run.
 Legs:
 - ``data`` (CPU) → ``OUT/run1002_grid_lone/data``;
 - ``recap`` (CPU) → ``OUT/run1002_grid_lone/data_<tag>``: `grid_small`'s
-  plain captions on every `grid_single` item, the 1×1 with one bubble and no
+  plain captions on every grid and lone item, the 1×1 with one bubble and no
   position header (``… no humans, speech bubble. Text reads as "ご".``);
 - ``train`` (GPU) → ``OUT/experiments/grid_lone_cold_hira[_<tag>]``;
 - ``read`` (GPU): `grid_small`'s (the hiragana words `en` + singles `swap`
@@ -81,11 +86,9 @@ PLAIN_CLAUSE = '{p}. Text reads as "{k}".'  # the recap's wording on a scene pro
 
 
 def table(GS) -> tuple:
-    from cjk_scale.builder import TABLE, Group, Tier
+    from cjk_scale.builder import Group, Tier, tiers
 
-    words = {g.name: g for g in TABLE if g.kind == "single"}
-
-    def grid(px: list, grids: str) -> tuple:
+    def grid(name: str, px: list, grids: str) -> tuple:
         params = {
             "grids": grids,
             "glyph_px": px,
@@ -96,15 +99,15 @@ def table(GS) -> tuple:
         }
         if grids == LONE:
             params["gate"] = "group"  # the grid twin's band, whatever the ink px
-        return (Tier("grid_single", 1.0, params),)
+        return (Tier(name, "grid", 1.0, params),)
 
     return (
-        Group("g0507", "single", (0.5, 0.7), 0.45, grid([28, 42], GS.GRIDS)),
-        Group("g0305", "single", (0.3, 0.5), 0.225, grid([14, 26], GS.GRIDS)),
-        Group("l0507", "single", (0.5, 0.7), 0.1125, grid([28, 42], LONE)),
-        Group("l0305", "single", (0.3, 0.5), 0.1125, grid([14, 26], LONE)),
-        Group("b0507", "single", (0.5, 0.7), 0.3, words["b0507"].tiers),
-        Group("b0305", "single", (0.3, 0.5), 0.3, words["b0305"].tiers),
+        Group("single", (0.5, 0.7), 0.45, grid("grid_29", [28, 42], GS.GRIDS)),
+        Group("single", (0.3, 0.5), 0.225, grid("grid_16", [14, 26], GS.GRIDS)),
+        Group("single", (0.5, 0.7), 0.1125, grid("lone_28", [28, 42], LONE)),
+        Group("single", (0.3, 0.5), 0.1125, grid("lone_16", [14, 26], LONE)),
+        Group("single", (0.5, 0.7), 0.3, tiers("bubbleN_34", "bubble1_32")),
+        Group("single", (0.3, 0.5), 0.3, tiers("bubbleN_18")),
     )
 
 
@@ -174,7 +177,7 @@ def main():
     arm = ARM + (f"_{args.tag}" if args.tag else "")
     data_dir = OUT / DATA_RUN / ("data" + (f"_{args.tag}" if args.tag else ""))
     steps = STEPS_PER_ROW * len(rows)
-    shares = {g.name: g.share for g in tbl}
+    shares = {g.label: g.share for g in tbl}
     print(
         f"{arm}: {len(rows)} rows (hiragana + {EXTRA_ROWS}) cold × {STEPS_PER_ROW} = "
         f"{steps} steps on {SEED_ROWS_0921}; groups {shares} "

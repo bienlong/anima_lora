@@ -39,6 +39,7 @@ os.environ.setdefault("ANIMA_VOCAB_PACK", "models/vocab_packs/anima_cjk_vocab_pa
 
 LINE = Path(__file__).resolve().parents[2]  # project/cjk_anima_scale
 sys.path.insert(0, str(LINE))
+from cjk_scale.builder import tier_of  # noqa: E402
 from cjk_scale.paths import OUT, SEED_ROWS, bootstrap, load_experiment  # noqa: E402
 
 bootstrap()
@@ -47,7 +48,7 @@ from bench._common import make_run_dir, write_result  # noqa: E402
 NAME = "b0305_reband"
 SRC_RUN = "retrain_kana"
 SRC = OUT / SRC_RUN / "data"
-GROUP = "b0305"
+TIER = "bubbleN_18"  # the records of record: group b0305, recipe scene_window
 BAND = (0.75, 0.93)
 MU = 0.02
 STEPS_PER_ROW = 23  # × 174 kana rows ≈ 4 000 steps
@@ -57,7 +58,7 @@ def data(dst: Path, band: tuple) -> dict:
     recs = [
         json.loads(ln) for ln in (SRC / "train.jsonl").read_text("utf-8").splitlines()
     ]
-    recs = [r for r in recs if r["group"] == GROUP]
+    recs = [r for r in recs if tier_of(r) == TIER]
     old = Counter(tuple(r["band"]) for r in recs)
     for r in recs:
         r["band"] = list(band)
@@ -70,7 +71,7 @@ def data(dst: Path, band: tuple) -> dict:
     bj = json.loads((SRC / "build.json").read_text("utf-8"))
     (dst / "build.json").write_text(
         json.dumps(
-            bj | {"band": list(band), "reband_from": str(SRC), "group": GROUP},
+            bj | {"band": list(band), "reband_from": str(SRC), "tier": TIER},
             ensure_ascii=False,
             indent=1,
         ),
@@ -79,7 +80,7 @@ def data(dst: Path, band: tuple) -> dict:
     return {
         "from": str(SRC),
         "items": len(recs),
-        "recipes": dict(Counter(r["recipe"] for r in recs)),
+        "tiers": dict(Counter(tier_of(r) for r in recs)),
         "old_bands": {f"{a}-{b}": n for (a, b), n in old.items()},
         "band": list(band),
         "glyph_route": bj.get("glyph_route"),
@@ -107,12 +108,12 @@ def main():
     rc = dataclasses.replace(load_run(SRC_RUN), name=name)
     vocabs = json.loads((SRC / "vocabs.json").read_text("utf-8"))
     n_items = sum(
-        json.loads(ln)["group"] == GROUP
+        tier_of(json.loads(ln)) == TIER
         for ln in (SRC / "train.jsonl").read_text("utf-8").splitlines()
     )
     steps = args.steps_per_row * len(vocabs)
     print(
-        f"{name}: {n_items} {GROUP} items → band {args.band}, {len(vocabs)} rows × "
+        f"{name}: {n_items} {TIER} items → band {args.band}, {len(vocabs)} rows × "
         f"{args.steps_per_row} = {steps} steps (≈ {steps * 4 / n_items:.1f} epochs at "
         f"batch 4), μ {args.mu}, warm from {SEED_ROWS}",
         flush=True,

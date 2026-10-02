@@ -127,14 +127,22 @@ nothing here imports, paths into or configures from `../finished/cjk_renderable_
   `horizontal_scenes` pools only — `sl1w`), marked in the caption
   (`horizontal Japanese text reads as` / `, written horizontally.`); a single glyph
   has none. Not a window axis.
+- **Item pools are tiers named `<form>_<px>`** (2026-10-02): `lone` / `grid` /
+  `bubble1` / `bubbleN` (+ `piece_*` / `line_*`) and the median ink px the
+  tier was built at on the kana run — `bubbleN_34`, `grid_82`
+  (`builder.TIER_PX`; the table is README § Item pools). The record key is
+  `tier`. Data dirs, reports and results before that date say
+  `b0507/scene_window` (band group / recipe); read a record's tier with
+  `builder.tier_of`, never by its `group`. A group — the tiers of one kind
+  drawn at one band from one rng restart — has no name.
 - σ is per item: the builder stamps every item with its band (`windows.window`
-  of its kind × px × layout) and the trainer draws σ inside it. A band group's
+  of its kind × px × layout) and the trainer draws σ inside it. A group's
   gate keeps an item iff the group band is inside its window (or 0.8 of it)
   — a tier with `gate = "group"` skips it and takes the group's band (a lone
   glyph's px is its own ink box, so the gate drops ー and the small kana
   from a small lone tier: `experiments/grid_lone`);
   the ±20 % `px_target` gate reads the tier's **drawn** px, before the band gate
-  truncates it. Each band group restarts from the pools' post-build rng state,
+  truncates it. Each group restarts from the pools' post-build rng state,
   so it draws the item stream its old stage build drew (verified 2026-09-25:
   records and pixels identical, workers 1) — do not reorder rng consumption
   in `recipes.py` / `build_pools`.
