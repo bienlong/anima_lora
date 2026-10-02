@@ -162,6 +162,10 @@ class ImagePrepSection(KnobSection):
             t("preprocess_source_image_dir"),
             tooltip=t("preprocess_source_image_dir_tip"),
         )
+        # 点选数据集文件夹（用户请求）：行尾打开图标 → 文件夹选择对话框。
+        from gui.widgets.fields import attach_browse
+
+        attach_browse(self.widgets["source_image_dir"], mode="dir")
         self.add_knob("path_scope", line(placeholder="data_group1"), t("path_scope"))
         self.add_knob(
             "preprocess_path_pattern",

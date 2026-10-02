@@ -77,6 +77,16 @@ _COMBO_CHOICES: dict[str, tuple[list[str], bool]] = {
     "discrete_flow_shift": (["1.0", "2.0", "3.0", "4.0"], True),
 }
 
+# Keys that get a trailing open-icon: click → file picker → fills the field.
+_FILE_BROWSE_KEYS = frozenset(
+    {
+        "pretrained_model_name_or_path",
+        "qwen3",
+        "vae",
+        "network_weights",
+    }
+)
+
 
 def _enum_combo(key: str, v) -> QWidget:
     """Quick-pick combo for an enum-ish TOML key (see _COMBO_CHOICES)."""
@@ -155,10 +165,17 @@ def _widget(v: Any, key: str = "") -> QWidget:
         w.setValue(v)
         return _no_wheel(w)
     if isinstance(v, float):
-        return QLineEdit(f"{v:g}")
+        w = QLineEdit(f"{v:g}")
+        return w
     if isinstance(v, list):
-        return QLineEdit(json.dumps(v))
-    return QLineEdit(str(v))
+        w = QLineEdit(json.dumps(v))
+        return w
+    w = QLineEdit(str(v))
+    # Quick-pick file dialogs for the model paths (user request: point-and-pick
+    # instead of typing absolute paths).
+    if key in _FILE_BROWSE_KEYS:
+        attach_browse(w, mode="file")
+    return w
 
 
 def _read(w: QWidget, orig: Any = None) -> Any:
@@ -272,6 +289,36 @@ def wrap_tooltip(text: str | None) -> str | None:
     if _LOOKS_RICH.search(text):
         return text
     return _wrap_plain(text, TOOLTIP_WRAP_COLS)
+
+
+def attach_browse(edit: QLineEdit, *, mode: str, title: str = "") -> None:
+    """Append an open-icon to a QLineEdit: click → file/folder dialog → fill.
+
+    ``mode="dir"`` picks a folder (dataset source dirs), ``mode="file"`` picks
+    a single file (model paths). Chosen paths are normalized to forward
+    slashes so they paste into TOML safely (mirrors ``_read``'s fixup).
+    """
+    import os
+
+    from PySide6.QtWidgets import QFileDialog, QStyle
+
+    icon = edit.style().standardIcon(
+        QStyle.SP_DirOpenIcon if mode == "dir" else QStyle.SP_FileDialogContentsView
+    )
+    action = edit.addAction(icon, QLineEdit.TrailingPosition)
+
+    def _browse():
+        cur = edit.text().strip()
+        start = cur if cur and os.path.exists(cur) else ""
+        if mode == "dir":
+            d = QFileDialog.getExistingDirectory(edit, title, start)
+        else:
+            d = QFileDialog.getOpenFileName(edit, title, start)[0]
+        if d:
+            edit.setText(d.replace("\\", "/"))
+            edit.setFocus()
+
+    action.triggered.connect(_browse)
 
 
 def make_field_label(
