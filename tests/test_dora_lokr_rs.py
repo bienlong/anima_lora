@@ -208,7 +208,10 @@ def test_dora_forward_matches_weight_decompose_formula():
     )
 
 
-def test_dora_magnitude_stays_frozen_under_backward():
+def test_dora_magnitude_trains_under_backward():
+    """The magnitude vector is DoRA's second trainable quantity — it must be
+    an nn.Parameter receiving gradients (a buffer here would freeze it at
+    ‖W0‖ and degrade DoRA to fixed-magnitude normalized LoRA)."""
     torch.manual_seed(0)
     org = torch.nn.Linear(48, 32, bias=False)
     module = DoRALoRAModule("t_dora", org, 1.0, 8, 16)
@@ -219,9 +222,9 @@ def test_dora_magnitude_stays_frozen_under_backward():
     module(torch.randn(2, 48)).sum().backward()
     assert module.lora_up.weight.grad is not None
     assert module.lora_down.weight.grad is not None
-    # m is a buffer (not a parameter): no gradient can reach it.
-    assert module.dora_scale.grad is None
-    assert all(p is not module.dora_scale for p in module.parameters())
+    assert module.dora_scale.grad is not None
+    assert module.dora_scale.grad.abs().sum() > 0
+    assert any(p is module.dora_scale for p in module.parameters())
 
 
 def test_dora_rejects_conv2d():
@@ -313,7 +316,7 @@ def test_dokr_zero_init_and_forward_matches_formula():
     )
 
 
-def test_dokr_gradients_reach_factors_and_magnitude_frozen():
+def test_dokr_gradients_reach_factors_and_magnitude():
     torch.manual_seed(0)
     org = torch.nn.Linear(256, 512, bias=False)
     module = DoKrLoRAModule("t_dokr", org, 1.0, 4, 16)
@@ -324,8 +327,8 @@ def test_dokr_gradients_reach_factors_and_magnitude_frozen():
     module(torch.randn(2, 256)).sum().backward()
     for p in (module.lokr_w1, module.lokr_w2_a, module.lokr_w2_b):
         assert p.grad is not None and p.grad.abs().sum() > 0
-    assert module.dora_scale.grad is None
-    assert all(p is not module.dora_scale for p in module.parameters())
+    assert module.dora_scale.grad is not None
+    assert module.dora_scale.grad.abs().sum() > 0
 
 
 def test_dokr_rejects_conv2d():

@@ -13,6 +13,7 @@ use_cmmd = false
 use_lokr = true
 lokr_factor = 0
 use_dora = true
+dora_detach_norm = false
 rs_lora = false
 sample_prompts = []
 sample_every_n_epochs = 0
@@ -29,8 +30,8 @@ validation_split = 0.0
 
 [variant]
 family = "lora"
-label = "LoKr"
-description = "LoRA + Kronecker product — more expressive per parameter; loads in-repo only."
+label = "DoKr"
+description = "DoKr: Kronecker direction + trainable magnitude (detach norm) — expressive AND fast; loads in-repo only."
 order = 40
 target_res = [ 896, 1024,]
 min_pixels = 250000

@@ -152,6 +152,57 @@ class LoKrModule(BaseLoRAModule):
 
         self.org_module_ref = [org_module]
         self._fused = False
+        # Kron block shapes for the block-wise activation path (no out×in
+        # materialization): kron(w1, w2)[(i,k),(j,m)] = w1[i,j]·w2[k,m] and the
+        # product maps x viewed as (in_m, in_n) blocks to (out_l, out_k) blocks.
+        self._in_m, self._in_n = int(in_m), int(in_n)
+        self._out_l, self._out_k = int(out_l), int(out_k)
+        self._out_dim = int(out_dim)
+
+    # -- block-wise kron activation path ------------------------------------
+
+    def _kron_project(self, x: torch.Tensor, work: torch.dtype) -> torch.Tensor:
+        """``kron(w1, w2) @ x`` block-wise — two small einsums, never
+        materializing the (out × in) Kronecker matrix:
+
+            x4 = x.view(..., in_m, in_n)
+            u[..., j, k] = Σ_m w2[k, m]·x4[..., j, m]   (w2 or w2_a@w2_b)
+            y4[..., i, k] = Σ_j w1[i, j]·u[..., j, k]
+            y = y4.view(..., out)
+        """
+        w1 = self.lokr_w1.to(x.dtype)
+        w2 = self._w2().to(x.dtype)
+        lead = x.shape[:-1]
+        x4 = x.reshape(*lead, self._in_m, self._in_n)
+        u = torch.einsum("...jm,km->...jk", x4, w2)
+        y4 = torch.einsum("ij,...jk->...ik", w1, u)
+        return y4.reshape(*lead, self._out_dim)
+
+    def _row_norms(self) -> torch.Tensor:
+        """Row norms of ``W0 + scale·kron(w1, w2)`` block-wise (fp32 accumulate,
+        no full-matrix materialization): with ``c = scale·w1``,
+
+            ‖V_row(i,k)‖² = Σ_j Σ_m (W0[i,k,j,m] + c[i,j]·w2[k,m])²
+                          = Σ_j [Σ_m W0² + 2c·Σ_m(W0·w2) + c²·Σ_m w2²]
+        exact — V is linear in w1/w2, so the per-element square expansion
+        loses nothing (and this is the detach path: no autograd, no retention).
+        """
+        org_weight = self.org_module_ref[0].weight
+        W04 = org_weight.to(torch.float).view(
+            self._out_l, self._out_k, self._in_m, self._in_n
+        )
+        w1 = self.lokr_w1.to(torch.float)
+        w2 = self._w2().to(torch.float)
+        c = self.scale * w1
+        w2_sq = (w2 * w2).sum(dim=1)  # (out_k,)
+        w0_sq = (W04 * W04).sum(dim=3)  # (out_l, out_k, in_m)
+        w0_dot = torch.einsum("ikjm,km->ikj", W04, w2)  # (out_l, out_k, in_m)
+        row_sq = (
+            w0_sq.sum(dim=2)
+            + 2.0 * torch.einsum("ij,ikj->ik", c, w0_dot)
+            + w2_sq.unsqueeze(0) * (c * c).sum(dim=1).unsqueeze(1)
+        )
+        return row_sq.clamp_min(1e-12).sqrt().reshape(-1)
 
     # -- delta weight -------------------------------------------------------
 
@@ -185,8 +236,10 @@ class LoKrModule(BaseLoRAModule):
     # -- forward ------------------------------------------------------------
 
     def _eval_delta(self, x, org_forwarded):
-        return self.multiplier * torch.nn.functional.linear(
-            self._rebalance(x), self._delta_weight(grad=False)
+        # Block-wise activation path: kron·x via two small einsums — same map
+        # as F.linear(x, kron delta) without the (out × in) materialization.
+        return self.multiplier * self.scale * self._kron_project(
+            self._rebalance(x), x.dtype
         )
 
     def forward(self, x):
@@ -204,11 +257,11 @@ class LoKrModule(BaseLoRAModule):
             return org_forwarded
 
         work = org_forwarded.dtype
-        delta = self._delta_weight(grad=True).to(work)
         x_lora = self._rebalance(x.to(work))
-        return org_forwarded + self.multiplier * torch.nn.functional.linear(
-            x_lora, delta
-        ).to(org_forwarded.dtype)
+        y = self._kron_project(x_lora, work)
+        return org_forwarded + self.multiplier * self.scale * y.to(
+            org_forwarded.dtype
+        )
 
     # -- fuse / merge -------------------------------------------------------
 

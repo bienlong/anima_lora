@@ -87,31 +87,30 @@ class DoRALoRAModule(LoRAModule):
             magnitude = dora_scale.detach().to(torch.float).clone()
         else:
             magnitude = W0.to(torch.float).norm(p=2, dim=1)
-        self.register_buffer("dora_scale", magnitude)
+        # 幅度向量是 DoRA 的第二个可训练量（方向由 down/up 承担）——必须是
+        # Parameter 而非 buffer，否则幅度永远停在 ‖W0‖，退化成"固定幅度归一化"。
+        self.dora_scale = torch.nn.Parameter(magnitude)
 
     # -- weight math --------------------------------------------------------
 
-    def _norm_scale_fn(self, up_w: torch.Tensor, down_w: torch.Tensor) -> torch.Tensor:
-        """Row-wise ``s = m / ‖W0 + scale·(up@down)‖`` → (out, 1).
-
-        Runs in the model dtype (bf16 on GPU) with an fp32-accumulated norm —
-        LyCORIS-style. The fp32 casts of the full W0 this replaces cost a
-        16MB allocation per module per step (280 modules → multi-GB of pure
-        cast traffic per step) and dominated the whole step time.
-        """
+    def _norms(self, up_w: torch.Tensor, down_w: torch.Tensor) -> torch.Tensor:
+        """Row norms of ``W0 + scale·(up@down)`` (fp32 accumulate) → (out, 1)."""
         W0 = self.org_module_ref[0].weight
         V = W0 + self.scale * (up_w @ down_w)
-        norms = V.norm(p=2, dim=1, keepdim=True, dtype=torch.float32).clamp_min(1e-12)
-        return self.dora_scale.to(V.dtype).unsqueeze(1) / norms
+        return V.norm(p=2, dim=1, keepdim=True, dtype=torch.float32).clamp_min(1e-12)
+
+    def _norm_scale_fn(self, up_w: torch.Tensor, down_w: torch.Tensor) -> torch.Tensor:
+        """``s = m / ‖V‖`` per row (model dtype, fp32-accumulated norm)."""
+        norms = self._norms(up_w, down_w)
+        return self.dora_scale.to(norms.dtype).unsqueeze(1) / norms
 
     def _norm_scale(self, *, grad: bool) -> torch.Tensor:
         if self.detach_norm:
-            # 范数不参与梯度：无 V 保留、无 checkpoint 段——速度与普通 LoRA
-            # 同级。代价：范数对 up/down 的二阶贡献为零（社区常见近似）。
+            # 只 detach 范数分母：m 保持在图内（幅度照常训练），方向不接收
+            # 范数耦合的二阶梯度——显存/速度与普通 LoRA 持平的社区常见近似。
             with torch.no_grad():
-                return self._norm_scale_fn(
-                    self.lora_up.weight, self.lora_down.weight
-                ).detach()
+                norms = self._norms(self.lora_up.weight, self.lora_down.weight)
+            return self.dora_scale.unsqueeze(1) / norms
         up_w = self.lora_up.weight if grad else self.lora_up.weight.detach()
         down_w = self.lora_down.weight if grad else self.lora_down.weight.detach()
         if grad and torch.is_grad_enabled():

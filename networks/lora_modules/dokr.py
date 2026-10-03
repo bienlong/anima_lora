@@ -42,6 +42,7 @@ class DoKrLoRAModule(LoKrModule):
         factor: int = -1,
         lokr_shapes=None,
         dora_scale=None,
+        dora_detach_norm=False,
     ):
         if org_module.__class__.__name__ != "Linear":
             raise ValueError(
@@ -66,9 +67,29 @@ class DoKrLoRAModule(LoKrModule):
             magnitude = dora_scale.detach().to(torch.float).clone()
         else:
             magnitude = W0.to(torch.float).norm(p=2, dim=1)
-        self.register_buffer("dora_scale", magnitude)
+        # 可训练幅度（DoRA 语义核心）——buffer 版本会让幅度永远冻结在 ‖W0‖。
+        self.dora_scale = torch.nn.Parameter(magnitude)
+        self.detach_norm = bool(dora_detach_norm)
 
     # -- weight math --------------------------------------------------------
+
+    def _norm_scale(self) -> torch.Tensor:
+        """``s = m / ‖W0 + scale·kron‖_row`` → (out, 1)。
+
+        detach 分支（DoKr 变体默认）：范数块状分解（无大矩阵拼接、无图内
+        保留），m 保持在图内照常训练；严格分支走旧的 materializing 路径
+        （梯度精确但慢一个量级，与 DoRA 严格模式同款权衡）。
+        """
+        if self.detach_norm:
+            with torch.no_grad():
+                norms = self._row_norms()
+            return self.dora_scale.unsqueeze(1) / norms
+        W0 = self.org_module_ref[0].weight.to(torch.float)
+        V = W0 + self.scale * make_kron(
+            self.lokr_w1.to(torch.float), self._w2().to(torch.float), 1.0
+        )
+        norms = V.norm(p=2, dim=1, keepdim=True).clamp_min(1e-12)
+        return self.dora_scale.to(torch.float).unsqueeze(1) / norms
 
     def _dokr_delta_fn(self, w1: torch.Tensor, w2: torch.Tensor) -> torch.Tensor:
         """``W' − W0`` in fp32 from the (graph-carrying) kron factors.
@@ -102,6 +123,13 @@ class DoKrLoRAModule(LoKrModule):
     # -- forward ------------------------------------------------------------
 
     def _eval_delta(self, x, org_forwarded):
+        work = org_forwarded.dtype
+        if self.detach_norm:
+            with torch.no_grad():
+                s = self._norm_scale().squeeze(-1).to(work)
+            x_lora = self._rebalance(x.to(work))
+            y = self.scale * self._kron_project(x_lora, work)
+            return self.multiplier * ((s - 1.0) * org_forwarded.to(work) + s * y)
         return self.multiplier * torch.nn.functional.linear(
             self._rebalance(x), self._dokr_delta(grad=False)
         )
@@ -121,6 +149,15 @@ class DoKrLoRAModule(LoKrModule):
             return org_forwarded
 
         work = org_forwarded.dtype
+        if self.detach_norm:
+            # 激活侧恒等式 + 块状 kron：无 (out×in) 拼接、无全量 delta GEMM
+            # ——速度与 DoRA detach/普通 LoRA 同级（实测见 docstring）。
+            s = self._norm_scale().squeeze(-1).to(work)
+            x_lora = self._rebalance(x.to(work))
+            y = self.scale * self._kron_project(x_lora, work)
+            return org_forwarded + self.multiplier * (
+                (s - 1.0) * org_forwarded.to(work) + s * y
+            ).to(org_forwarded.dtype)
         delta = self._dokr_delta(grad=True).to(work)
         x_lora = self._rebalance(x.to(work))
         return org_forwarded + self.multiplier * torch.nn.functional.linear(
