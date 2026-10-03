@@ -10,8 +10,8 @@
 ``…/<run>/trained.pt`` (the whole merged rows, ``cjk_scale.train``: the
 run's rows cold, every other row frozen at its ``seed``). ``read`` (GPU) is
 the scale line's ``experiments/grid_lone`` ``read_plain`` on the kana run's
-13 words + 14 singles: the run paired against ``READ_AGAINST`` (renders
-cached in their dirs; the run's land in ``…/<run>/native_r4_plain/``) →
+13 words + 14 singles: the run paired against every reseed run read
+before it and ``READ_AGAINST`` (renders cached in their dirs; the run's land in ``…/<run>/native_r4_plain/``) →
 ``results/<YYYYMMDD-HHMM>-<run>/result.json``.
 """
 
@@ -71,9 +71,20 @@ def read(run) -> None:
     from bench._common import make_run_dir, write_result
     from cjk_scale.paths import OUT as SCALE_OUT
     from cjk_scale.paths import load_experiment
-    from reseed import HOME
+    from reseed import HOME, OUT
 
-    arms = {run.name: run.dir} | {Path(d).name: SCALE_OUT / d for d in READ_AGAINST}
+    # every other reseed run already read (its plain renders cached), then the
+    # scale line's arms of record
+    read_before = {
+        d.name: d
+        for d in sorted(OUT.iterdir())
+        if d != run.dir and (d / "native_r4_plain" / "native_reads.json").exists()
+    }
+    arms = (
+        {run.name: run.dir}
+        | read_before
+        | {Path(d).name: SCALE_OUT / d for d in READ_AGAINST}
+    )
     metrics = {"read_plain": load_experiment("grid_lone").read_plain(arms, "all")}
     run_dir = make_run_dir("cjk_anima_reseed", label=run.name, root=HOME / "results")
     write_result(
