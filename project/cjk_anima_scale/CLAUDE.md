@@ -41,6 +41,9 @@ nothing here imports, paths into or configures from `../finished/cjk_renderable_
   `run_exp.py`). Baking a run's rows into a pack is one command, not a
   module:
   `.venv/bin/python scripts/toolkits/bake_vocab_pack.py output/cjk_anima_scale/<run> --out models/vocab_packs/anima_cjk_vocab_pack_<run>` (`--glyph_route` ships routing on, as a routed run's rows need).
+  **`builder` / `recipes` are frozen** (2026-10-03): they rebuild the seed of
+  record; new data recipes go to `../cjk_anima_reseed/reseed/`, which imports
+  `src/` and the trainer from here but never these two.
 - `src/` — **the stage packages, vendored 2026-09-25** (top-level `common` /
   `data` / `train` / `eval` / `scenes` / `probe`, `cli`, `stages`,
   `run_stage.py`) and **pruned the same day to the code the line runs**: the

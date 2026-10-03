@@ -1,0 +1,268 @@
+"""builder — a run's rows → ``<run>/data/`` (``img/``, ``train.jsonl``,
+``eval.json``, ``vocabs.json``, ``windows.json``, ``build.json``,
+``sheet_<tier>.png``), in one pass::
+
+    for each tier t of TABLE (n = ITEMS_PER_ROW × rows × t.share × frac):
+        item = t.recipe()               # re-drawn on a render miss or a px outside t.px_keep
+        item.tier, item.band = t.name, t.band
+
+Rendering forks over ``workers`` processes, each on a seed drawn from the
+build's rng (deterministic per seed × workers).
+"""
+
+from __future__ import annotations
+
+import json
+import multiprocessing as mp
+import os
+import random
+import statistics as st
+import time
+from collections import Counter
+from pathlib import Path
+
+from . import table as T
+from .config import Run
+from .pools import add_windows, build_pools
+from .recipes import RECIPES
+
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+
+# eval.json group order (the stages'; the trainer encodes these captions too)
+EVAL_ORDER = (
+    "single",
+    "en",
+    "single_kanji",
+    "single_ext",
+    "single_small",
+    "single_extra",
+)
+
+
+def default_workers() -> int:
+    return max(1, (os.cpu_count() or 2) - 2)
+
+
+def build(run: Run, workers: int | None = None, frac: float = 1.0) -> Path:
+    """``frac`` < 1 draws that share of every tier (a look at the sizes)."""
+    from common.prompts import TPL_BUBBLE, TPL_EN
+    from data.stage import _ink_stats
+
+    t0 = time.time()
+    out = run.data
+    (out / "img").mkdir(parents=True, exist_ok=True)
+    workers = default_workers() if workers is None else max(1, int(workers))
+    rng = random.Random(T.SEED)
+    pools = build_pools(list(run.rows), rng)
+    win = add_windows(pools, run.read, out)
+    plan = [
+        (t, int(round(T.ITEMS_PER_ROW * len(pools.singles) * t.share * frac)))
+        for t in T.TABLE
+    ]
+    print(
+        f"build {run.name} → {out}: {len(pools.singles)} rows; "
+        + ", ".join(f"{t.name} σ {t.band[0]:g}–{t.band[1]:g} {n}" for t, n in plan)
+        + f"; {workers} workers",
+        flush=True,
+    )
+    recs: list = []
+    report: dict = {}
+    for t, n in plan:
+        got, report[t.name] = _build_tier(t, n, pools, rng, out, len(recs), workers)
+        recs += got
+    assert recs, "nothing drawn"
+    _ink_stats(recs)
+    (out / "train.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in recs) + "\n",
+        encoding="utf-8",
+    )
+    ev = [
+        {
+            "group": g,
+            "text": s,
+            "caption": (TPL_EN if g == "en" else TPL_BUBBLE).format(s),
+        }
+        for g in EVAL_ORDER
+        for s in pools.inv.evals.get(g, ())
+    ]
+    (out / "eval.json").write_text(
+        json.dumps(ev, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    (out / "vocabs.json").write_text(
+        json.dumps(pools.singles, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    build = {
+        "run": run.name,
+        "run_config": str(run.path),
+        "rows": list(run.rows),
+        "n_rows": len(pools.singles),
+        "seed": T.SEED,
+        "seed_rows": str(run.seed_rows()),
+        "frac": frac,
+        "glyph_route": True,  # the windows: train.py routes the captions per glyph
+        "windows": win,
+        "scenes": {
+            "pools": T.SCENES,
+            "small": T.SMALL_POOL,
+            "mono_share": T.MONO_SHARE,
+            "horizontal_frac": T.HORIZONTAL_FRAC,
+        },
+        "table": [
+            {
+                "name": t.name,
+                "recipe": t.recipe,
+                "share": t.share,
+                "band": list(t.band),
+                "px_keep": list(t.px_keep),
+                **t.params,
+            }
+            for t in T.TABLE
+        ],
+        "workers": workers,
+        "tiers": report,
+        "shapes": dict(Counter("x".join(map(str, r["shape"])) for r in recs)),
+        "n_train": len(recs),
+        "minutes": round((time.time() - t0) / 60, 1),
+    }
+    (out / "build.json").write_text(
+        json.dumps(build, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    print(
+        f"data: {len(recs)} items {dict(Counter(r['tier'] for r in recs))}; "
+        f"eval {len(ev)}; {build['minutes']} min",
+        flush=True,
+    )
+    return out
+
+
+# fork-inherited job state (set before the pool forks; never pickled)
+_JOB: dict = {}
+
+
+def _worker(job):
+    n, first, seed = job
+    return _draw_loop(
+        _JOB["t"], n, _JOB["pools"], random.Random(seed), _JOB["out"], first
+    )
+
+
+def _build_tier(t: T.Tier, n: int, pools, rng, out: Path, first: int, workers: int):
+    t0 = time.time()
+    if workers <= 1 or n < 4 * workers:
+        kept, rejects, px_seen, tries = _draw_loop(t, n, pools, rng, out, first)
+    else:
+        per = [n // workers + (i < n % workers) for i in range(workers)]
+        jobs = [
+            (per[i], first + sum(per[:i]), rng.randrange(2**31)) for i in range(workers)
+        ]
+        _JOB.update(t=t, pools=pools, out=out)
+        try:
+            with mp.get_context("fork").Pool(workers) as pool:
+                parts = pool.map(_worker, jobs)
+        finally:
+            _JOB.clear()
+        kept, rejects, px_seen, tries = [], Counter(), [], 0
+        for k, rj, px, tr in parts:
+            kept += k
+            rejects.update(rj)
+            px_seen += px
+            tries += tr
+        pools.used.update(Counter(r["scene"] for r in kept if "scene" in r))
+    if len(kept) < n:
+        print(
+            f"  {t.name}: WARNING {len(kept)}/{n} after {tries} tries "
+            f"(rejects {dict(rejects)})",
+            flush=True,
+        )
+    rep = {
+        "n": len(kept),
+        "planned": n,
+        "tries": tries,
+        "rejects": dict(rejects),
+        "px_kept": _quantiles([r["px"] for r in kept]),
+        "px_drawn": _quantiles(px_seen),
+        "mono": sum(bool(r.get("mono")) for r in kept),
+        "horizontal": sum(r.get("horizontal") is True for r in kept),
+        "minutes": round((time.time() - t0) / 60, 1),
+    }
+    print(
+        f"  {t.name}: {len(kept)}/{n} in {tries} tries, rejects {dict(rejects)}; "
+        f"px kept {_fmt(rep['px_kept'])} (drawn {_fmt(rep['px_drawn'])})",
+        flush=True,
+    )
+    _sheet(rng, kept, out / f"sheet_{t.name}.png")
+    return kept, rep
+
+
+def _draw_loop(t: T.Tier, n: int, pools, rng, out: Path, first: int):
+    draw = RECIPES[t.recipe]
+    lo, hi = t.px_keep
+    kept, rejects, px_seen = [], Counter(), []
+    tries, max_tries = 0, 4 * n + 50
+    while len(kept) < n and tries < max_tries:
+        tries += 1
+        item = draw(pools, rng, t.params)
+        if item is None:
+            rejects["render"] += 1
+            continue
+        px = item.px()
+        px_seen.append(px)
+        if (lo is not None and px < lo) or (hi is not None and px > hi):
+            rejects["px"] += 1
+            continue
+        fn = out / "img" / f"{t.name}_{first + len(kept):06d}.png"
+        item.image.save(fn)
+        rec = {
+            "file": str(fn),
+            "text": item.text,
+            "caption": item.caption,
+            "src": item.src,
+            "kind": t.recipe,
+            "recipe": t.recipe,
+            "tier": t.name,
+            "layout": item.layout,
+            "units": item.vocabs,  # the on-disk key the trainer's readers know
+            "shape": list(item.shape),
+            "px": round(px, 1),
+            "band": list(t.band),
+            **item.extra,
+        }
+        if item.layout == "scene":
+            rec["box"] = item.boxes[0]
+        else:
+            rec["boxes"] = item.boxes
+        kept.append(rec)
+    return kept, rejects, px_seen, tries
+
+
+def _quantiles(xs):
+    if not xs:
+        return None
+    xs = sorted(xs)
+    return {
+        "median": round(st.median(xs), 1),
+        "p10": round(xs[int(0.1 * (len(xs) - 1))], 1),
+        "p90": round(xs[int(0.9 * (len(xs) - 1))], 1),
+    }
+
+
+def _fmt(q) -> str:
+    return "–" if not q else f"{q['median']:.0f} ({q['p10']:.0f}–{q['p90']:.0f})"
+
+
+def _sheet(rng, recs, path: Path, n: int = 24):
+    from common.readers import contact_sheet
+    from PIL import Image, ImageDraw
+
+    if not recs:
+        return
+    tiles = []
+    for r in rng.sample(recs, min(n, len(recs))):
+        im = Image.open(r["file"]).convert("RGB")
+        d = ImageDraw.Draw(im)
+        for b in r.get("boxes") or [r["box"]]:
+            d.rectangle(b, outline=(0, 255, 0), width=2)
+        tag = " H" if r.get("horizontal") is True else ""
+        tiles.append((im, [r["text"][:24], f"{r['px']:.0f} px {r['layout']}{tag}"]))
+    contact_sheet(tiles, path, thumb=192, cols=6)
