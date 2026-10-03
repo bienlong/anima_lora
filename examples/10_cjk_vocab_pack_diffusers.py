@@ -24,7 +24,7 @@ vocabulary-identical to the pack's bundled ``tokenizer_qwen3/``; its T5
 tokenizer is the stock Anima one). LoRAs loaded through
 ``pipe.load_lora_weights`` compose with the pack — disjoint parameters.
 
-    python examples/10_cjk_vocab_pack_diffusers.py --prompt "1girl, 猫耳, 銀髪, セーラー服, 笑顔, 教室"
+    python examples/10_cjk_vocab_pack_diffusers.py --prompt '1girl, solo, speech bubble. Text reads as "何言ってるの?".'
     # a local pack: path prefix of the .safetensors/.json pair
     python examples/10_cjk_vocab_pack_diffusers.py --pack output/ckpt/cjk_vocab/cjk_vocab_pack_synthjakozh1sym_r256 …
     # CPU check of both patch points without the transformer / VAE (~1.5 GB download)
@@ -47,7 +47,7 @@ from library.anima.ext_vocab import T5_TABLE_SIZE, HybridT5Encoder, load_ext_ass
 
 PIPE_REPO = "circlestone-labs/Anima-Base-v1.0-Diffusers"
 PACK_REPO = "sorryhyun/anima-vocab-pack-cjk"
-PACK_STEM = "anima_cjk_vocab_pack_preview"
+PACK_STEM = "anima_cjk_vocab_pack_preview5"
 
 
 def fetch_pack(local_prefix: str | None) -> Path:
@@ -155,7 +155,8 @@ def report(pipe, prompt: str) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
-        "--prompt", default="1girl, 猫耳, 銀髪, セーラー服, 笑顔, 教室, 上半身"
+        "--prompt",
+        default='1girl, solo, upper body, speech bubble. Text reads as "何言ってるの?".',
     )
     p.add_argument("--negative_prompt", default="")
     p.add_argument("--pack", help="local path prefix of the .safetensors/.json pair")

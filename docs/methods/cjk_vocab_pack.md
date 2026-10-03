@@ -11,19 +11,38 @@ itself if the default is missing. Setting the key to `""` turns the whole path
 off (stock tokenizer).
 
 Public pack: <https://huggingface.co/sorryhyun/anima-vocab-pack-cjk>
-(`anima_cjk_vocab_pack_preview.{safetensors,json}`, ~285 MB; the model card carries the
+(`anima_cjk_vocab_pack_preview5.{safetensors,json}`, ~285 MB; the model card carries the
 training label). Research history lives under `project/finished/cjk_aware_anima/`; the
 builder is `bench/cjk_adapter/build_ext.py` (ext table) + `scripts/distill_cjk/`
 (corpus builders under `corpus/`, cache, distill) — see [Rebuilding a pack](#rebuilding-a-pack).
 The rest of this page is the shipped surface only.
 
+## Intended use
+
+Japanese in a prompt or caption is **text to draw in the image**. Put the
+string you want rendered in double quotes inside an English clause; the rest
+of the prompt stays English tags:
+
+```
+1girl, solo, speech bubble. Text reads as "何言ってるの?".
+1girl, solo, speech bubble, japanese text. Japanese text reads as "はい".
+```
+
+The `japanese text` tag (and the `Japanese` in the clause) is optional. The
+shipped pack's JA rows are trained on rendering composites in this frame, so
+Japanese written as tags (`猫耳`, `銀髪`) is not the intended use — write
+those in English (`cat ears`, `silver hair`). Captions for LoRA training follow
+the same frame; the export stage's `--combine_ocr` already writes it
+(`… Japanese text reads as "…"`). KO / ZH spans route to glossary-derived tag
+rows; rendering them is not trained.
+
 ## Default on, how to turn off
 
 ```bash
-make download-models              # first-run set — includes the pack (→ models/vocab_packs/anima_cjk_vocab_pack_preview.{safetensors,json})
+make download-models              # first-run set — includes the pack (→ models/vocab_packs/anima_cjk_vocab_pack_preview5.{safetensors,json})
 make download-vocab-pack          # re-fetch just the pack
 # configs/base.toml (the shipped default)
-vocab_pack = "models/vocab_packs/anima_cjk_vocab_pack_preview"
+vocab_pack = "models/vocab_packs/anima_cjk_vocab_pack_preview5"
 # off: stock tokenizer, bit-exact
 vocab_pack = ""
 make preprocess-te ARGS=--overwrite   # after any change, only if a caption carries CJK (see below)
@@ -88,9 +107,10 @@ EN-only datasets are unaffected either way (identical ids, identical caches).
   stock T5 cannot spell (the pack's symbol block, e.g. `♡`); KO / ZH tag rows
   are trained (glossary-derived) but were not grid-validated as widely as JA.
   These tag results were measured on the pre-render pack. The shipped
-  `_preview` pack continues 503 of the same rows (kana, common kanji,
-  punctuation) on quoted-text rendering composites, so JA tag behaviour on it
-  is not re-verified.
+  `_preview5` pack (`_preview4`'s retrained seed rows, baked with routing on,
+  plus the stick rescaled × 0.8 — `project/cjk_anima_scale/`) retrains the
+  kana / kanji rows on quoted-text rendering composites, so JA tag behaviour
+  on it is not re-verified.
 - Renders (preview): quoted Japanese text drawn into the image —
   `speech bubble, japanese text. … Japanese text reads as "はい".` Single kana /
   kanji and very short words render some of the time, seed-dependent; longer

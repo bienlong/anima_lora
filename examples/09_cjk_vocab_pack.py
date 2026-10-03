@@ -8,7 +8,7 @@ means patching two places — the T5-side tokenizer and the LLM adapter's
 embedding table — and ``library.anima.vocab_pack`` owns both, so on the front
 door it is one field:
 
-    GenerationRequest(prompt="1girl, 猫耳, 銀髪", vocab_pack="models/vocab_packs/anima_cjk_vocab_pack_preview")
+    GenerationRequest(prompt='1girl, speech bubble. Text reads as "はい".', vocab_pack="models/vocab_packs/anima_cjk_vocab_pack_preview5")
 
 ``generate()`` installs the pack-routing tokenize strategy and ``load_dit_model``
 hooks the rows onto ``llm_adapter.embed`` (the module's state dict stays at the
@@ -21,13 +21,13 @@ character are bit-identical with or without the pack.
 Run from the repo root after ``make download-models`` and ``make
 download-vocab-pack``:
 
-    python examples/09_cjk_vocab_pack.py --prompt "1girl, 猫耳, 銀髪, セーラー服, 笑顔, 教室"
+    python examples/09_cjk_vocab_pack.py --prompt '1girl, solo, speech bubble. Text reads as "何言ってるの?".'
     python examples/09_cjk_vocab_pack.py --prompt "1girl, 고양이귀, 은발, 세일러복, 미소"
     python examples/09_cjk_vocab_pack.py --prompt "1girl, 猫耳, 银发, 水手服, 微笑"
     # a local pack build: path prefix of the .safetensors/.json pair
     python examples/09_cjk_vocab_pack.py --pack output/ckpt/cjk_vocab/cjk_vocab_pack_synthjakozh1sym_r256 --prompt …
     # tokenizer-only dry run (no DiT / VAE): prints the routed id stream
-    python examples/09_cjk_vocab_pack.py --dry_run --prompt "1girl, 猫耳, 銀髪"
+    python examples/09_cjk_vocab_pack.py --dry_run --prompt '1girl, speech bubble. Text reads as "はい".'
 
 What to expect: danbooru-style tags in JA worked like their English spelling
 in same-seed grids on the pre-render pack (the shipped ``_preview`` pack
@@ -124,7 +124,8 @@ def generate_image(args: argparse.Namespace) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
-        "--prompt", default="1girl, 猫耳, 銀髪, セーラー服, 笑顔, 教室, 上半身"
+        "--prompt",
+        default='1girl, solo, upper body, speech bubble. Text reads as "何言ってるの?".',
     )
     p.add_argument(
         "--pack",
