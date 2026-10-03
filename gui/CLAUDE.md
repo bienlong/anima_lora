@@ -109,7 +109,9 @@ must not appear.
   links go to the system browser. `QtWebEngine*` is imported only when the tab is built;
   `app.main` sets `AA_ShareOpenGLContexts` before `QApplication`, and `MainWindow` holds a
   hidden 0×0 `QRhiWidget` so the window is RHI-composited from creation. Without it, the
-  first web view makes Qt recreate the top-level window, which flashes.
+  first web view makes Qt recreate the top-level window, which flashes. The view itself stays
+  off-stack until its first load lands, over a `window`-colored page background, so
+  Chromium's white pre-paint never shows.
 - **`tabs/preprocess/knobs.py`** — the **trainer-native knob table** (`KNOBS:
   tuple[Knob]`: kind / default / `default_from` (const · `preprocess.toml` ·
   `gui_settings.json`) / env name / `persist` elision rule / snapshot flag). Only what is
@@ -178,7 +180,11 @@ must not appear.
   jobs stop via `daemon.stop_job()`.
 - **`gui_settings.json`** holds UI state (language, 6 h update-check cache, preprocess
   knobs, hardware preset) — outside `configs/` so it survives a config reset.
-- **Install app-wide event filters last.** `app.installEventFilter(self)` routes every Qt
-  event through Python, including ~82k construction-time events (~0.7 s of launch), so
-  `MainWindow` installs its filter after `setCentralWidget`. Launch budget:
+- **No app-wide Python event filter.** `app.installEventFilter` routes every Qt event
+  through Python (~82k construction-time events, ~0.7 s of launch), and on Linux it
+  segfaults the anime_tools tab: wrapping QtWebEngine's internal
+  `RenderWidgetHostViewQtDelegateItem` from inside a filter recurses until the stack
+  overflows. `MainWindow` filters each top-level `QWindow` instead (`_filter_window`, on
+  show and on `focusWindowChanged`): right-click arrives there as `ContextMenu`, and
+  tooltips are rewrapped on `MouseMove` over the widget under the cursor. Launch budget:
   `tests/test_gui_launch_speed.py`.

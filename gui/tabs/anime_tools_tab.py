@@ -16,7 +16,7 @@ from __future__ import annotations
 import time
 
 from PySide6.QtCore import QTimer, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from gui import anime_tools_panel
@@ -89,6 +89,9 @@ class AnimeToolsTab(QWidget):
 
         view = QWebEngineView()
         view.setPage(_Page(view))
+        # Chromium clears to white until the page paints; the view is also kept
+        # off-stack until its first load lands (``_on_load_finished``).
+        view.page().setBackgroundColor(QColor(tok("window")))
         view.loadFinished.connect(self._on_load_finished)
         return view
 
@@ -148,14 +151,18 @@ class AnimeToolsTab(QWidget):
             self._show_placeholder(t("anime_tools_no_webengine", url=url))
             return
         self._view.setUrl(QUrl(url))
-        self._stack.setCurrentWidget(self._view)
 
     def _on_load_finished(self, ok: bool) -> None:
+        if ok:
+            self._stack.setCurrentWidget(self._view)
+            return
         # The start line is printed just before uvicorn binds; a fresh launch
         # retries a refused first load until its deadline.
-        if not ok and self._url is not None and time.monotonic() < self._deadline:
+        if self._url is not None and time.monotonic() < self._deadline:
             url = self._url
             QTimer.singleShot(_POLL_MS, lambda: self._view.setUrl(QUrl(url)))
+        else:
+            self._stack.setCurrentWidget(self._view)
 
     def _show_placeholder(self, text: str) -> None:
         self._placeholder.setText(text)

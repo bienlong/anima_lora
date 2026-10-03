@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QRhiWidget,
     QStackedWidget,
     QTabWidget,
-    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -208,21 +207,43 @@ class MainWindow(QMainWindow):
         self._update_tensorboard_btn_style(False)
         self._update_queue_btn_style(False)
 
-        # App-wide filter for uniform right-click + wrapped tooltips. Must install
-        # LAST, after the tree is built: it only handles ContextMenu/ToolTip (can't
-        # fire before the window is shown), but installed earlier it would also see
-        # every construction-time event (ChildAdded/Polish/...) — ~82k Python
-        # round-trips per launch, measurably slowing startup. Removed in closeEvent
-        # so a _reload_ui rebuild doesn't stack filters.
+        # Uniform right-click + wrapped tooltips, filtered on each top-level QWindow
+        # (this one and every dialog, picked up as it takes focus) — not app-wide.
+        # An app-wide Python filter wraps every receiver, and wrapping QtWebEngine's
+        # internal delegate item from inside a filter recurses until the stack
+        # overflows (Linux, the anime_tools tab). Undone in closeEvent so a
+        # _reload_ui rebuild doesn't leave a dead window filtering events.
+        self._filtered_windows = []
         app = QApplication.instance()
         if app is not None:
-            app.installEventFilter(self)
+            app.focusWindowChanged.connect(self._filter_window)
+
+    def showEvent(self, event):  # noqa: N802 — Qt event handler name
+        super().showEvent(event)
+        self._filter_window(self.windowHandle())
+
+    def _filter_window(self, window) -> None:
+        if (
+            window is None
+            or self._filtered_windows is None
+            or window in self._filtered_windows
+        ):
+            return
+        window.installEventFilter(self)
+        self._filtered_windows.append(window)
+        window.destroyed.connect(lambda: self._forget_window(window))
+
+    def _forget_window(self, window) -> None:
+        if self._filtered_windows and window in self._filtered_windows:
+            self._filtered_windows.remove(window)
 
     def closeEvent(self, event):
-        # Drop the app-wide filter so a _reload_ui rebuild doesn't leave a dead window filtering events.
         app = QApplication.instance()
-        if app is not None:
-            app.removeEventFilter(self)
+        if app is not None and self._filtered_windows is not None:
+            app.focusWindowChanged.disconnect(self._filter_window)
+            for window in self._filtered_windows:
+                window.removeEventFilter(self)
+            self._filtered_windows = None
         # Without this, closing the window leaves training subprocesses orphaned, still holding VRAM.
         for i in range(self.tabs.count()):
             cleanup = getattr(self.tabs.widget(i), "cleanup_subprocess", None)
@@ -275,19 +296,30 @@ class MainWindow(QMainWindow):
         )
 
     def eventFilter(self, obj, event):  # noqa: N802 — Qt event handler name
-        """Intercept every right-click to show our menu instead of the target
-        widget's default one, and re-show long tooltips wrapped to a bounded
-        width."""
+        """On a filtered top-level window: intercept every right-click to show our
+        menu instead of the target widget's default one, and wrap the tooltip of
+        the widget under the cursor to a bounded width before it shows."""
         if event.type() == QEvent.ContextMenu:
             self._show_context_menu(event.globalPos())
             return True
-        if event.type() == QEvent.ToolTip:
-            tip = obj.toolTip() if hasattr(obj, "toolTip") else ""
-            wrapped = wrap_tooltip(tip)
-            if wrapped is not None and wrapped != tip:
-                QToolTip.showText(event.globalPos(), wrapped, obj)
-                return True
+        if event.type() == QEvent.MouseMove:
+            self._wrap_tooltip_at(event.globalPosition().toPoint())
         return super().eventFilter(obj, event)
+
+    @staticmethod
+    def _wrap_tooltip_at(global_pos) -> None:
+        """Rewrap the tooltip Qt would show at ``global_pos``: the first one up
+        from the widget under the cursor. A wrapped tooltip is multi-line, which
+        ``wrap_tooltip`` leaves alone, so this rewrites each tooltip once."""
+        w = QApplication.widgetAt(global_pos)
+        while w is not None:
+            tip = w.toolTip()
+            if tip:
+                wrapped = wrap_tooltip(tip)
+                if wrapped != tip:
+                    w.setToolTip(wrapped)
+                return
+            w = w.parentWidget()
 
     def _show_context_menu(self, global_pos):
         """Walk up from the widget under the cursor; the first ancestor exposing
