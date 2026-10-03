@@ -1,8 +1,9 @@
 """Unit tests for the Qt-free knob table (``gui/tabs/preprocess/knobs.py``).
 
-Since the stage-schema migration (P1–P3) the table holds only the trainer-native rows — dataset roots / scope,
-the low-res sugar, the TE-cache variant knobs and the three chain gates; the
-stage forms are ``stage_form``'s and tested in ``test_gui_stage_form.py``.
+The table holds only the trainer-native rows — dataset roots / scope and the
+TE-cache variant knobs (the curation chain gates left with the tab's curation
+sections; the env pins them off); the stage forms are ``stage_form``'s and
+tested in ``test_gui_stage_form.py``.
 Feeds the pure functions hand-built value dicts and checks them against the
 characterization fixture — so the table reproduces the tab's contract
 without constructing a single widget.
@@ -30,11 +31,6 @@ FLIPPED_VALUES = {
     "caption_shuffle_variants": 11,
     "caption_tag_dropout_rate": "0.45",
 }
-_TOGGLED = (
-    "caption_position_clauses",
-    "caption_autotag",
-    "run_sam_mask",
-)
 
 
 def _defaults(scenario: str) -> dict:
@@ -55,8 +51,6 @@ def _default_widget_values(scenario: str) -> dict:
 def _flipped_widget_values(scenario: str) -> dict:
     values = _default_widget_values(scenario)
     values.update(FLIPPED_VALUES)
-    for key in _TOGGLED:
-        values[key] = not values[key]
     return values
 
 
@@ -96,8 +90,7 @@ def _flat(meta: dict) -> dict:
 @pytest.mark.parametrize("scenario", list(SCENARIOS))
 def test_merge_into_meta_matches_fixture(scenario):
     """Same save sequence as the characterization run, on one meta table:
-    inputs-only save, full save, flip, inputs-only save, full save — so a
-    mask-less save leaving earlier mask keys untouched is part of the contract."""
+    inputs-only save, full save, flip, inputs-only save, full save."""
     defaults = _defaults(scenario)
     expected = EXPECTED[scenario]
     meta = {"family": "lora"}
@@ -105,9 +98,9 @@ def test_merge_into_meta_matches_fixture(scenario):
         ("defaults", _persistable(_default_widget_values(scenario))),
         ("flipped", _persistable(_flipped_widget_values(scenario))),
     ):
-        K.merge_into_meta(meta, values, defaults, include_mask=False)
+        K.merge_into_meta(meta, values, defaults)
         assert _roundtrip(meta) == _flat(expected[state]["meta_inputs_only"]), state
-        K.merge_into_meta(meta, values, defaults, include_mask=True)
+        K.merge_into_meta(meta, values, defaults)
         assert _roundtrip(meta) == _flat(expected[state]["meta_full"]), state
 
 
@@ -115,7 +108,7 @@ def test_load_values_is_a_fixed_point_of_merge_on_bare_checkout():
     """Save → load reproduces the flipped values (the tab's reload invariant)."""
     defaults = _defaults("bare")
     values = _persistable(_flipped_widget_values("bare"))
-    meta = K.merge_into_meta({}, values, defaults, include_mask=True)
+    meta = K.merge_into_meta({}, values, defaults)
     loaded = K.load_values(meta, defaults)
     for knob in K.KNOBS:
         assert K._coerce(knob, loaded[knob.key]) == K._coerce(knob, values[knob.key]), (
@@ -124,49 +117,43 @@ def test_load_values_is_a_fixed_point_of_merge_on_bare_checkout():
 
 
 def test_retired_knob_loads_as_nothing_and_is_dropped_on_save():
-    """A variant saved before resize lost its pixel floor still carries
-    ``drop_lowres_images``: it is not a knob any more, so it loads as nothing
-    and the next save pops it."""
+    """A variant saved by an older GUI still carries ``drop_lowres_images`` or
+    a curation chain gate: none is a knob any more, so each loads as nothing,
+    the next save pops it, and ConfigTab still strips it from training."""
     defaults = _defaults("populated")
-    stale = {"drop_lowres_images": False}
-    assert "drop_lowres_images" not in K.load_values(stale, defaults)
+    stale = {key: True for key in K.RETIRED_KEYS}
+    loaded = K.load_values(stale, defaults)
     values = _persistable(_flipped_widget_values("populated"))
-    meta = K.merge_into_meta(dict(stale), values, defaults, include_mask=False)
-    assert "drop_lowres_images" not in meta
+    meta = K.merge_into_meta(dict(stale), values, defaults)
+    for key in K.RETIRED_KEYS:
+        assert key not in loaded and key not in meta, key
+        assert key in K.PREPROCESS_ONLY_KEYS, key
+
+
+def test_env_pins_the_curation_gates_off():
+    """A ``preprocess.toml`` turning a curation stage on never reaches a GUI
+    run: env beats the config chain in ``tasks.py``."""
+    pp = {"caption_position_clauses": True, "caption_autotag": True}
+    defaults = K.resolved_defaults(pp, {})
+    env = K.to_env(K.load_values({}, defaults), defaults)
+    assert env["CAPTION_AUTOTAG"] == "0"
+    assert env["CAPTION_POSITION_CLAUSES"] == "0"
 
 
 def test_elision_keeps_a_plain_checkout_empty():
     """All-defaults on a bare checkout writes nothing (the tiers, always
     written, live in the resize stage's table now)."""
     defaults = _defaults("bare")
-    meta = K.merge_into_meta(
-        {}, _default_widget_values("bare"), defaults, include_mask=False
-    )
+    meta = K.merge_into_meta({}, _default_widget_values("bare"), defaults)
     assert meta == {}
-
-
-def test_preprocess_toml_default_sticks_when_unchecked():
-    """The `_pp_default` trap, now declared: a caption-master stage set true
-    in preprocess.toml must persist an explicit false when unchecked."""
-    pp = {"caption_position_clauses": True, "caption_autotag": True}
-    defaults = K.resolved_defaults(pp, {})
-    values = K.load_values({}, defaults)
-    assert values["caption_position_clauses"] is True
-    values["caption_position_clauses"] = False
-    values["caption_autotag"] = False
-    meta = K.merge_into_meta({}, values, defaults, include_mask=False)
-    assert meta["caption_position_clauses"] is False
-    assert meta["caption_autotag"] is False
 
 
 def test_table_invariants():
     keys = [k.key for k in K.KNOBS]
     assert len(keys) == len(set(keys))
-    assert K.PREPROCESS_ONLY_KEYS == set(keys) | {K.STAGES_KEY}
+    assert K.PREPROCESS_ONLY_KEYS == set(keys) | {K.STAGES_KEY} | set(K.RETIRED_KEYS)
     for knob in K.KNOBS:
         assert knob.enabled_by is None or knob.enabled_by in K.KNOBS_BY_KEY, knob.key
-        if knob.persist == "mask":
-            assert knob.section == "mask" and not knob.snapshot and not knob.env
     env_names = [k.env for k in K.ENV_KNOBS]
     assert len(env_names) == len(set(env_names))
     # Nothing a stage form shows is a knob row any more (the trainer-owned

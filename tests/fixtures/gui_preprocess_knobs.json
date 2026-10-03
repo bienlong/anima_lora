@@ -8,11 +8,6 @@
         "CAPTION_TAG_DROPOUT_RATE": "0.1",
         "PREPROCESS_PATH_PATTERN": "*",
         "PREPROCESS_STAGES_JSON": {
-          "autotag": {
-            "batch_size": 8,
-            "min_confidence": 0.0,
-            "mode": "missing"
-          },
           "correct": {
             "caption_drop_groups": "",
             "caption_insert_no_artist": false,
@@ -21,19 +16,6 @@
             "no_correct": true,
             "tag_csv": ""
           },
-          "masks_sam": [
-            {
-              "dilate": 5,
-              "force": false,
-              "masks": [
-                "ignore:text:speech bubble",
-                "ignore:text:text bubble"
-              ],
-              "path_pattern": "",
-              "threshold": 0.5,
-              "workers": 4
-            }
-          ],
           "resize": {
             "freefit_max_ratio": 4.0,
             "overwrite": false,
@@ -48,16 +30,7 @@
       },
       "meta_full": {
         "family": "lora",
-        "run_sam_mask": false,
         "stages": {
-          "masks_sam": [
-            {
-              "masks": [
-                "ignore:text:speech bubble",
-                "ignore:text:text bubble"
-              ]
-            }
-          ],
           "resize": {
             "target_res": [
               1024
@@ -75,10 +48,7 @@
           }
         }
       },
-      "overrides": {
-        "caption_autotag": false,
-        "caption_position_clauses": false
-      }
+      "overrides": {}
     },
     "defaults_reloaded": {
       "env": {
@@ -88,11 +58,6 @@
         "CAPTION_TAG_DROPOUT_RATE": "0.1",
         "PREPROCESS_PATH_PATTERN": "*",
         "PREPROCESS_STAGES_JSON": {
-          "autotag": {
-            "batch_size": 8,
-            "min_confidence": 0.0,
-            "mode": "missing"
-          },
           "correct": {
             "caption_drop_groups": "",
             "caption_insert_no_artist": false,
@@ -101,19 +66,6 @@
             "no_correct": true,
             "tag_csv": ""
           },
-          "masks_sam": [
-            {
-              "dilate": 5,
-              "force": false,
-              "masks": [
-                "ignore:text:speech bubble",
-                "ignore:text:text bubble"
-              ],
-              "path_pattern": "",
-              "threshold": 0.5,
-              "workers": 4
-            }
-          ],
           "resize": {
             "freefit_max_ratio": 4.0,
             "overwrite": false,
@@ -128,16 +80,7 @@
       },
       "meta_full": {
         "family": "lora",
-        "run_sam_mask": false,
         "stages": {
-          "masks_sam": [
-            {
-              "masks": [
-                "ignore:text:speech bubble",
-                "ignore:text:text bubble"
-              ]
-            }
-          ],
           "resize": {
             "target_res": [
               1024
@@ -147,16 +90,7 @@
       },
       "meta_inputs_only": {
         "family": "lora",
-        "run_sam_mask": false,
         "stages": {
-          "masks_sam": [
-            {
-              "masks": [
-                "ignore:text:speech bubble",
-                "ignore:text:text bubble"
-              ]
-            }
-          ],
           "resize": {
             "target_res": [
               1024
@@ -164,24 +98,16 @@
           }
         }
       },
-      "overrides": {
-        "caption_autotag": false,
-        "caption_position_clauses": false
-      }
+      "overrides": {}
     },
     "flipped": {
       "env": {
-        "CAPTION_AUTOTAG": "1",
-        "CAPTION_POSITION_CLAUSES": "1",
+        "CAPTION_AUTOTAG": "0",
+        "CAPTION_POSITION_CLAUSES": "0",
         "CAPTION_SHUFFLE_VARIANTS": "11",
         "CAPTION_TAG_DROPOUT_RATE": "0.45",
         "PREPROCESS_PATH_PATTERN": "artist_a/**",
         "PREPROCESS_STAGES_JSON": {
-          "autotag": {
-            "batch_size": 8,
-            "min_confidence": 0.55,
-            "mode": "overwrite"
-          },
           "correct": {
             "caption_drop_groups": "artist,lighting",
             "caption_insert_no_artist": true,
@@ -190,30 +116,6 @@
             "no_correct": false,
             "tag_csv": ""
           },
-          "masks_sam": [
-            {
-              "dilate": 7,
-              "force": false,
-              "masks": [
-                "keep:text:face",
-                "ignore:text:bubble",
-                "ignore:text:sfx"
-              ],
-              "path_pattern": "artist_b/*",
-              "threshold": 0.35,
-              "workers": 4
-            },
-            {
-              "dilate": 2,
-              "force": false,
-              "masks": [
-                "ignore:text:watermark"
-              ],
-              "path_pattern": "",
-              "threshold": 0.6,
-              "workers": 4
-            }
-          ],
           "resize": {
             "freefit_max_ratio": 2.25,
             "overwrite": true,
@@ -233,20 +135,13 @@
         }
       },
       "meta_full": {
-        "caption_autotag": true,
-        "caption_position_clauses": true,
         "caption_shuffle_variants": 11,
         "caption_tag_dropout_rate": 0.45,
         "family": "lora",
         "path_scope": "artist_a",
         "preprocess_path_pattern": "artist_a/**",
-        "run_sam_mask": true,
         "source_image_dir": "flipped_images",
         "stages": {
-          "autotag": {
-            "min_confidence": 0.55,
-            "mode": "overwrite"
-          },
           "correct": {
             "caption_drop_groups": "artist,lighting",
             "caption_insert_no_artist": true,
@@ -254,25 +149,6 @@
             "caption_trigger_word": "@flipped",
             "no_correct": false
           },
-          "masks_sam": [
-            {
-              "dilate": 7,
-              "masks": [
-                "keep:text:face",
-                "ignore:text:bubble",
-                "ignore:text:sfx"
-              ],
-              "path_pattern": "artist_b/*",
-              "threshold": 0.35
-            },
-            {
-              "dilate": 2,
-              "masks": [
-                "ignore:text:watermark"
-              ],
-              "threshold": 0.6
-            }
-          ],
           "resize": {
             "freefit_max_ratio": 2.25,
             "overwrite": true,
@@ -292,20 +168,13 @@
         }
       },
       "meta_inputs_only": {
-        "caption_autotag": true,
-        "caption_position_clauses": true,
         "caption_shuffle_variants": 11,
         "caption_tag_dropout_rate": 0.45,
         "family": "lora",
         "path_scope": "artist_a",
         "preprocess_path_pattern": "artist_a/**",
-        "run_sam_mask": false,
         "source_image_dir": "flipped_images",
         "stages": {
-          "autotag": {
-            "min_confidence": 0.55,
-            "mode": "overwrite"
-          },
           "correct": {
             "caption_drop_groups": "artist,lighting",
             "caption_insert_no_artist": true,
@@ -313,14 +182,6 @@
             "caption_trigger_word": "@flipped",
             "no_correct": false
           },
-          "masks_sam": [
-            {
-              "masks": [
-                "ignore:text:speech bubble",
-                "ignore:text:text bubble"
-              ]
-            }
-          ],
           "resize": {
             "freefit_max_ratio": 2.25,
             "overwrite": true,
@@ -339,24 +200,16 @@
           }
         }
       },
-      "overrides": {
-        "caption_autotag": true,
-        "caption_position_clauses": true
-      }
+      "overrides": {}
     },
     "flipped_reloaded": {
       "env": {
-        "CAPTION_AUTOTAG": "1",
-        "CAPTION_POSITION_CLAUSES": "1",
+        "CAPTION_AUTOTAG": "0",
+        "CAPTION_POSITION_CLAUSES": "0",
         "CAPTION_SHUFFLE_VARIANTS": "11",
         "CAPTION_TAG_DROPOUT_RATE": "0.45",
         "PREPROCESS_PATH_PATTERN": "artist_a/**",
         "PREPROCESS_STAGES_JSON": {
-          "autotag": {
-            "batch_size": 8,
-            "min_confidence": 0.55,
-            "mode": "overwrite"
-          },
           "correct": {
             "caption_drop_groups": "artist,lighting",
             "caption_insert_no_artist": true,
@@ -365,30 +218,6 @@
             "no_correct": false,
             "tag_csv": ""
           },
-          "masks_sam": [
-            {
-              "dilate": 7,
-              "force": false,
-              "masks": [
-                "keep:text:face",
-                "ignore:text:bubble",
-                "ignore:text:sfx"
-              ],
-              "path_pattern": "artist_b/*",
-              "threshold": 0.35,
-              "workers": 4
-            },
-            {
-              "dilate": 2,
-              "force": false,
-              "masks": [
-                "ignore:text:watermark"
-              ],
-              "path_pattern": "",
-              "threshold": 0.6,
-              "workers": 4
-            }
-          ],
           "resize": {
             "freefit_max_ratio": 2.25,
             "overwrite": true,
@@ -408,20 +237,13 @@
         }
       },
       "meta_full": {
-        "caption_autotag": true,
-        "caption_position_clauses": true,
         "caption_shuffle_variants": 11,
         "caption_tag_dropout_rate": 0.45,
         "family": "lora",
         "path_scope": "artist_a",
         "preprocess_path_pattern": "artist_a/**",
-        "run_sam_mask": true,
         "source_image_dir": "flipped_images",
         "stages": {
-          "autotag": {
-            "min_confidence": 0.55,
-            "mode": "overwrite"
-          },
           "correct": {
             "caption_drop_groups": "artist,lighting",
             "caption_insert_no_artist": true,
@@ -429,25 +251,6 @@
             "caption_trigger_word": "@flipped",
             "no_correct": false
           },
-          "masks_sam": [
-            {
-              "dilate": 7,
-              "masks": [
-                "keep:text:face",
-                "ignore:text:bubble",
-                "ignore:text:sfx"
-              ],
-              "path_pattern": "artist_b/*",
-              "threshold": 0.35
-            },
-            {
-              "dilate": 2,
-              "masks": [
-                "ignore:text:watermark"
-              ],
-              "threshold": 0.6
-            }
-          ],
           "resize": {
             "freefit_max_ratio": 2.25,
             "overwrite": true,
@@ -467,20 +270,13 @@
         }
       },
       "meta_inputs_only": {
-        "caption_autotag": true,
-        "caption_position_clauses": true,
         "caption_shuffle_variants": 11,
         "caption_tag_dropout_rate": 0.45,
         "family": "lora",
         "path_scope": "artist_a",
         "preprocess_path_pattern": "artist_a/**",
-        "run_sam_mask": true,
         "source_image_dir": "flipped_images",
         "stages": {
-          "autotag": {
-            "min_confidence": 0.55,
-            "mode": "overwrite"
-          },
           "correct": {
             "caption_drop_groups": "artist,lighting",
             "caption_insert_no_artist": true,
@@ -488,25 +284,6 @@
             "caption_trigger_word": "@flipped",
             "no_correct": false
           },
-          "masks_sam": [
-            {
-              "dilate": 7,
-              "masks": [
-                "keep:text:face",
-                "ignore:text:bubble",
-                "ignore:text:sfx"
-              ],
-              "path_pattern": "artist_b/*",
-              "threshold": 0.35
-            },
-            {
-              "dilate": 2,
-              "masks": [
-                "ignore:text:watermark"
-              ],
-              "threshold": 0.6
-            }
-          ],
           "resize": {
             "freefit_max_ratio": 2.25,
             "overwrite": true,
@@ -525,26 +302,18 @@
           }
         }
       },
-      "overrides": {
-        "caption_autotag": true,
-        "caption_position_clauses": true
-      }
+      "overrides": {}
     }
   },
   "populated": {
     "defaults": {
       "env": {
-        "CAPTION_AUTOTAG": "1",
-        "CAPTION_POSITION_CLAUSES": "1",
+        "CAPTION_AUTOTAG": "0",
+        "CAPTION_POSITION_CLAUSES": "0",
         "CAPTION_SHUFFLE_VARIANTS": "7",
         "CAPTION_TAG_DROPOUT_RATE": "0.3",
         "PREPROCESS_PATH_PATTERN": "*",
         "PREPROCESS_STAGES_JSON": {
-          "autotag": {
-            "batch_size": 8,
-            "min_confidence": 0.35,
-            "mode": "merge"
-          },
           "correct": {
             "caption_drop_groups": "",
             "caption_insert_no_artist": false,
@@ -553,19 +322,6 @@
             "no_correct": true,
             "tag_csv": ""
           },
-          "masks_sam": [
-            {
-              "dilate": 3,
-              "force": false,
-              "masks": [
-                "keep:text:face",
-                "ignore:text:sign"
-              ],
-              "path_pattern": "",
-              "threshold": 0.4,
-              "workers": 4
-            }
-          ],
           "resize": {
             "freefit_max_ratio": 3.0,
             "overwrite": false,
@@ -588,18 +344,7 @@
         "caption_shuffle_variants": 7,
         "caption_tag_dropout_rate": 0.3,
         "family": "lora",
-        "run_sam_mask": false,
         "stages": {
-          "masks_sam": [
-            {
-              "dilate": 3,
-              "masks": [
-                "keep:text:face",
-                "ignore:text:sign"
-              ],
-              "threshold": 0.4
-            }
-          ],
           "resize": {
             "target_res": [
               896,
@@ -621,24 +366,16 @@
           }
         }
       },
-      "overrides": {
-        "caption_autotag": true,
-        "caption_position_clauses": true
-      }
+      "overrides": {}
     },
     "defaults_reloaded": {
       "env": {
-        "CAPTION_AUTOTAG": "1",
-        "CAPTION_POSITION_CLAUSES": "1",
+        "CAPTION_AUTOTAG": "0",
+        "CAPTION_POSITION_CLAUSES": "0",
         "CAPTION_SHUFFLE_VARIANTS": "7",
         "CAPTION_TAG_DROPOUT_RATE": "0.3",
         "PREPROCESS_PATH_PATTERN": "*",
         "PREPROCESS_STAGES_JSON": {
-          "autotag": {
-            "batch_size": 8,
-            "min_confidence": 0.35,
-            "mode": "merge"
-          },
           "correct": {
             "caption_drop_groups": "",
             "caption_insert_no_artist": false,
@@ -647,19 +384,6 @@
             "no_correct": true,
             "tag_csv": ""
           },
-          "masks_sam": [
-            {
-              "dilate": 3,
-              "force": false,
-              "masks": [
-                "keep:text:face",
-                "ignore:text:sign"
-              ],
-              "path_pattern": "",
-              "threshold": 0.4,
-              "workers": 4
-            }
-          ],
           "resize": {
             "freefit_max_ratio": 3.0,
             "overwrite": false,
@@ -682,18 +406,7 @@
         "caption_shuffle_variants": 7,
         "caption_tag_dropout_rate": 0.3,
         "family": "lora",
-        "run_sam_mask": false,
         "stages": {
-          "masks_sam": [
-            {
-              "dilate": 3,
-              "masks": [
-                "keep:text:face",
-                "ignore:text:sign"
-              ],
-              "threshold": 0.4
-            }
-          ],
           "resize": {
             "target_res": [
               896,
@@ -706,18 +419,7 @@
         "caption_shuffle_variants": 7,
         "caption_tag_dropout_rate": 0.3,
         "family": "lora",
-        "run_sam_mask": false,
         "stages": {
-          "masks_sam": [
-            {
-              "dilate": 3,
-              "masks": [
-                "keep:text:face",
-                "ignore:text:sign"
-              ],
-              "threshold": 0.4
-            }
-          ],
           "resize": {
             "target_res": [
               896,
@@ -726,10 +428,7 @@
           }
         }
       },
-      "overrides": {
-        "caption_autotag": true,
-        "caption_position_clauses": true
-      }
+      "overrides": {}
     },
     "flipped": {
       "env": {
@@ -739,11 +438,6 @@
         "CAPTION_TAG_DROPOUT_RATE": "0.45",
         "PREPROCESS_PATH_PATTERN": "artist_a/**",
         "PREPROCESS_STAGES_JSON": {
-          "autotag": {
-            "batch_size": 8,
-            "min_confidence": 0.55,
-            "mode": "overwrite"
-          },
           "correct": {
             "caption_drop_groups": "artist,lighting",
             "caption_insert_no_artist": true,
@@ -752,30 +446,6 @@
             "no_correct": false,
             "tag_csv": ""
           },
-          "masks_sam": [
-            {
-              "dilate": 7,
-              "force": false,
-              "masks": [
-                "keep:text:face",
-                "ignore:text:bubble",
-                "ignore:text:sfx"
-              ],
-              "path_pattern": "artist_b/*",
-              "threshold": 0.35,
-              "workers": 4
-            },
-            {
-              "dilate": 2,
-              "force": false,
-              "masks": [
-                "ignore:text:watermark"
-              ],
-              "path_pattern": "",
-              "threshold": 0.6,
-              "workers": 4
-            }
-          ],
           "resize": {
             "freefit_max_ratio": 2.25,
             "overwrite": true,
@@ -795,20 +465,13 @@
         }
       },
       "meta_full": {
-        "caption_autotag": false,
-        "caption_position_clauses": false,
         "caption_shuffle_variants": 11,
         "caption_tag_dropout_rate": 0.45,
         "family": "lora",
         "path_scope": "artist_a",
         "preprocess_path_pattern": "artist_a/**",
-        "run_sam_mask": true,
         "source_image_dir": "flipped_images",
         "stages": {
-          "autotag": {
-            "min_confidence": 0.55,
-            "mode": "overwrite"
-          },
           "correct": {
             "caption_drop_groups": "artist,lighting",
             "caption_insert_no_artist": true,
@@ -816,25 +479,6 @@
             "caption_trigger_word": "@flipped",
             "no_correct": false
           },
-          "masks_sam": [
-            {
-              "dilate": 7,
-              "masks": [
-                "keep:text:face",
-                "ignore:text:bubble",
-                "ignore:text:sfx"
-              ],
-              "path_pattern": "artist_b/*",
-              "threshold": 0.35
-            },
-            {
-              "dilate": 2,
-              "masks": [
-                "ignore:text:watermark"
-              ],
-              "threshold": 0.6
-            }
-          ],
           "resize": {
             "freefit_max_ratio": 2.25,
             "overwrite": true,
@@ -854,20 +498,13 @@
         }
       },
       "meta_inputs_only": {
-        "caption_autotag": false,
-        "caption_position_clauses": false,
         "caption_shuffle_variants": 11,
         "caption_tag_dropout_rate": 0.45,
         "family": "lora",
         "path_scope": "artist_a",
         "preprocess_path_pattern": "artist_a/**",
-        "run_sam_mask": false,
         "source_image_dir": "flipped_images",
         "stages": {
-          "autotag": {
-            "min_confidence": 0.55,
-            "mode": "overwrite"
-          },
           "correct": {
             "caption_drop_groups": "artist,lighting",
             "caption_insert_no_artist": true,
@@ -875,16 +512,6 @@
             "caption_trigger_word": "@flipped",
             "no_correct": false
           },
-          "masks_sam": [
-            {
-              "dilate": 3,
-              "masks": [
-                "keep:text:face",
-                "ignore:text:sign"
-              ],
-              "threshold": 0.4
-            }
-          ],
           "resize": {
             "freefit_max_ratio": 2.25,
             "overwrite": true,
@@ -903,10 +530,7 @@
           }
         }
       },
-      "overrides": {
-        "caption_autotag": false,
-        "caption_position_clauses": false
-      }
+      "overrides": {}
     },
     "flipped_reloaded": {
       "env": {
@@ -916,11 +540,6 @@
         "CAPTION_TAG_DROPOUT_RATE": "0.45",
         "PREPROCESS_PATH_PATTERN": "artist_a/**",
         "PREPROCESS_STAGES_JSON": {
-          "autotag": {
-            "batch_size": 8,
-            "min_confidence": 0.55,
-            "mode": "overwrite"
-          },
           "correct": {
             "caption_drop_groups": "artist,lighting",
             "caption_insert_no_artist": true,
@@ -929,30 +548,6 @@
             "no_correct": false,
             "tag_csv": ""
           },
-          "masks_sam": [
-            {
-              "dilate": 7,
-              "force": false,
-              "masks": [
-                "keep:text:face",
-                "ignore:text:bubble",
-                "ignore:text:sfx"
-              ],
-              "path_pattern": "artist_b/*",
-              "threshold": 0.35,
-              "workers": 4
-            },
-            {
-              "dilate": 2,
-              "force": false,
-              "masks": [
-                "ignore:text:watermark"
-              ],
-              "path_pattern": "",
-              "threshold": 0.6,
-              "workers": 4
-            }
-          ],
           "resize": {
             "freefit_max_ratio": 2.25,
             "overwrite": true,
@@ -972,20 +567,13 @@
         }
       },
       "meta_full": {
-        "caption_autotag": false,
-        "caption_position_clauses": false,
         "caption_shuffle_variants": 11,
         "caption_tag_dropout_rate": 0.45,
         "family": "lora",
         "path_scope": "artist_a",
         "preprocess_path_pattern": "artist_a/**",
-        "run_sam_mask": true,
         "source_image_dir": "flipped_images",
         "stages": {
-          "autotag": {
-            "min_confidence": 0.55,
-            "mode": "overwrite"
-          },
           "correct": {
             "caption_drop_groups": "artist,lighting",
             "caption_insert_no_artist": true,
@@ -993,25 +581,6 @@
             "caption_trigger_word": "@flipped",
             "no_correct": false
           },
-          "masks_sam": [
-            {
-              "dilate": 7,
-              "masks": [
-                "keep:text:face",
-                "ignore:text:bubble",
-                "ignore:text:sfx"
-              ],
-              "path_pattern": "artist_b/*",
-              "threshold": 0.35
-            },
-            {
-              "dilate": 2,
-              "masks": [
-                "ignore:text:watermark"
-              ],
-              "threshold": 0.6
-            }
-          ],
           "resize": {
             "freefit_max_ratio": 2.25,
             "overwrite": true,
@@ -1031,20 +600,13 @@
         }
       },
       "meta_inputs_only": {
-        "caption_autotag": false,
-        "caption_position_clauses": false,
         "caption_shuffle_variants": 11,
         "caption_tag_dropout_rate": 0.45,
         "family": "lora",
         "path_scope": "artist_a",
         "preprocess_path_pattern": "artist_a/**",
-        "run_sam_mask": true,
         "source_image_dir": "flipped_images",
         "stages": {
-          "autotag": {
-            "min_confidence": 0.55,
-            "mode": "overwrite"
-          },
           "correct": {
             "caption_drop_groups": "artist,lighting",
             "caption_insert_no_artist": true,
@@ -1052,25 +614,6 @@
             "caption_trigger_word": "@flipped",
             "no_correct": false
           },
-          "masks_sam": [
-            {
-              "dilate": 7,
-              "masks": [
-                "keep:text:face",
-                "ignore:text:bubble",
-                "ignore:text:sfx"
-              ],
-              "path_pattern": "artist_b/*",
-              "threshold": 0.35
-            },
-            {
-              "dilate": 2,
-              "masks": [
-                "ignore:text:watermark"
-              ],
-              "threshold": 0.6
-            }
-          ],
           "resize": {
             "freefit_max_ratio": 2.25,
             "overwrite": true,
@@ -1089,10 +632,7 @@
           }
         }
       },
-      "overrides": {
-        "caption_autotag": false,
-        "caption_position_clauses": false
-      }
+      "overrides": {}
     }
   }
 }

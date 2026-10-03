@@ -61,40 +61,45 @@ must not appear.
   every merge/save/submit by `ConfigTab._current_preset()`. Variant files must not pin
   hardware keys (method beats preset).
 - **`tabs/preprocess/`** (`preprocess_tab.py` is a re-export shim). `tab.py` =
-  `PreprocessingTab`: method/variant bar, Save + Run split buttons, status row,
+  `PreprocessingTab`, the **cache builder** (resize → VAE → caption mirror → TE, plus
+  PE). Curation (autotag, position clauses, SAM masks) is the `anime_tools` panel's:
+  every env the tab builds, the Train auto-chain's included, pins `CAPTION_AUTOTAG` /
+  `CAPTION_POSITION_CLAUSES` to `0` (`knobs.CURATION_GATES_OFF`), so a
+  `preprocess.toml` that turns one on never starts it from the GUI. Method/variant bar,
+  Save + Run split buttons, status row,
   explanation panel, log, daemon observer, and the ConfigTab contract (`set_variant` /
   `preprocess_env` / `preprocess_overrides` / `preprocess_config_snapshot` /
   `persist_preprocess_inputs`). The form is a stack of **`KnobSection`**s (`_section.py`:
   a `QGroupBox` whose `add_knob(key, widget, label)` wires change→dirty, the `enabled_by`
   gate and `values()`/`set_values()`, dispatched on *widget type*).
-  - Four of five sections are **`stage_form.py::StageFormSection`**s rendering an
-    `anime_tools.gui.stages.schema` as a `KnobSection` keyed by the stage's dests. Bound
-    and trainer-owned dests (`TRAINER_FIELDS`) are hidden; trainer-native rows sit beside
-    them via `add_trainer_knob` → `knob_widgets` (chain gate via `gate=`). Values persist
-    under `[variant.stages.<stage_id>]`, elided against `preprocess.toml`-seeded defaults
-    (`seeded_defaults` / `persistable_values` / `merge_stages_into_meta`).
+  - Two of three sections are **`stage_form.py::StageFormSection`**s rendering an
+    `anime_tools.gui.stages.schema` as a `KnobSection` keyed by the stage's dests
+    (`STAGE_IDS` = `resize`, `correct`). Bound and trainer-owned dests (`TRAINER_FIELDS`)
+    are hidden; trainer-native rows sit beside them via `add_trainer_knob` →
+    `knob_widgets`. Values persist under `[variant.stages.<stage_id>]`, elided against
+    `preprocess.toml`-seeded defaults (`seeded_defaults` / `persistable_values` /
+    `merge_stages_into_meta`). An older GUI's `autotag` / `masks_sam` tables are left
+    as they are on Save.
   - Sections: `image_prep.py` (`ImagePrepSection` over `resize`, with the tier / crop-anchor
-    / crop-margin domain widgets mapped by dest), `captions.py` (`AutotagSection` over
-    `autotag` behind `caption_autotag`; `CaptionEditingSection` over `correct` + the
-    `caption_position_clauses` gate), `masking.py` (`SamMaskSection`: `run_sam_mask` + one
-    `_RuleCard` = `StageFormSection(masks_sam)` per rule, each with its own
-    `path_pattern`; `[[variant.stages.masks_sam]]`), `text_caching.py` (trainer-native).
+    / crop-margin domain widgets mapped by dest), `text_caching.py` (trainer-native),
+    `captions.py` (`CaptionEditingSection` over `correct` — the mirror TE encodes from).
   - `tab.values()` = trainer knobs, `tab.stage_values()` = `{stage_id: form}`. At submit
     the forms ride as `PREPROCESS_STAGES_JSON` in `preprocess_env()`, and
     `request_from_form` (`scripts/tasks/_common.py`) builds each request through the
     package's `build_argv` with the trainer's roots; the tab validates the same way at
     Save/Run (`_validate_stages`). Field labels/help come from
     `explanations/guides/<lang>/_stage_fields.json` (English from the schema as fallback).
-  - Legacy `tab.<widget>` names (`source_dir_edit`, `caption_autotag_chk`, …) resolve via
+  - Legacy `tab.<widget>` names (`source_dir_edit`, `shuffle_spin`, …) resolve via
     `_WIDGET_ALIASES` in `__getattr__` for one release — tests and `image_tab` still use
     them; new code uses `values()` / `stage_values()` / `tab.<section>.widgets[dest]`.
-    Tests monkeypatching `_load_preprocess_toml` / `read_gui_settings` / `_load_sam_yaml`
-    must patch `gui.tabs.preprocess.tab`.
+    Tests monkeypatching `_load_preprocess_toml` / `read_gui_settings` must patch
+    `gui.tabs.preprocess.tab`.
 - **`tabs/preprocess/knobs.py`** — the **trainer-native knob table** (`KNOBS:
   tuple[Knob]`: kind / default / `default_from` (const · `preprocess.toml` ·
   `gui_settings.json`) / env name / `persist` elision rule / snapshot flag). Only what is
-  *not* a stage-request field: dataset roots + scope, the TE-cache variant knobs, and the
-  three chain gates (`caption_autotag` / `caption_position_clauses` / `run_sam_mask`). Pure
+  *not* a stage-request field: dataset roots + scope and the TE-cache variant knobs. The
+  former curation gates are `RETIRED_KEYS`: dropped on save, but kept in
+  `PREPROCESS_ONLY_KEYS` so an old variant's copy never reaches `train.py`. Pure
   functions:
   `resolved_defaults` → `load_values` (`set_variant`), `to_env` (`preprocess_env`),
   `to_overrides` (`preprocess_overrides`), `merge_into_meta` (`[variant]` pop-or-set

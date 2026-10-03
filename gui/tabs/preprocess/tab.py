@@ -1,17 +1,18 @@
-"""PreprocessingTab — composes the knob sections (image prep / text caching /
-captions / masking) over the Qt-free knob table, and owns what isn't a knob:
-the method/variant bar, Save + the Run split buttons, the status row, the
-explanation panel, the log, and the daemon job observer.
+"""PreprocessingTab — the cache builder. Composes the knob sections (image
+prep / text caching / caption mirror) over the Qt-free knob table, and owns
+what isn't a knob: the method/variant bar, Save + the Run split buttons, the
+status row, the explanation panel, the log, and the daemon job observer.
 
 Layout mirrors ConfigTab: top action bar, form+explain split, log panel.
-Surfaces the knobs the bare ``make preprocess`` / ``make mask`` paths hardcode.
+Surfaces the knobs the bare ``make preprocess`` path hardcodes.
+
+Curation (autotag, position clauses, SAM masks) is the ``anime_tools``
+panel's; this tab never runs it — ``knobs.CURATION_GATES_OFF`` rides in every
+env it builds, the Train auto-chain's included.
 
 Settings persist to the selected ``configs/gui-methods/<variant>.toml``
 ``[variant]`` table: the trainer-native knobs as flat keys, each
-``anime_tools`` stage form under ``[variant.stages.<stage_id>]`` (SAM rule
-cards as ``[[variant.stages.masks_sam]]``). ``configs/sam_mask.yaml`` is
-only the CLI fallback — GUI Save never writes it, so a terminal ``make mask``
-won't see GUI mask settings unless the YAML is edited by hand. At submit the
+``anime_tools`` stage form under ``[variant.stages.<stage_id>]``. At submit the
 stage forms travel as ``PREPROCESS_STAGES_JSON`` (``stage_form.STAGE_VALUES_ENV``)
 and ``tasks.py`` builds each request through the package's ``build_argv``.
 """
@@ -26,7 +27,6 @@ import sys
 from pathlib import Path
 
 import toml
-import yaml
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
@@ -67,20 +67,18 @@ from gui.explanations import field_help_html, preprocess_guide
 from gui.i18n import t
 from gui.progress import TQDM_RE, TqdmProgressTracker, make_progress_bar
 from gui.tabs.config_tab import ConfigTab, SplitButtonStyle
-from gui.tabs.preprocess.captions import AutotagSection, CaptionEditingSection
+from gui.tabs.preprocess.captions import CaptionEditingSection
 from gui.tabs.preprocess.image_prep import ImagePrepSection
 from gui.tabs.preprocess.knobs import (
     DEFAULT_PREPROCESS_PATH_PATTERN,
     DEFAULT_TE_TAG_DROPOUT,
     PREPROCESS_ONLY_KEYS,
-    load_rules,
     load_values,
     merge_into_meta,
     resolved_defaults,
     to_env,
     to_overrides,
 )
-from gui.tabs.preprocess.masking import SamMaskSection
 from gui.tabs.preprocess.stage_form import (
     STAGE_IDS,
     STAGE_VALUES_ENV,
@@ -95,7 +93,6 @@ from gui.theme import action_button_qss, rich_text_pt as _explain_pt, tok
 from gui.widgets import DirtyTrackingMixin, action_button, apply_variant
 from library.datasets.path_filter import filter_paths_by_glob
 
-SAM_YAML = ROOT / "configs" / "sam_mask.yaml"
 PREPROCESS_TOML = ROOT / "configs" / "preprocess.toml"
 
 PREPROCESS_METHODS = ["lora", "tlora", "hydralora"]
@@ -126,11 +123,6 @@ _WIDGET_ALIASES: dict[str, tuple[str, str]] = {
     "caption_trigger_word_edit": ("caption_section", "caption_trigger_word"),
     "caption_trigger_at_front_chk": ("caption_section", "caption_trigger_at_front"),
     "caption_drop_groups_edit": ("caption_section", "caption_drop_groups"),
-    "caption_position_clauses_chk": ("caption_section", "caption_position_clauses"),
-    "caption_autotag_chk": ("autotag_section", "caption_autotag"),
-    "caption_autotag_mode_combo": ("autotag_section", "mode"),
-    "caption_autotag_confidence_spin": ("autotag_section", "min_confidence"),
-    "run_sam_mask_chk": ("sam_section", "run_sam_mask"),
 }
 
 # Placeholder roots for validating a stage form at Save / Run (the real
@@ -151,15 +143,6 @@ def _load_preprocess_toml() -> dict:
     try:
         return toml.loads(PREPROCESS_TOML.read_text(encoding="utf-8"))
     except (OSError, toml.TomlDecodeError):
-        return {}
-
-
-def _load_sam_yaml() -> dict:
-    if not SAM_YAML.exists():
-        return {}
-    try:
-        return yaml.safe_load(SAM_YAML.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
         return {}
 
 
@@ -292,10 +275,6 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
             t("preprocess_run_pe"), run_step_style, self._run_pe
         )
         top.addWidget(self.run_pe_btn)
-        self.run_mask_btn = self._make_run_button(
-            t("preprocess_run_mask"), run_step_style, self._run_mask
-        )
-        top.addWidget(self.run_mask_btn)
 
         top.addStretch()
         self.stop_btn = action_button(t("stop"), variant="danger", on_click=self._stop)
@@ -339,40 +318,20 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
             defaults=stage_defaults["resize"],
         )
         self.text_section = TextCachingSection(help_cb, settings=settings)
-        # Auto-tagging runs first and is the only stage that can create a caption
-        # from nothing; the caption-editing box below edits text that already exists.
-        self.autotag_section = AutotagSection(
-            self._schemas["autotag"],
-            help_cb,
-            defaults=stage_defaults["autotag"],
-            gate_on=bool(pp_cfg.get("caption_autotag", False)),
-        )
         self.caption_section = CaptionEditingSection(
             self._schemas["correct"],
             help_cb,
             defaults=stage_defaults["correct"],
-            position_on=bool(pp_cfg.get("caption_position_clauses", False)),
-        )
-        self.sam_section = SamMaskSection(
-            self._schemas["masks_sam"],
-            help_cb,
-            settings=settings,
-            defaults=stage_defaults["masks_sam"],
-            initial_rules=self._seed_sam_cards(),
         )
         self.sections = (
             self.image_section,
             self.text_section,
-            self.autotag_section,
             self.caption_section,
-            self.sam_section,
         )
-        # stage id → the section holding its form (a list of cards for SAM).
+        # stage id → the section holding its form.
         self.stage_sections = {
             "resize": self.image_section,
-            "autotag": self.autotag_section,
             "correct": self.caption_section,
-            "masks_sam": self.sam_section,
         }
 
         scroll = QScrollArea()
@@ -390,23 +349,6 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         """``{stage_id: {dest: default}}`` — the schema defaults with
         ``preprocess.toml`` seeded on top (``stage_form.seeded_defaults``)."""
         return {sid: seeded_defaults(self._schemas[sid], pp_cfg) for sid in STAGE_IDS}
-
-    def _seed_sam_cards(self) -> list[dict]:
-        """The SAM cards a variant with no ``[[variant.stages.masks_sam]]``
-        opens on: ``configs/sam_mask.yaml``'s rules (the CLI's), spelled as
-        ``masks_sam`` form values (an empty region list is a blank editor —
-        the request's default)."""
-        cards = []
-        for rule in load_rules(_load_sam_yaml()):
-            cards.append(
-                {
-                    "path_pattern": rule.get("path_pattern") or "",
-                    "masks": list(rule.get("masks") or []),
-                    "threshold": float(rule["threshold"]),
-                    "dilate": int(rule["dilate"]),
-                }
-            )
-        return cards
 
     def __getattr__(self, name: str):
         # Legacy ``tab.<widget>`` access → the owning section's widget (see
@@ -490,15 +432,9 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
 
     def _load_stage_values(self, meta: dict) -> dict[str, object]:
         """``{stage_id: values}`` for a variant: its ``[variant.stages.*]``
-        over the seeded defaults; SAM cards fall back to the yaml seed."""
+        over the seeded defaults."""
         defaults = self._stage_defaults(_load_preprocess_toml())
-        out: dict[str, object] = {}
-        for sid in STAGE_IDS:
-            loaded = load_stage_values(meta, sid, defaults[sid])
-            if sid == "masks_sam" and loaded is None:
-                loaded = self._seed_sam_cards()
-            out[sid] = loaded
-        return out
+        return {sid: load_stage_values(meta, sid, defaults[sid]) for sid in STAGE_IDS}
 
     # -- values (the section surface) ---------------------------------------
 
@@ -515,8 +451,8 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
     _widget_values = values  # legacy name
 
     def stage_values(self) -> dict[str, object]:
-        """``{stage_id: {dest: value}}`` for every stage form (``masks_sam``:
-        one dict per rule card) — what the job receives and the variant keeps."""
+        """``{stage_id: {dest: value}}`` for every stage form — what the job
+        receives and the variant keeps."""
         out: dict[str, object] = {}
         for sid, section in self.stage_sections.items():
             reader = getattr(section, "stage_values", None)
@@ -557,19 +493,6 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
 
     def _resize_crop_margins(self) -> dict[str, float]:
         return self.resize_crop_margins_widget.margins()
-
-    def _set_autotag_mode(self, mode: str) -> None:
-        self.autotag_section.set_values({"mode": mode})
-
-    def _autotag_mode(self) -> str:
-        return self.autotag_section.mode()
-
-    @property
-    def _rule_cards(self):
-        return self.sam_section.rule_cards
-
-    def _set_rule_cards(self, rules: list[dict]) -> None:
-        self.sam_section.set_rule_cards(rules)
 
     # -- dirty / help / status ----------------------------------------------
 
@@ -824,49 +747,35 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         self._mark_dirty()
 
     def persist_preprocess_inputs(self) -> bool:
-        """Persist cache-building inputs for ConfigTab's auto-chain/queue.
-        Excludes mask-only settings so an invalid mask threshold can't block a
-        plain cache build."""
+        """Persist cache-building inputs for ConfigTab's auto-chain/queue."""
         return self._save_variant_preprocess_meta(validate_dropout=True)
 
     # -- save ---------------------------------------------------------------
 
-    def _validate_stages(self, *, include_mask: bool) -> bool:
+    def _validate_stages(self) -> bool:
         """Run every stage form through the package's ``build_argv`` (the
         request's own ``__post_init__``): a bad value surfaces as a dialog
-        here, not minutes into a SAM3 / tagger load."""
-        stage_values = self.stage_values()
-        for sid, values in stage_values.items():
-            if sid == "masks_sam":
-                if not include_mask:
-                    continue
-                cards = values or []
-            else:
-                cards = [values]
-            for i, card in enumerate(cards):
-                try:
-                    argv_for(
-                        self._schemas[sid],
-                        card,
-                        roots=_VALIDATION_ROOTS,
-                        settings={"path_pattern": "*"},
-                        mask_root="post_image_dataset",
-                    )
-                except ValueError as exc:
-                    label = self._schemas[sid].get("title") or sid
-                    if sid == "masks_sam":
-                        label = f"{t('preprocess_sam_rule')} {i + 1}"
-                    QMessageBox.warning(
-                        self,
-                        t("error"),
-                        t("preprocess_invalid_stage", stage=label, err=str(exc)),
-                    )
-                    return False
+        here, not minutes into a cache build."""
+        for sid, values in self.stage_values().items():
+            try:
+                argv_for(
+                    self._schemas[sid],
+                    values,
+                    roots=_VALIDATION_ROOTS,
+                    settings={"path_pattern": "*"},
+                    mask_root="post_image_dataset",
+                )
+            except ValueError as exc:
+                label = self._schemas[sid].get("title") or sid
+                QMessageBox.warning(
+                    self,
+                    t("error"),
+                    t("preprocess_invalid_stage", stage=label, err=str(exc)),
+                )
+                return False
         return True
 
-    def _save_variant_preprocess_meta(
-        self, *, validate_dropout: bool, include_mask: bool = False
-    ) -> bool:
+    def _save_variant_preprocess_meta(self, *, validate_dropout: bool) -> bool:
         if not self._variant:
             return True
         dropout_text = self.dropout_edit.text().strip()
@@ -881,7 +790,7 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
                 dropout = float(dropout_text)
             except ValueError:
                 dropout = DEFAULT_TE_TAG_DROPOUT
-        if not self._validate_stages(include_mask=include_mask):
+        if not self._validate_stages():
             return False
 
         path = variant_path(self._variant)
@@ -900,14 +809,14 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         # Elision (pop-if-default, with the preprocess.toml-resolved comparison
         # for the caption-master stages) is the knob table's job; the stage
         # forms are elided against their seeded defaults by stage_form.
-        merge_into_meta(
-            meta, values, self._resolved_defaults(), include_mask=include_mask
-        )
+        merge_into_meta(meta, values, self._resolved_defaults())
+        # Stage tables this tab no longer draws (an older GUI's ``autotag`` /
+        # ``masks_sam``) are left as they are.
         merge_stages_into_meta(
             meta,
             self.stage_values(),
             self._stage_defaults(_load_preprocess_toml()),
-            include_mask=include_mask,
+            include_mask=False,
         )
 
         if meta:
@@ -924,9 +833,7 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         )
         if dropout is None:
             return False
-        if not self._save_variant_preprocess_meta(
-            validate_dropout=False, include_mask=True
-        ):
+        if not self._save_variant_preprocess_meta(validate_dropout=False):
             return False
         self._clear_dirty()
         return True
@@ -990,28 +897,6 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
             attach=not queue,
         )
 
-    def _run_mask(self, *, queue: bool = False) -> None:
-        if not self._save_all():
-            return
-        if not self.run_sam_mask_chk.isChecked():
-            QMessageBox.warning(self, t("error"), t("preprocess_mask_nothing_enabled"))
-            return
-        # Without the snapshot, masking falls back to the unscoped resized/ and re-masks every group each run.
-        snapshot = self.preprocess_config_snapshot()
-        # Masking reads the resized images; with none on disk the task exits
-        # with an opaque "no images to mask". Surface the real cause first.
-        resized_dir = self._snapshot_path(snapshot, "resized_image_dir", RESIZED_DIR)
-        if _count_resized(resized_dir) == 0:
-            QMessageBox.warning(self, t("error"), t("preprocess_no_resized_to_process"))
-            return
-        self._submit(
-            label="mask",
-            argv=["tasks.py", "mask"],
-            extra_env=self.preprocess_env(),
-            config_snapshot=snapshot,
-            attach=not queue,
-        )
-
     def _submit(
         self,
         *,
@@ -1021,7 +906,7 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         config_snapshot: dict | None = None,
         attach: bool = True,
     ) -> None:
-        """Submit a preprocess/mask job to the daemon (spawns ``python <argv>``
+        """Submit a preprocess job to the daemon (spawns ``python <argv>``
         detached, serialized behind any running training job). Pre-launch
         validation is the caller's job. ``attach=True`` (main Run) takes over
         the log/bar and blocks Run until the job finishes; ``attach=False``
@@ -1062,7 +947,7 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
     # -- job observer -------------------------------------------------------
 
     def _try_reattach(self) -> None:
-        """Bind to a preprocess/mask job still running when the tab first opens
+        """Bind to a preprocess job still running when the tab first opens
         (so close-mid-preprocess → reopen re-attaches). Skips a training job
         (belongs to ConfigTab) and stays idle when the daemon is down."""
         try:
@@ -1117,6 +1002,6 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
 
     def cleanup_subprocess(self) -> None:
         """App-shutdown hook. Stops observing but leaves the daemon job alive —
-        it runs detached, so a cache build / mask pass survives GUI close
+        it runs detached, so a cache build survives GUI close
         (re-attached on next launch)."""
         self._job_timer.stop()

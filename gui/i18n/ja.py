@@ -61,51 +61,7 @@ STRINGS: dict[str, str] = {
         "最初の @artist マーカー以前のタグはドロップされません。"
         "シャッフルバリアント ≤ 0 の場合は無視されます。"
     ),
-    "preprocess_caption_autotag_box": "自動タグ付け",
-    "preprocess_caption_autotag": "Anima Tagger で自動タグ付け",
-    "preprocess_caption_autotag_tip": (
-        "データセット全体に Anima Tagger を実行し、.txt キャプションを書き出します。"
-        "リサイズ直後、最初に実行されます — 下の「キャプション編集」の各ステップは、"
-        "このステージが直前に作成したかもしれないキャプションを編集するためです。"
-        "GPU ステージです — タガーのパスがデータセットに対して1回追加され、"
-        "チェックポイントは初回実行時に自動でダウンロードされます。書き込む前に"
-        "キャプションを確認したい場合は、まず `make caption-autotag` でドライラン "
-        "レポートを出してください。"
-    ),
-    "preprocess_caption_autotag_mode": "モード",
-    "preprocess_caption_autotag_mode_missing": "キャプションのない画像のみ",
-    "preprocess_caption_autotag_mode_merge": "既存キャプションにマージ",
-    "preprocess_caption_autotag_mode_overwrite": "全キャプションを上書き",
-    "preprocess_caption_autotag_mode_tip": (
-        "キャプションのない画像のみ: .txt サイドカーがない画像だけをタグ付けし、"
-        "既存のキャプションには一切手を加えません — 安全なデフォルトです。\n"
-        "既存キャプションにマージ: 全画像をタグ付けしますが、キャプションに"
-        "ないタグのみを追加します。位置節とそのタグは保持されます。\n"
-        "全キャプションを上書き: すべてのキャプションをタガーの出力で置き換えます。"
-        "手書きのキャプションは失われます。"
-    ),
-    "preprocess_caption_autotag_min_confidence": "信頼度しきい値",
-    "preprocess_caption_autotag_min_confidence_tip": (
-        "タガー自体のタグごとのしきい値に加えて適用される、追加の確率下限です — "
-        "これを下回るタグは破棄されます。0 (デフォルト) はタガーの較正済みの"
-        "判断をそのまま使います。値を上げるとタグ数は減り、より安全になります。"
-        "レーティングはこの値に関わらず常に出力されます。"
-    ),
     "preprocess_caption_editing": "キャプション編集",
-    "preprocess_caption_position_clauses": "位置節の生成 (複数被写体)",
-    "preprocess_caption_position_clauses_tip": (
-        "複数被写体の画像から SAM3 で被写体を検出し、それぞれをタグ付けして "
-        "キャプションを 'On the left, …' の位置節に書き換えます。属性がフラットな"
-        "タグ列に浮いたままにならず、各被写体に紐づきます。1人だけに紐づいたタグは"
-        "フラットなタグ列から**取り除かれて**その節へ移るので、各属性はちょうど1回"
-        "だけ記述されます（キャラクター名はタグ列にも残ります）。キャッシュ前に実行"
-        "され、キャプションはリサイズ画像の隣 (post_image_dataset/) に書き込みます —— "
-        "image_dataset/ の元のキャプションは変更しません。すでに位置節がある画像や、検出"
-        "数がキャプションの人数と食い違う画像はそのまま残します。GPU ステージです — "
-        "SAM3 + タガーのパスが1回追加されます。書き込む前に提案を確認したい場合は、"
-        "まず `make caption-position` でドライラン レポートを出してください。"
-        '`make caption-position ARGS="--flatten --apply"` で元に戻せます。'
-    ),
     "preprocess_caption_correct_order": "キャプション順序補正",
     "preprocess_caption_correct_order_tip": (
         "補正済み .txt キャプションをリサイズ画像の隣に保存し、"
@@ -133,49 +89,6 @@ STRINGS: dict[str, str] = {
     "preprocess_run_pe": "PE キャッシュ実行",
     "preprocess_add_to_queue": "キューに追加",
     "preprocess_queued": "{label} をキューに追加しました (ジョブ {job_id}) — キュータブで確認できます。",
-    "preprocess_masking_sam": "SAM3 マスキング (テキストバブル)",
-    "preprocess_sam_prompts": "SAM プロンプト (1行1件):",
-    "preprocess_sam_prompts_tip": (
-        "SAM3 が検索するテキストプロンプト。1行1件。"
-        "デフォルトは 'speech bubble' と 'text bubble'。"
-    ),
-    "preprocess_sam_focus_prompts": "SAM フォーカスプロンプト (1行1件):",
-    "preprocess_sam_focus_prompts_tip": (
-        "逆極性: 残したい被写体を指定します。設定すると、マスクはその被写体のみを"
-        "学習対象とし、それ以外はすべて無視されます (例: 'girl' を指定すると背景全体が"
-        "無視されます)。上のプロンプトと合成され、最終的な学習領域はフォーカスした"
-        "被写体から無視領域を除いた部分になります。空欄にするとデフォルトの"
-        "無視専用の動作になります。"
-    ),
-    "preprocess_sam_rule": "マスクルール",
-    "preprocess_sam_add_rule": "+ ルール追加",
-    "preprocess_sam_add_rule_tip": (
-        "マスクルールをもう一つ追加します。各ルールはパスパターンで画像の"
-        "サブセットを対象とし、パターンが一致するルールは互いに合成されます。"
-    ),
-    "preprocess_sam_remove_rule": "ルール削除",
-    "preprocess_sam_rule_path_pattern": "パスパターン (このルール):",
-    "preprocess_sam_rule_path_pattern_tip": (
-        "このルールを適用する画像を指定します — データセットルート基準の各画像"
-        "パスに対する fnmatch グロブ ('|' で OR 結合)。例: 'character_a/*'。"
-        "空欄または '*' はすべての画像にマッチするキャッチオール規則です。"
-    ),
-    "preprocess_sam_threshold": "SAM しきい値 (0.0–1.0):",
-    "preprocess_sam_threshold_tip": (
-        "SAM3 の検出結果を採用するための最小信頼度。"
-        "低いほど多くのマスクを生成 (誤検出が増える可能性あり)、"
-        "高いほど厳しくなります。デフォルト 0.5。"
-    ),
-    "preprocess_dilate": "膨張 (px):",
-    "preprocess_dilate_tip": (
-        "バイナリマスクに適用するピクセル膨張量。"
-        "大きい値ほどマスクのエッジが外側に広がります。"
-        "デフォルト 5。0 で無効化。"
-    ),
-    "preprocess_run_mask": "マスキング実行",
-    "preprocess_run_sam_mask": "SAM マスキング実行",
-    "preprocess_run_sam_mask_tip": "マスク生成の一部として SAM3 セグメンテーションを実行します。オフにするとマスキング実行ボタンは何もしません。",
-    "preprocess_mask_nothing_enabled": "マスキングを実行するには SAM マスキングを有効にしてください。",
     "preprocess_invalid_stage": "{stage}: {err}",
     "preprocess_status_resized": "リサイズ済み画像: {n}",
     "preprocess_status_caches": "キャッシュ — 潜在変数: {lat}, テキスト: {te}, PE: {pe}",

@@ -20,8 +20,8 @@ module is the trainer-side half of that seam:
   default is ``None``), str → line edit, enum → combo, list → csv line edit,
   path → line edit + ``…`` chooser (dir vs file by ``path_kind``), ``gate`` →
   ``enabled_by``, ``advanced`` fields inside a fold — plus the trainer-native
-  rows a section carries beside the stage's own (the chain gate, the
-  dataset roots): those are ``knobs.py`` rows, kept in ``knob_widgets`` and
+  rows a section carries beside the stage's own (the dataset roots): those
+  are ``knobs.py`` rows, kept in ``knob_widgets`` and
   read back by :meth:`StageFormSection.knob_values`.
 
 The trainer owns a few dests per stage that its chain fills at run time
@@ -57,8 +57,9 @@ __all__ = [
     "visible_fields",
 ]
 
-STAGE_IDS: tuple[str, ...] = ("resize", "autotag", "correct", "masks_sam")
-"""The stages the Preprocessing tab draws a form for."""
+STAGE_IDS: tuple[str, ...] = ("resize", "correct")
+"""The stages the Preprocessing tab draws a form for (the cache-side ones;
+curation stages are the ``anime_tools`` panel's)."""
 
 STAGE_VALUES_ENV = "PREPROCESS_STAGES_JSON"
 """The env var a preprocess / mask job receives its stage forms in: a JSON
@@ -484,9 +485,7 @@ else:
         Trainer-native rows (a ``knobs.py`` key) sit in the same form through
         :meth:`add_trainer_knob`; they are kept in ``knob_widgets`` and read by
         :meth:`knob_values`, so the stage's ``values()`` stays exactly what
-        ``build_argv`` takes. ``gate`` names a bool trainer knob rendered as
-        the first row that enables / disables every stage row (a chain gate);
-        ``gated_by`` maps a stage dest onto a trainer knob that enables it.
+        ``build_argv`` takes.
         """
 
         def __init__(
@@ -497,8 +496,6 @@ else:
             title: str | None = None,
             values: dict | None = None,
             defaults: dict | None = None,
-            gate: str | None = None,
-            gated_by: dict[str, str] | None = None,
         ):
             self.schema = schema
             self.stage_id: str = schema["id"]
@@ -508,8 +505,6 @@ else:
             self._defaults: dict[str, Any] = dict(defaults or {})
             self._knobs: dict[str, Knob] = {}
             self.knob_widgets: dict[str, QWidget] = {}
-            self._gate_key = gate
-            self._gated_by: dict[str, str] = dict(gated_by or {})
             self._current_form: QFormLayout | None = None
             self.advanced_toggle: QCheckBox | None = None
             self.advanced_box: QGroupBox | None = None
@@ -578,7 +573,7 @@ else:
             tooltip: str | None = None,
             field=None,
         ) -> QWidget:
-            """A ``knobs.py`` row beside the stage's own (a chain gate, a
+            """A ``knobs.py`` row beside the stage's own (a
             dataset root). Lives in ``knob_widgets`` / :meth:`knob_values`."""
             if key not in KNOBS_BY_KEY:
                 raise KeyError(f"{key}: not in the preprocess knob table")
@@ -596,15 +591,6 @@ else:
             return widget
 
         def _build(self) -> None:
-            if self._gate_key:
-                gate = checkbox(t(f"preprocess_{self._gate_key}"))
-                gate.setChecked(bool(KNOBS_BY_KEY[self._gate_key].default))
-                self.add_trainer_knob(
-                    self._gate_key,
-                    gate,
-                    t(f"preprocess_{self._gate_key}"),
-                    tooltip=t(f"preprocess_{self._gate_key}_tip"),
-                )
             self._build_prefix()
             basic = [f for f in self._fields.values() if not f.get("advanced")]
             advanced = [f for f in self._fields.values() if f.get("advanced")]
@@ -696,18 +682,14 @@ else:
             if chosen:
                 edit.setText(chosen)
 
-        # -- gating (private knob table + trainer gates) --------------------
+        # -- gating (private knob table) -------------------------------------
 
         def _gate_widget(self, key: str):
-            """The checkbox gating ``key``: a stage dest's schema gate, or the
-            trainer knob ``gated_by`` names."""
+            """The checkbox gating ``key`` (its schema gate), if any."""
             if key in self._knobs:
                 gate = self._knobs[key].enabled_by
                 if gate and gate in self.widgets:
                     return self.widgets[gate]
-            knob_gate = self._gated_by.get(key)
-            if knob_gate and knob_gate in self.knob_widgets:
-                return self.knob_widgets[knob_gate]
             return None
 
         def _wire_enabled_by(self) -> None:
@@ -715,29 +697,16 @@ else:
                 gate = self._gate_widget(key)
                 if gate is not None:
                     gate.toggled.connect(widget.setEnabled)
-            if self._gate_key and self._gate_key in self.knob_widgets:
-                self.knob_widgets[self._gate_key].toggled.connect(
-                    lambda _on: self._sync_enabled()
-                )
             self._sync_enabled()
 
         def _sync_enabled(self) -> None:
-            chain_on = True
-            if self._gate_key and self._gate_key in self.knob_widgets:
-                chain_on = self.knob_widgets[self._gate_key].isChecked()
             for key, widget in self.widgets.items():
                 gate = self._gate_widget(key)
-                on = chain_on and (gate is None or gate.isChecked())
+                on = gate is None or gate.isChecked()
                 widget.setEnabled(on)
                 btn = self.browse_buttons.get(key)
                 if btn is not None:
                     btn.setEnabled(on)
-            if self.advanced_toggle is not None:
-                self.advanced_toggle.setEnabled(chain_on)
-            for key, widget in self.knob_widgets.items():
-                if key == self._gate_key:
-                    continue
-                widget.setEnabled(chain_on)
 
         # -- values ----------------------------------------------------------
 

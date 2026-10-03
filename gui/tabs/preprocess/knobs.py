@@ -3,13 +3,15 @@ Qt-free.
 
 This table holds only what is **not** a field of an ``anime_tools`` stage
 request: the dataset roots and scope (``source_image_dir``
-/ ``path_scope`` / ``preprocess_path_pattern``), the trainer-side TE-cache
-knobs (``caption_shuffle_variants`` / ``caption_tag_dropout_rate``) and the three
-**chain gates** — whether the Run chain runs the autotag / position-clause /
-SAM stages at all (``caption_autotag`` / ``caption_position_clauses`` /
-``run_sam_mask``). Everything else (resize geometry, caption rewriting,
-autotag mode, SAM rule cards) is drawn from the stage schemas by
-``stage_form.py`` and persisted under ``[variant.stages.<stage_id>]``.
+/ ``path_scope`` / ``preprocess_path_pattern``) and the trainer-side TE-cache
+knobs (``caption_shuffle_variants`` / ``caption_tag_dropout_rate``). The
+resize geometry and the caption mirror's rewrite knobs are drawn from the stage
+schemas by ``stage_form.py`` and persisted under ``[variant.stages.<stage_id>]``.
+
+The tab is cache-only: the curation stages (autotag, position clauses, SAM
+masks) run from the ``anime_tools`` panel, and the GUI pins their chain gates
+off (:data:`CURATION_GATES_OFF`) so a ``preprocess.toml`` that turns one on
+never starts a tagger / SAM3 pass from a cache build.
 
 The pure functions below implement the tab's default resolution, env /
 override serialisation and ``[variant]`` elision from the table, so adding a
@@ -37,14 +39,14 @@ DEFAULT_SOURCE_IMAGE_DIR = "image_dataset"
 DEFAULT_PREPROCESS_PATH_PATTERN = "*"
 DEFAULT_TE_SHUFFLE_VARIANTS = 4
 DEFAULT_TE_TAG_DROPOUT = 0.1
-DEFAULT_CAPTION_POSITION_CLAUSES = False
-DEFAULT_CAPTION_AUTOTAG = False
-DEFAULT_RUN_SAM_MASK = False  # masking is opt-in
-# The SAM rule the first card seeds from when neither the variant nor
-# ``configs/sam_mask.yaml`` names one (the CLI's historical prompt set).
-DEFAULT_SAM_MASKS = ("ignore:text:speech bubble", "ignore:text:text bubble")
-DEFAULT_SAM_THRESHOLD = 0.5
-DEFAULT_SAM_DILATE = 5
+
+# Chain gates of the curation stages, exported off by every GUI run: the tab
+# builds caches, the ``anime_tools`` panel curates. Env beats the config
+# chain in ``scripts/tasks/preprocess.py``.
+CURATION_GATES_OFF: dict[str, str] = {
+    "CAPTION_AUTOTAG": "0",
+    "CAPTION_POSITION_CLAUSES": "0",
+}
 
 # The key under ``[variant]`` holding the per-stage form values
 # (``[variant.stages.<stage_id>]`` — see ``stage_form.py``). Not a knob row:
@@ -56,8 +58,12 @@ Kind = Literal["bool", "int", "float", "str"]
 # Knobs that left the table: a variant saved by an older GUI may still carry
 # them; they load as nothing and are dropped on the next save.
 RETIRED_KEYS = (
-    "drop_lowres_images",
-)  # resize lost its pixel floor (anime_tools 0.7.5)
+    "drop_lowres_images",  # resize lost its pixel floor (anime_tools 0.7.5)
+    # The curation chain gates, gone with the tab's curation sections.
+    "caption_position_clauses",
+    "caption_autotag",
+    "run_sam_mask",
+)
 
 DefaultFrom = Literal["const", "preprocess_toml", "gui_settings"]
 # How the knob reaches the variant's ``[variant]`` meta on save:
@@ -67,14 +73,13 @@ DefaultFrom = Literal["const", "preprocess_toml", "gui_settings"]
 #                       the hardcoded default would otherwise not stick, because
 #                       the tab always exports the env var and env beats the TOML)
 #   if_truthy         — written when non-empty (path_scope)
-#   mask              — always written, but only when the mask section is being saved
-Persist = Literal["if_changed", "if_changed_resolved", "if_truthy", "mask"]
+Persist = Literal["if_changed", "if_changed_resolved", "if_truthy"]
 
 
 @dataclass(frozen=True)
 class Knob:
     key: str
-    section: str  # "image" | "text" | "captions" | "autotag" | "mask"
+    section: str  # "image" | "text"
     kind: Kind
     default: object
     default_from: DefaultFrom = "const"
@@ -125,37 +130,6 @@ KNOBS: tuple[Knob, ...] = (
         default_from="gui_settings",
         env="CAPTION_TAG_DROPOUT_RATE",
     ),
-    # Chain gates for the caption-master stages: SAM3+tagger (position clauses)
-    # before TE and the Anima Tagger stage right after resize (autotag *creates*
-    # the master). The stages' own knobs live in ``[variant.stages.*]``.
-    Knob(
-        "caption_position_clauses",
-        "captions",
-        "bool",
-        DEFAULT_CAPTION_POSITION_CLAUSES,
-        default_from="preprocess_toml",
-        env="CAPTION_POSITION_CLAUSES",
-        persist="if_changed_resolved",
-        snapshot=True,
-    ),
-    Knob(
-        "caption_autotag",
-        "autotag",
-        "bool",
-        DEFAULT_CAPTION_AUTOTAG,
-        default_from="preprocess_toml",
-        env="CAPTION_AUTOTAG",
-        persist="if_changed_resolved",
-        snapshot=True,
-    ),
-    Knob(
-        "run_sam_mask",
-        "mask",
-        "bool",
-        DEFAULT_RUN_SAM_MASK,
-        default_from="gui_settings",
-        persist="mask",
-    ),
 )
 
 KNOBS_BY_KEY: dict[str, Knob] = {k.key: k for k in KNOBS}
@@ -163,42 +137,12 @@ KNOBS_BY_KEY: dict[str, Knob] = {k.key: k for k in KNOBS}
 # Every key the Preprocessing tab owns. ConfigTab strips these from the
 # training snapshot (they must not ride into train.py — e.g.
 # ``caption_tag_dropout_rate`` collides with a real *live* dataloader arg).
-PREPROCESS_ONLY_KEYS: frozenset[str] = frozenset(k.key for k in KNOBS) | {STAGES_KEY}
+# Retired keys stay listed: an older variant may still carry them.
+PREPROCESS_ONLY_KEYS: frozenset[str] = (
+    frozenset(k.key for k in KNOBS) | {STAGES_KEY} | frozenset(RETIRED_KEYS)
+)
 ENV_KNOBS: tuple[Knob, ...] = tuple(k for k in KNOBS if k.env)
 SNAPSHOT_KNOBS: tuple[Knob, ...] = tuple(k for k in KNOBS if k.snapshot)
-MASK_KEYS: frozenset[str] = frozenset(k.key for k in KNOBS if k.persist == "mask")
-
-
-def load_rules(sam_yaml: dict) -> list[dict]:
-    """Normalize either ``sam_mask.yaml`` schema into per-card rule dicts: a
-    ``rules:`` array returns card-for-card (missing threshold/dilate fall back
-    to top-level); a flat config collapses to one catch-all card. Seeds the
-    first SAM card when the variant has no ``[[variant.stages.masks_sam]]``.
-    A rule's regions are its ``masks`` list (a pre-0.6.4 ``prompts`` /
-    ``focus_prompts`` pair translated — ``library.config.sam_masks``)."""
-    from library.config.sam_masks import rule_masks
-
-    default_threshold = float(sam_yaml.get("threshold", DEFAULT_SAM_THRESHOLD))
-    default_dilate = int(sam_yaml.get("dilate", DEFAULT_SAM_DILATE))
-    raw = sam_yaml.get("rules")
-    if raw is None:
-        return [
-            {
-                "path_pattern": "",
-                "masks": rule_masks(sam_yaml) or list(DEFAULT_SAM_MASKS),
-                "threshold": default_threshold,
-                "dilate": default_dilate,
-            }
-        ]
-    return [
-        {
-            "path_pattern": r.get("path_pattern") or "",
-            "masks": rule_masks(r),
-            "threshold": float(r.get("threshold", default_threshold)),
-            "dilate": int(r.get("dilate", default_dilate)),
-        }
-        for r in raw
-    ]
 
 
 def resolve_default(knob: Knob, pp_cfg: dict, settings: dict):
@@ -262,7 +206,7 @@ def to_env(values: dict, defaults: dict) -> dict[str, str]:
     A ``str`` for a float/int knob is exported verbatim (already user text).
     The stage forms travel separately (``PREPROCESS_STAGES_JSON``, see
     ``stage_form.STAGE_VALUES_ENV``)."""
-    env: dict[str, str] = {}
+    env: dict[str, str] = dict(CURATION_GATES_OFF)
     for knob in ENV_KNOBS:
         value = _with_empty_fallback(knob, values[knob.key], defaults)
         if knob.kind == "bool":
@@ -285,23 +229,14 @@ def to_overrides(values: dict) -> dict[str, object]:
     return {knob.key: _coerce(knob, values[knob.key]) for knob in SNAPSHOT_KNOBS}
 
 
-def merge_into_meta(
-    meta: dict, values: dict, defaults: dict, *, include_mask: bool
-) -> dict:
+def merge_into_meta(meta: dict, values: dict, defaults: dict) -> dict:
     """Apply the elision rules to a variant's ``[variant]`` table in place:
     each knob is written or popped per its ``persist`` policy, so a plain
-    checkout keeps an empty meta. Mask knobs are only touched when
-    ``include_mask`` (so an invalid mask rule can't block a cache build).
-    Returns ``meta``. The ``stages`` sub-table is ``stage_form``'s
+    checkout keeps an empty meta. Returns ``meta``. The ``stages`` sub-table is ``stage_form``'s
     (``merge_stages_into_meta``)."""
     for key in RETIRED_KEYS:
         meta.pop(key, None)
     for knob in KNOBS:
-        if knob.persist == "mask":
-            if not include_mask:
-                continue
-            meta[knob.key] = _coerce(knob, values[knob.key])
-            continue
         value = _coerce(knob, _with_empty_fallback(knob, values[knob.key], defaults))
         if knob.persist == "if_truthy":
             keep = bool(value)

@@ -231,7 +231,8 @@ def test_persistable_values_elide_against_the_seeded_defaults(schemas):
 
 
 def test_stage_meta_round_trips(schemas):
-    defaults = {sid: SF.seeded_defaults(schemas[sid], {}) for sid in SF.STAGE_IDS}
+    sids = ("resize", "autotag", "correct", "masks_sam")
+    defaults = {sid: SF.seeded_defaults(schemas[sid], {}) for sid in sids}
     forms = {
         "resize": {**defaults["resize"], "target_res": [768], "overwrite": True},
         "autotag": {**defaults["autotag"], "mode": "merge"},
@@ -255,7 +256,7 @@ def test_stage_meta_round_trips(schemas):
     (card,) = SF.load_stage_values(legacy, "masks_sam", defaults["masks_sam"])
     assert card["masks"] == [*defaults["masks_sam"]["masks"], "ignore:text:bubble"]
     assert card["dilate"] == 2 and "prompts" not in card
-    # A variant without cards reports None so the tab seeds from sam_mask.yaml.
+    # A variant without cards reports None.
     assert SF.load_stage_values({}, "masks_sam", defaults["masks_sam"]) is None
     # Mask cards move only with the mask section; an all-default stage vanishes.
     meta2 = SF.merge_stages_into_meta(
@@ -407,28 +408,5 @@ def test_gate_disables_its_drawer(schemas):
         assert drawer.isEnabled()
         sec.set_values({"combine_ocr": False})
         assert not drawer.isEnabled()
-    finally:
-        sec.deleteLater()
-
-
-def test_chain_gate_disables_the_stage_rows(schemas):
-    """A trainer knob passed as ``gate`` renders first and switches every
-    stage row (and the Advanced fold) off with it; ``knob_values`` carries it."""
-    _app()
-    from gui.tabs.preprocess.stage_form import StageFormSection
-
-    sec = StageFormSection(schemas["autotag"], lambda *_: None, gate="caption_autotag")
-    try:
-        gate = sec.knob_widgets["caption_autotag"]
-        assert set(sec.keys()) == {"mode", "min_confidence", "batch_size"}
-        assert sec.knob_values() == {"caption_autotag": False}
-        assert not sec.widgets["mode"].isEnabled()
-        gate.setChecked(True)
-        assert (
-            sec.widgets["mode"].isEnabled()
-            and sec.widgets["min_confidence"].isEnabled()
-        )
-        sec.set_knob_values({"caption_autotag": False})
-        assert not sec.widgets["mode"].isEnabled()
     finally:
         sec.deleteLater()

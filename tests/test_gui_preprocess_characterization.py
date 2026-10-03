@@ -4,13 +4,16 @@ Pins, for every knob and stage form, what ``preprocess_env()``,
 ``preprocess_overrides()`` and the persisted ``[variant]`` meta (flat trainer
 knobs + ``[variant.stages.*]``) look like at (a) all-defaults and (b) every
 knob flipped — under two deterministic default sources (a bare checkout and a
-populated ``preprocess.toml`` / ``gui_settings.json`` / ``sam_mask.yaml``).
+populated ``preprocess.toml`` / ``gui_settings.json``).
 
 This is the byte-for-byte contract the ``knobs.py`` extraction (Phase 1) and
 the stage-form migration (P1–P3, regenerated
 2026-09-07 with the migrated keys — resize geometry, caption rewriting,
 autotag mode, SAM rules — moved out of the flat keys / env) must
-reproduce. Regenerate deliberately, never to make a red run green::
+reproduce. Regenerated 2026-10-03 when the tab went cache-only: the autotag /
+position / SAM sections left, and every env pins ``CAPTION_AUTOTAG`` /
+``CAPTION_POSITION_CLAUSES`` to ``0`` (the populated ``preprocess.toml`` turns
+both on, so the pin shows). Regenerate deliberately, never to make a red run green::
 
     uv run python tests/test_gui_preprocess_characterization.py --write
 """
@@ -28,7 +31,7 @@ FIXTURE = Path(__file__).parent / "fixtures" / "gui_preprocess_knobs.json"
 # diverges from every hardcoded default so the three policies (const /
 # preprocess.toml / gui_settings) are distinguishable in the fixture.
 SCENARIOS: dict[str, dict[str, dict]] = {
-    "bare": {"preprocess_toml": {}, "gui_settings": {}, "sam_yaml": {}},
+    "bare": {"preprocess_toml": {}, "gui_settings": {}},
     "populated": {
         "preprocess_toml": {
             "source_image_dir": "my_images",
@@ -56,13 +59,6 @@ SCENARIOS: dict[str, dict[str, dict]] = {
         "gui_settings": {
             "caption_shuffle_variants": 7,
             "caption_tag_dropout_rate": 0.3,
-            "run_sam_mask": False,
-        },
-        "sam_yaml": {
-            "path_pattern": "artist_x/*",
-            "threshold": 0.4,
-            "dilate": 3,
-            "rules": [{"masks": ["keep:text:face", "ignore:text:sign"]}],
         },
     },
 }
@@ -87,28 +83,6 @@ def _flip_every_knob(tab) -> None:
     tab.caption_trigger_word_edit.setText("@flipped")
     tab.caption_trigger_at_front_chk.setChecked(True)
     tab.caption_drop_groups_edit.setText("artist,lighting")
-    tab.caption_position_clauses_chk.setChecked(
-        not tab.caption_position_clauses_chk.isChecked()
-    )
-    tab.caption_autotag_chk.setChecked(not tab.caption_autotag_chk.isChecked())
-    tab._set_autotag_mode("overwrite")
-    tab.caption_autotag_confidence_spin.setValue(0.55)
-    tab.run_sam_mask_chk.setChecked(not tab.run_sam_mask_chk.isChecked())
-    tab._set_rule_cards(
-        [
-            {
-                "path_pattern": "artist_b/*",
-                "masks": "keep:text:face, ignore:text:bubble, ignore:text:sfx",
-                "threshold": 0.35,
-                "dilate": 7,
-            },
-            {
-                "masks": "ignore:text:watermark",
-                "threshold": 0.6,
-                "dilate": 2,
-            },
-        ]
-    )
 
 
 def _make_tab(monkeypatch_targets, scenario: dict[str, dict]):
@@ -123,14 +97,13 @@ def _make_tab(monkeypatch_targets, scenario: dict[str, dict]):
         {
             "_load_preprocess_toml": lambda: dict(scenario["preprocess_toml"]),
             "read_gui_settings": lambda: dict(scenario["gui_settings"]),
-            "_load_sam_yaml": lambda: dict(scenario["sam_yaml"]),
         },
     )
     return preprocess_tab.PreprocessingTab()
 
 
 def _observe(tab, variant: str, path: Path) -> dict:
-    """env / overrides / persisted meta (with and without the mask section)."""
+    """env / overrides / persisted meta (inputs-only save and the full Save)."""
     from gui import _load
 
     assert tab.persist_preprocess_inputs()

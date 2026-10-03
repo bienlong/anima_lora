@@ -61,52 +61,7 @@ STRINGS: dict[str, str] = {
         "including the first @artist marker are never dropped. Ignored when "
         "shuffle variants ≤ 0."
     ),
-    "preprocess_caption_autotag_box": "Auto-tagging",
-    "preprocess_caption_autotag": "Auto-tag with Anima Tagger",
-    "preprocess_caption_autotag_tip": (
-        "Run the Anima Tagger over the dataset and write .txt captions. Runs "
-        "first, right after resize, because everything else in Caption "
-        "rewriting edits captions this stage may have just created. GPU stage — "
-        "adds one tagger pass over the dataset; the checkpoint is downloaded "
-        "automatically the first time. Run `make caption-autotag` for a dry-run "
-        "report if you want to review the captions before writing them."
-    ),
-    "preprocess_caption_autotag_mode": "Mode",
-    "preprocess_caption_autotag_mode_missing": "Uncaptioned images only",
-    "preprocess_caption_autotag_mode_merge": "Merge into existing captions",
-    "preprocess_caption_autotag_mode_overwrite": "Overwrite all captions",
-    "preprocess_caption_autotag_mode_tip": (
-        "Uncaptioned only: tag images with no .txt sidecar and leave every "
-        "existing caption untouched — the safe default.\n"
-        "Merge: tag everything but only append tags the caption lacks; position "
-        "clauses and their tags are preserved.\n"
-        "Overwrite: replace every caption with the tagger's output. This "
-        "discards hand-written captions."
-    ),
-    "preprocess_caption_autotag_min_confidence": "Confidence threshold",
-    "preprocess_caption_autotag_min_confidence_tip": (
-        "Extra probability floor on top of the tagger's own per-tag "
-        "thresholds — a kept tag below it is dropped. 0 (default) leaves the "
-        "tagger's calibrated decisions alone; raise it for fewer, safer tags. "
-        "The rating is always emitted regardless."
-    ),
     "preprocess_caption_editing": "Caption rewriting",
-    "preprocess_caption_position_clauses": "Position clauses (multi-subject)",
-    "preprocess_caption_position_clauses_tip": (
-        "Detect the subjects in a multi-subject image (SAM3), tag each one, and "
-        "rewrite the caption into 'On the left, …' clauses so attributes bind to "
-        "a subject instead of floating in the flat tag bag. A tag bound to one "
-        "subject is MOVED out of the flat bag, so each attribute is stated "
-        "exactly once; character names stay in the bag as well. Runs before "
-        "caching and writes the caption next to the RESIZED image "
-        "(post_image_dataset/) — your captions in image_dataset/ are never "
-        "touched; images that already have clauses, or where detection "
-        "disagrees with the caption's girl "
-        "count, are left alone. GPU stage — adds a SAM3 + tagger pass over the "
-        "dataset. Run `make caption-position` first for a dry-run report if you "
-        "want to review the proposals before writing them; "
-        '`make caption-position ARGS="--flatten --apply"` undoes a run.'
-    ),
     "preprocess_caption_correct_order": "Correct caption order",
     "preprocess_caption_correct_order_tip": (
         "Write corrected .txt captions next to resized images and use them for "
@@ -136,47 +91,6 @@ STRINGS: dict[str, str] = {
     "preprocess_run_pe": "Run PE caching",
     "preprocess_add_to_queue": "Add to queue",
     "preprocess_queued": "Queued {label} (job {job_id}) — watch it in the Queue tab.",
-    "preprocess_masking_sam": "SAM3 masking (text bubbles)",
-    "preprocess_sam_prompts": "SAM prompts (one per line):",
-    "preprocess_sam_prompts_tip": (
-        "Text prompts SAM3 looks for. One per line. Defaults to 'speech bubble' "
-        "and 'text bubble'."
-    ),
-    "preprocess_sam_focus_prompts": "SAM focus prompts (one per line):",
-    "preprocess_sam_focus_prompts_tip": (
-        "Reversed polarity: subjects to KEEP. When set, the mask trains ONLY on "
-        "these subjects and ignores everything else (e.g. 'girl' masks all "
-        "background). Composes with the prompts above — final trainable region "
-        "is the focus subject minus those ignore regions. Leave empty for the "
-        "default ignore-only behaviour."
-    ),
-    "preprocess_sam_rule": "Mask rule",
-    "preprocess_sam_add_rule": "+ Add rule",
-    "preprocess_sam_add_rule_tip": (
-        "Add another mask rule. Each rule targets a subset of images by path "
-        "pattern; rules whose pattern matches an image compose together."
-    ),
-    "preprocess_sam_remove_rule": "Remove rule",
-    "preprocess_sam_rule_path_pattern": "Path pattern (this rule):",
-    "preprocess_sam_rule_path_pattern_tip": (
-        "Which images this rule applies to — an fnmatch glob ('|'-OR-combined) "
-        "on each image's path relative to the dataset root, e.g. 'character_a/*'. "
-        "Empty or '*' matches every image (a catch-all default rule)."
-    ),
-    "preprocess_sam_threshold": "SAM threshold (0.0–1.0):",
-    "preprocess_sam_threshold_tip": (
-        "Minimum confidence for a SAM3 detection to be kept. Lower = more masks "
-        "(may include false positives), higher = stricter. Default 0.5."
-    ),
-    "preprocess_dilate": "Dilate (px):",
-    "preprocess_dilate_tip": (
-        "Pixels of dilation applied to the binary mask. Larger values blur "
-        "mask edges outward. Default 5. Set to 0 to disable."
-    ),
-    "preprocess_run_mask": "Run masking",
-    "preprocess_run_sam_mask": "Run SAM masking",
-    "preprocess_run_sam_mask_tip": "Run SAM3 segmentation as part of mask generation. Unchecked, the Run masking button does nothing.",
-    "preprocess_mask_nothing_enabled": "SAM masking must be enabled to run masking.",
     "preprocess_invalid_stage": "{stage}: {err}",
     "preprocess_status_resized": "Resized images: {n}",
     "preprocess_status_caches": "Caches — latents: {lat}, text: {te}, PE: {pe}",

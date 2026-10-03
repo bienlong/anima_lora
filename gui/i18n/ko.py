@@ -58,51 +58,7 @@ STRINGS: dict[str, str] = {
         "첫 번째 @artist 마커까지의 태그는 절대 드롭되지 않습니다. "
         "셔플 변형 수가 0 이하이면 무시됩니다."
     ),
-    "preprocess_caption_autotag_box": "자동 태깅",
-    "preprocess_caption_autotag": "Anima Tagger로 자동 태깅",
-    "preprocess_caption_autotag_tip": (
-        "데이터셋 전체에 Anima Tagger를 돌려 .txt 캡션을 생성합니다. 리사이즈 "
-        "직후 가장 먼저 실행됩니다 — 아래 '캡션 편집'의 모든 단계는 이 단계가 "
-        "방금 만들었을 수도 있는 캡션을 편집하기 때문입니다. GPU 단계입니다 — "
-        "태거 패스가 한 번 더 돌아가며, 체크포인트는 처음 실행할 때 자동으로 "
-        "내려받습니다. 쓰기 전에 캡션을 검토하려면 먼저 "
-        "`make caption-autotag`으로 드라이런 리포트를 뽑으세요."
-    ),
-    "preprocess_caption_autotag_mode": "모드",
-    "preprocess_caption_autotag_mode_missing": "캡션 없는 이미지만",
-    "preprocess_caption_autotag_mode_merge": "기존 캡션에 병합",
-    "preprocess_caption_autotag_mode_overwrite": "전체 덮어쓰기",
-    "preprocess_caption_autotag_mode_tip": (
-        "캡션 없는 이미지만: .txt 사이드카가 없는 이미지만 태깅하고 기존 "
-        "캡션은 전혀 건드리지 않습니다 — 안전한 기본값입니다.\n"
-        "기존 캡션에 병합: 전부 태깅하되 캡션에 없는 태그만 덧붙입니다. "
-        "위치 절과 그 안의 태그는 그대로 보존됩니다.\n"
-        "전체 덮어쓰기: 모든 캡션을 태거 출력으로 교체합니다. 손으로 쓴 "
-        "캡션이 사라집니다."
-    ),
-    "preprocess_caption_autotag_min_confidence": "신뢰도 임계값",
-    "preprocess_caption_autotag_min_confidence_tip": (
-        "태거 자체의 태그별 임계값 위에 추가로 적용되는 확률 하한입니다 — "
-        "이 값보다 낮은 태그는 버려집니다. 0(기본값)이면 태거의 보정된 판단을 "
-        "그대로 씁니다. 값을 올리면 태그 수는 줄고 더 안전해집니다. "
-        "레이팅은 이 값과 무관하게 항상 출력됩니다."
-    ),
     "preprocess_caption_editing": "캡션 편집",
-    "preprocess_caption_position_clauses": "위치 절 생성 (다중 인물)",
-    "preprocess_caption_position_clauses_tip": (
-        "다중 인물 이미지에서 SAM3로 인물을 검출하고 각각을 태깅해 "
-        "캡션을 'On the left, …' 형태의 위치 절로 다시 씁니다. 속성이 "
-        "평면 태그 나열에 떠 있지 않고 각 인물에 묶입니다. 한 인물에게만 "
-        "묶인 태그는 평면 나열에서 **빠져나와** 해당 절로 옮겨지므로 각 속성이 "
-        "정확히 한 번만 서술됩니다(캐릭터 이름은 평면 나열에도 그대로 남습니다). "
-        "캐싱 전에 실행되며, 캡션은 리사이즈 이미지 옆(post_image_dataset/)에 "
-        "씁니다 — image_dataset/의 원본 캡션은 건드리지 않습니다. 이미 위치 절이 있거나 "
-        "검출 수가 캡션의 인원 수와 어긋나는 이미지는 건드리지 않습니다. "
-        "GPU 단계입니다 — SAM3 + 태거 패스가 한 번 더 돌아갑니다. 쓰기 전에 "
-        "제안을 검토하려면 먼저 `make caption-position`으로 드라이런 리포트를 "
-        '뽑으세요. `make caption-position ARGS="--flatten --apply"`로 되돌릴 수 '
-        "있습니다."
-    ),
     "preprocess_caption_correct_order": "캡션 순서 교정",
     "preprocess_caption_correct_order_tip": (
         "교정된 .txt 캡션을 리사이즈 이미지 옆에 저장하고 텍스트 인코더 "
@@ -131,47 +87,6 @@ STRINGS: dict[str, str] = {
     "preprocess_run_pe": "PE 캐싱 실행",
     "preprocess_add_to_queue": "큐에 추가",
     "preprocess_queued": "{label} 큐에 추가됨 (작업 {job_id}) — 큐 탭에서 확인하세요.",
-    "preprocess_masking_sam": "SAM3 마스킹 (말풍선)",
-    "preprocess_sam_prompts": "SAM 프롬프트 (한 줄에 하나):",
-    "preprocess_sam_prompts_tip": (
-        "SAM3이 찾을 텍스트 프롬프트. 한 줄에 하나씩. "
-        "기본값: 'speech bubble', 'text bubble'."
-    ),
-    "preprocess_sam_focus_prompts": "SAM 포커스 프롬프트 (한 줄에 하나):",
-    "preprocess_sam_focus_prompts_tip": (
-        "반전 극성: 유지할 피사체를 지정합니다. 설정하면 마스크는 해당 피사체에만 "
-        "학습이 적용되고 나머지는 모두 무시됩니다 (예: 'girl'을 지정하면 배경 전체가 "
-        "무시 영역이 됩니다). 위의 프롬프트와 합성되어, 최종 학습 영역은 포커스 "
-        "피사체에서 무시 영역을 뺀 부분이 됩니다. 비워두면 기본 무시 전용 동작이 "
-        "적용됩니다."
-    ),
-    "preprocess_sam_rule": "마스크 규칙",
-    "preprocess_sam_add_rule": "+ 규칙 추가",
-    "preprocess_sam_add_rule_tip": (
-        "마스크 규칙을 하나 더 추가합니다. 각 규칙은 경로 패턴으로 이미지 "
-        "서브셋을 대상으로 하며, 패턴이 일치하는 규칙들은 서로 합성됩니다."
-    ),
-    "preprocess_sam_remove_rule": "규칙 삭제",
-    "preprocess_sam_rule_path_pattern": "경로 패턴 (이 규칙):",
-    "preprocess_sam_rule_path_pattern_tip": (
-        "이 규칙이 적용될 이미지를 지정합니다 — 데이터셋 루트 기준 각 이미지 "
-        "경로에 대한 fnmatch 글로브 ('|'로 OR 조합). 예: 'character_a/*'. "
-        "빈 값 또는 '*'는 모든 이미지에 매칭되는 기본 규칙입니다."
-    ),
-    "preprocess_sam_threshold": "SAM 임계값 (0.0–1.0):",
-    "preprocess_sam_threshold_tip": (
-        "SAM3 탐지를 유지할 최소 신뢰도. 낮을수록 더 많은 마스크 "
-        "(오탐 포함 가능), 높을수록 엄격. 기본값 0.5."
-    ),
-    "preprocess_dilate": "팽창 (px):",
-    "preprocess_dilate_tip": (
-        "이진 마스크에 적용할 팽창 픽셀 수. 값이 클수록 마스크 가장자리가 "
-        "바깥으로 번집니다. 기본값 5. 0으로 비활성화."
-    ),
-    "preprocess_run_mask": "마스킹 실행",
-    "preprocess_run_sam_mask": "SAM 마스킹 실행",
-    "preprocess_run_sam_mask_tip": "마스크 생성 시 SAM3 분할을 실행합니다. 끄면 마스킹 실행 버튼은 아무것도 하지 않습니다.",
-    "preprocess_mask_nothing_enabled": "마스킹을 실행하려면 SAM 마스킹을 켜야 합니다.",
     "preprocess_invalid_stage": "{stage}: {err}",
     "preprocess_status_resized": "리사이즈된 이미지: {n}장",
     "preprocess_status_caches": "캐시 — latents: {lat}, text: {te}, PE: {pe}",
