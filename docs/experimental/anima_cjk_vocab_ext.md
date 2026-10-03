@@ -1,37 +1,45 @@
-# CJK vocab ext rows — the training recipe
+# CJK vocab ext rows — how preview5's rows are made
 
-How the Japanese rows of the [CJK vocab pack](../methods/cjk_vocab_pack.md) are
-trained so that the base model **renders** them as glyphs: which rows a
-caption reaches (Qwen : T5 granularity and per-glyph routing), where the
-images come from (a self-generated canvas with pasted text), which σ each
-item trains at (a band law and a per-band data mix), and how the loss
-weighs the text (in-box share). Status 2026-09-28: the kana rows
-(`retrain_kana`) and the first kanji batch (`retrain_kanji_b1`) are trained;
-two kanji batches and the bake of the new seed are left.
+How the Japanese rows of the shipped [CJK vocab pack](../methods/cjk_vocab_pack.md)
+(`anima_cjk_vocab_pack_preview5`, the v2 default) are trained so that the
+base model **renders** them as glyphs. This page covers which rows a caption
+reaches (per-glyph routing and the encode fold), where the images come from
+(a self-generated canvas with pasted text), which σ each item trains at (the
+band law and a per-band data mix), how the loss weighs the text (in-box
+share), the chain of runs that built the rows, and the one change preview5
+makes on top of them (the shared direction × 0.8).
 
-The line's code and records live in `project/cjk_anima_scale/`. Its
-`README.md` holds the current state, `proposal_length.md` the open question,
-`retrain_experiments.md` the reads behind this page, and
-`band_experiment_results.md` the band law. Run it through that project's
-`scale.py <run> data | train | eval`. There is no `make` target.
+The code and records live in `project/cjk_anima_scale/` (the trainer, the
+data builder, the band law in `band_experiment_results.md`, the seed's floor
+in `floor_score.md`). Runs go through that project's
+`scale.py <run> data | train | eval`. There is no `make` target. Work on the
+next pack is in `project/cjk_anima_reseed/`.
+
+## What preview5 is
+
+| | |
+|---|---|
+| Rows | 2 683 ext rows differ from the raw pack. **1 362 are trained singles**: 174 kana and punctuation + 1 188 kanji and marks (`゙ 々 〇`), trained cold. The rest are the older seed's rows, mostly piece rows that per-glyph routing never reaches. |
+| Source | `seed_retrain_0930` (the rows published as `preview4`), with each family's shared direction scaled × 0.8 (§ The shared direction) |
+| Bake | `scripts/toolkits/bake_vocab_pack.py --glyph_route` on the raw pack with the `fold` map. Every untouched row is byte-identical to the raw pack. |
+| Pack json | `glyph_route: true`, `fold` (§ Addressing) |
+| Coverage | Every Japanese text clause in the training set's captions (615 captions) is fully covered by trained singles. On the dialogue corpus, the top 1 000 glyphs cover 99.06 % of occurrences. |
+| ComfyUI | ComfyUI-Anima_lora-Adapter ≥ 3.13.0 (3.12.0 added routing, 3.13.0 the fold). Older nodes ignore both keys. |
+| Hub | `sorryhyun/anima-vocab-pack-cjk` |
 
 ## What trains
 
 Only the pack's ext rows train. The DiT, the LLM adapter and the T5 table stay
 frozen. A run stores a delta per row (`raw · row_scale`), summed onto the
-pack row at lookup, and `scripts/toolkits/bake_vocab_pack.py` folds it into a
-new pack pair. A trained row ends near norm 250, against the T5 table's mean
-212.
+pack row at lookup, and the bake folds it into a new pack pair.
 
 A run's vocabs start **cold**: Δ = 0 on the raw pack row. Every other row a
-caption touches rides frozen at the context rows (the seed, or the previous
-run of a chain). Cold is deliberate. On the same in-word data, rows warm
-from the old seed composed less than cold rows (こんにちは ≤ 1 edit 6 vs
-11 / 16) and doubled more (`dup` 13 vs 4). The old seed carries a direction
-the adapter treats as context-free, and training on top of it keeps that
-direction (`retrain_experiments.md` § 1).
+caption touches stays frozen at its context row. Cold is deliberate. On the
+same in-word data, rows warmed from the older seed composed less than cold
+rows (こんにちは ≤ 1 edit 6 vs 11 / 16) and doubled more (`dup` 13 vs 4)
+(`retrain_experiments.md` § 1).
 
-## Addressing: Qwen : T5 granularity and per-glyph routing
+## Addressing: per-glyph routing and the fold
 
 Anima's text path sends each caption through Qwen and through a T5-side query
 table. The table's granularity decides whether a row is shared by many words
@@ -40,49 +48,44 @@ or is a whole string of its own.
 | | T5 side | Qwen | Qwen / T5 |
 |---|---|---|---|
 | Latin | 28 438 pieces | 68 923 | **2.4** |
-| JA, pack as built | one ext row per Qwen token (8 734 one-glyph, 18 288 multi-glyph "piece" rows) | 27 022 | **1.0** |
-| JA, per-glyph routing | ≈ 1 500 single rows in use (up to ≈ 8.7 k) | 27 022 | **≈ 3** |
+| JA, one ext row per Qwen token | 8 734 one-glyph, 18 288 multi-glyph "piece" rows | 27 022 | **1.0** |
+| JA, per-glyph routing (shipped) | ≈ 1 500 single rows in use | 27 022 | **≈ 3** |
 
-EN sits at 2.4. A T5 piece is shared by many words, and the adapter reads it
-in context. A JA piece row is the only address of its string, and nothing
-ever asked the adapter to read it by its neighbours.
+A JA piece row is the only address of its string, and nothing ever asked the
+adapter to read it from its neighbours. **Per-glyph routing**
+(`HybridT5Encoder`, `library/anima/ext_vocab.py`) sends every JA Qwen token,
+on the T5 side, to its glyphs' single rows. The Qwen text is untouched, and
+EN stays bit-exact. Each single row is then shared by every word it appears
+in, as EN pieces are. On こんにちは (16 renders), routed beat spelled
+(≤ 1 edit 14 vs 11) and the piece row (0).
 
-**Per-glyph routing** is an encoder flag (`HybridT5Encoder`,
-`library/anima/ext_vocab.py`). On the T5 side, every JA Qwen token goes to its
-glyphs' single rows. The Qwen text is untouched, and so is EN, which stays
-bit-exact. Each single row is then shared by every word it appears in, as EN
-pieces are. The piece rows go unused.
+The flag is `"glyph_route": true` in the pack json.
+`ANIMA_VOCAB_GLYPH_ROUTE=1/0` overrides it.
 
-On こんにちは (16 renders), the routed caption beat both the spelled one and
-the piece row:
+**The fold** (`"fold"` in the pack json) rewrites a few characters on the T5
+side before routing. The training set's OCR text writes `! ? ~` half-width,
+while the word pool wrote full-width forms:
 
-| | ≤ 1 edit | official |
+| typed | encoded as | why |
 |---|---|---|
-| routed | 14 | 8 |
-| spelled | 11 | 5 |
-| piece row | 0 | 0 |
+| `！ ？` | `! ?` (base T5 rows) | the house text is half-width; the base knows them |
+| `~` | `～` (trained) | half-width `~` has no row |
+| `『 【` / `』 】` | `「` / `」` (trained) | their own rows were never retrained |
 
-Singles reach 99.85 % of JA glyph occurrences in the dialogue corpus with
-≈ 1 500 rows. Pieces covered ≈ 85 % of lines with 1 900 rows.
-
-The flag lives in the pack json (`"glyph_route": true`).
-`ANIMA_VOCAB_GLYPH_ROUTE=1/0` overrides it. A data dir built with routed
-windows records `glyph_route` in `build.json`. It is then trained and read
-routed, against a routed floor cache.
+Qwen reads the text as typed. The fold is one character to one character, so
+offsets still index the typed text. It is part of the pack digest, so
+changing it re-encodes every TE cache.
 
 ## Data: a self-generated canvas with pasted text
 
-**Real images do not train rows.** The kana rows were warm-trained on 291 real
-kanji-free pages with their verbatim captions and the loss box on the quoted
-lines (`experiments/real_kana`). Every read fell to ≈ 0: words official
-16 → 0 / 104, singles contained 73 → 14 / 112. The frozen DiT cannot
-reproduce a real page, so its FM loss is high everywhere. The rows are the
-only trainable place for that residual, and they absorb the image's whole
+**Real images do not train rows.** Warm-training the kana rows on 291 real
+kanji-free pages, with the loss box on the quoted lines, collapsed every read
+(word official 16 → 0 / 104). The frozen DiT cannot reproduce a real page,
+so its FM loss is high everywhere, and the rows absorb the image's whole
 mismatch, not just the text's.
 
-So the canvas is the base model's own render, and only the text is foreign.
-The `scenes` stage (`project/cjk_anima_scale/src/scenes/stage.py`) works like
-this:
+So the canvas is the base model's own render, and only the text is foreign
+(`project/cjk_anima_scale/src/scenes/stage.py`):
 
 1. **Generate.** The base model draws a scene from a combinatorial tag
    prompt plus an EN anchor clause:
@@ -90,98 +93,69 @@ this:
    Every token is pretrained, and no ext row is touched.
 2. **Judge.** A detector and a reader keep an image only if **exactly one**
    text box is found and the anchor is read back. The box must reach a
-   minimum size, and the erase must clear it. Stray specks are erased or
-   the image is rejected. The 1 k pools kept 13–24 % of renders.
+   minimum size, and the erase must clear it. The pools kept 13–24 % of
+   renders.
 3. **Composite.** The data stage erases the anchor's box, draws the JA text
-   into the bubble with a font, and swaps only the quote in the caption. For
-   example, `English text reads as "hi"` becomes
-   `Japanese text reads as "…"`, with the `english text` tag becoming
-   `japanese text`.
+   into the bubble with a font, and swaps only the quote in the caption:
+   `English text reads as "hi"` becomes `Japanese text reads as "…"`, and
+   the `english text` tag becomes `japanese text`.
 
 Everything outside the box is the DiT's own output, so the loss there is
 low. What is left for the rows is the glyph.
 
-The 1 k-token pools are 384–640 px shapes: `s1` and `s1w` (one-word anchors,
-four caption frames), `sl1w` (EN sentences, the only pool for left-to-right
-items), and `ja_comic` (one bubble). Lone glyphs go to `s1` / `s1w` scenes
-whose bubble aspect is at most 2.
+The scene pools are 384–640 px shapes at ≈ 1 k tokens: `s1` and `s1w`
+(one-word anchors, four caption frames), `sl1w` (EN sentences, the source of
+left-to-right items) and `ja_comic` (one bubble). Orientation is drawn, not
+fitted: 30 % of multi-glyph items are left-to-right lines, marked in the
+caption (`horizontal Japanese text reads as` / `, written horizontally.`);
+the rest are columns, the manga default.
 
-`scenes_t4k` is a 1024-tier pilot pool (3 840–4 480 tokens, `plan_polish.md`).
-It uses the frame `Text reads as "<short EN sentence>".` with no
-`english text` tag, and keeps 51 of 200 renders.
+## σ per item: the band law and the mix
 
-Orientation is drawn, not fitted. 30 % of multi-glyph items are
-left-to-right lines, marked in the caption (`horizontal Japanese text reads
-as` / `, written horizontally.`). The rest are columns, the manga default.
+Every item is stamped with a σ band, and the trainer draws σ inside it (a
+batch is split by band). The band comes from the **band law**
+(`band_experiment_results.md`, rows with provenance in
+`cjk_scale/windows.py`):
 
-## σ per item: the band law and the per-band mix
+- **Glyph count sets the band.** Single-glyph rows train at 0.7–0.9,
+  multi-glyph at 0.5–0.7.
+- **Rendered px sets the floor** a band may reach: 12–16 px text lives at
+  0.2–0.6, 48 px at 0.5–0.7, 128 px at 0.8.
+- **Nothing above 0.9.** 0.8–0.95 is dead at 48 px, for kana and kanji
+  alike.
+- **Ink, stroke density and the bubble ellipse move no band.** Kanji take
+  the kana band.
 
-Every item is stamped with a σ band. The trainer draws σ inside that band
-(`fm_training_batch` with the band's `t_min` / `t_max`; a batch is split by
-band). The band comes from a **band law** keyed on the item's kind and px,
-where px = √(ink box area / glyphs). The law is written as rows with
-provenance in `cjk_scale/windows.py`, each row naming the read that set it.
+The singles' mix (`builder.TABLE`) has three band groups, a third of the
+items each. A tier is named `<form>_<median px>`:
 
-| kind | px | band | read |
+| band | tier | weight | what |
 |---|---|---|---|
-| single (one token, one glyph) | ≥ 40 | 0.7–0.9 | trained: 24 kana at bubble fit, native 84 / 55 vs 49 / 30 of 192 at 0.5–0.7 |
-| single | 24–40 | 0.5–0.7 | ceiling only |
-| single | 12–24 | 0.3–0.5 | ceiling only |
-| piece / multi (≥ 2 glyphs) | 24–64 | 0.5–0.7 | trained: 16 pieces at 35 px, exact 7 vs 1 / 32 against 0.7–0.9 |
-| piece / multi | 12–24 | 0.3–0.5 | ceiling only |
+| 0.7–0.9 | `bubble1_52` | 0.5 | one glyph in a generated scene's bubble, fill 0.7 |
+| | `grid_82` / `lone_190` | 0.5 | 1×1 … 3×3 grids, one glyph per cell, half in bubbles; captions name each cell (the 1×1 deals are `lone_190`) |
+| 0.5–0.7 | `bubbleN_34` | 0.7 | a 2–6-glyph window of a dialogue line in a bubble, routed caption |
+| | `bubble1_32` | 0.3 | one glyph at line px in a bubble it fills 0.2–0.4 of (the count tier) |
+| 0.3–0.5 | `bubbleN_18` | 1.0 | windows at 12–24 px in small bubbles |
 
-The band law's other findings:
+**Windows** are substrings of manga dialogue lines (plus, for the last kanji
+batch, the training set's own JA text) whose glyphs are all trained singles,
+with no glyph repeated and none crossing a held-out read word's trigram.
+Whole lines would cover kana only; 2–6-glyph windows reach every kanji the
+corpus holds. Each draw picks a glyph uniformly, then one of its windows, so
+exposure is per row. Every window must encode to exactly its glyphs' single
+rows, or it is dropped.
 
-- **Glyph count sets the band.** Single-glyph rows train higher than
-  multi-glyph rows.
-- **Px sets the floor.** Px decides how low a band may reach: 12–16 px text
-  lives at 0.2–0.6, 128 px at 0.8.
-- **Nothing above 0.9.** 0.8–0.95 is dead at 48 px, for kana and kanji alike.
-- **What moves no band:** ink, stroke density and the bubble ellipse. Kanji
-  take the kana band.
+Two reads set the mix: the lone group alone composes nothing (C1), and the
+in-word groups are load-bearing.
 
-**The singles' mix** (`builder.TABLE`) has three band groups. Each group
-takes half of the kind's item budget; the tiers split the group by weight.
-An item is kept only if the group's band sits inside its own window (or
-covers 0.8 of it), so px and band stay consistent.
-
-| group | band | tier | weight | what |
-|---|---|---|---|---|
-| lone | 0.7–0.9 | `scene_single` | 0.5 | one glyph in a bubble, fill 0.7 (≈ 50 px) |
-| | | `grid_single` | 0.5 | 1×1 … 3×3 grids, one glyph per cell, half in bubbles; captions name each cell |
-| in-word | 0.5–0.7 | `scene_window` | 0.7 | a 2–6-glyph window of a dialogue line in a bubble (≈ 40 px), routed caption |
-| | | `scene_single_small` | 0.3 | one glyph at line px (28–40) in a bubble it fills 0.2–0.4 of: the count tier |
-| small in-word | 0.3–0.5 | `scene_window` | 1.0 | windows at 12–24 px in small bubbles (fill ≥ 0.5) |
-
-**Windows** are any substring of a manga dialogue line whose glyphs are all
-the run's singles, with no glyph repeated and none crossing a held-out read
-word's trigram. Whole lines cover kana only: the kanji median is 3 lines per
-glyph, and 101 kanji have none. Windows of 2–6 glyphs give a kanji median of
-162 and reach every kanji the corpus holds. A window may cross a word
-boundary; the DiT renders JA and never reads it for meaning. Each draw picks
-a glyph uniformly, then one of its windows, so exposure is per row.
-
-Every window must encode to exactly its glyphs' single rows, or it is
-dropped.
-
-Two reads settled the mix:
-
-- **Lone alone composes nothing** (C1). Lone and in-word are 1 : 2.
-- **The in-word tier is load-bearing.** Kana rows trained this way hold their
-  singles and compose.
-
-**Budget.** The base is 90 steps per vocab, scaled by kind, glyph count,
-cold/warm and ink (`cjk_scale/budget.py`), times the mix factor 1.5 for the
-in-word share:
+**Budget** (`cjk_scale/budget.py`): 90 steps per row, scaled by kind and
+ink, × 1.5 for the in-word share:
 
 | rows | steps / row |
 |---|---|
 | cold kana | 135 |
 | cold kanji, ink < 10 | 225 |
 | cold kanji, ink ≥ 10 | 337 |
-
-Dense kanji at 225 lost half their reads. 450 brought them back, and 337 is
-the midpoint. Items scale with steps, at ≈ 67 per vocab-factor.
 
 ## In-box loss
 
@@ -195,89 +169,88 @@ s(n) = s1 + (s_cap − s1) · min(1, ln n / ln n_cap)
      s1 = 0.25 (one glyph), s_cap = 0.5, n_cap = 8 glyphs
 ```
 
-The share rises with the glyph count on a log curve and is paid in glyphs, not
-tokens. Under the probe's linear rule, a 4-glyph piece already hit a 0.75
-cap. The pixel box maps to latent cells at 8× (`box_mask`).
-
-A grid item takes the **union of its cells** as one box (`grid_box`, on),
-with the share from the joined glyph count. Each row learns from its own
-cell because the caption's position clause binds it there. The loss does
-not pair a row with its cell. Without the union, a grid cell was priced
-15–50× below a scene box per draw (`reports/grid_box_2026_09_25.md`).
-
-A flat 1×1 and any item without a box stay plain MSE.
+The pixel box maps to latent cells at 8× (`box_mask`). A grid item takes the
+**union of its cells** as one box, with the share from the joined glyph
+count. Each row learns from its own cell because the caption's position
+clause binds it there. A flat 1×1 and any item without a box stay plain MSE.
 
 ## Trainer
 
 | setting | value |
 |---|---|
-| loss | plain flow matching on the frozen DiT, with the in-box share above |
+| loss | flow matching on the frozen DiT, with the in-box share above |
 | lr | 1e-3, cosine, warmup 0.1 |
 | batch | 4 |
 | anchor μ | 0 (the rest is frozen, not anchored) |
 | free residual | 1e-3 · ‖f‖² on the touched rows |
 | σ | per item, in its band |
 
-The trainer is fixed: each constant in `cjk_scale/train.py` names the read
-that set it, and a change is a code change with a report beside it.
+Each constant in `cjk_scale/train.py` names the read that set it. ≈ 2.35 it/s
+locally at batch 4, ≈ 6.7 on a Colab G4.
 
-The kana runs at 1 k tokens: 12 shapes, 384–640 px on a side. The local GPU does
-≈ 2.2 it/s at batch 4, and a Colab G4 ≈ 6.7.
+## The chain that built the rows
 
-## Results so far
+Each run trains its vocabs cold, with every earlier row frozen at its
+context's, and its windows may carry every single trained down the chain.
+The last run's `trained.pt` holds the whole chain.
 
-`retrain_kana` trained 174 cold kana and punctuation rows, 23 490 steps on
-17 400 items (183 min). It was read routed, 4 prompts × 2 seeds per key:
-
-| words (`en`, / 8 per word) | ≤ 1 edit | official | `dup` |
+| run | rows | steps | context |
 |---|---|---|---|
-| floor (old seed), 8 words | 1 / 64 | 0 | 4 |
-| `retrain_kana`, same 8 | **29** / 64 | 10 | 42 |
-| `retrain_kana`, 4 katakana words | 20 / 32 | 6 | 15 |
+| `retrain_kana` | 174 kana + punctuation | 23 490 | the older seed |
+| `retrain_kanji_b1` | 329 kanji (91 new) | 90 749 | `retrain_kana` |
+| `retrain_kanji_b2` | 307 kanji | 90 319 | b1 |
+| `retrain_kanji_b3` | 305 kanji | 90 321 | b2 |
+| `retrain_kanji_b4` | 247: the training set's JA tail (244 kanji + `゙ 々 〇`), first trained under the fold | 76 662 | b3 |
 
-- **Composition.** Against the floor, ≤ 1 edit rose 28 / 0 (p 7e-9).
-- **Singles** hold at the floor: official 17 vs 23 / 64 hiragana, not
-  significant; contained flat.
-- **Doubling rose** (`dup` 42, こんんにちちぱ-style). Collapsing doubles lifts
-  ≤ 1 edit 29 → 48 / 64, and why doubling rose is unread.
+b1–b3 are the top 1 000 glyphs of the dialogue corpus, ranked by count and
+cut at equal steps. b4 adds the training set's own JA glyphs (Chinese-only
+strings excluded). b4's rows are `seed_retrain_0930`, published as `preview4`.
 
-`retrain_kanji_b1` trained 329 kanji, 91 of them new, cold on
-`retrain_kana`'s rows: 90 749 steps on a Colab G4 (225 min). Its singles
-were read only on the kanji the seed floor already had cached: 21 kanji,
-2 prompts × 2 seeds, paired (`experiments/kanji_read`).
+## The shared direction (× 0.8)
 
-| kanji | floor contained | `b1` contained | floor official | `b1` official |
-|---|---|---|---|---|
-| 12 with no seed row | 0 / 48 | **29** (p 4e-9) | 0 | 15 |
-| 9 dense seed kanji | 20 / 36 | 17 (n.s.) | 10 | 6 (n.s.) |
+The trained rows of each family (kana, kanji) share a mean delta, the
+"stick", that holds ≈ 30 % of their delta energy; the per-row residuals are
+near-orthogonal (`project/cjk_anima_reseed/reports/stick_2026_10_03.md`).
+preview5 moves every trained row of a family by `(s − 1) · m_family` with
+s = 0.8, leaving the residuals as they are. No other row changes.
 
-`repeat` (the glyph drawn more than once) went 0 → 7.
+On record for this lever is the stick report's sweep on the seed rows
+(`sent` keys, 92 renders): ≤ 1 edit 45 → 25 at s = 0.75, with the text region
+shrinking toward the EN reference's layout (box 0.149 → 0.142). No scored
+read of s = 0.8 itself is on record.
 
-It and the kana are baked, routing on, as
-`models/vocab_packs/anima_cjk_vocab_pack_retrained0928_kanj1b`. The same
-table is on the Hub as `anima_cjk_vocab_pack_preview3`. Its trained glyphs
-are listed in `anima_cjk_vocab_pack_preview3_trained.json`. In ComfyUI it
-needs ComfyUI-Anima_lora-Adapter ≥ 3.12.0; older nodes ignore the routing
-flag.
+## How the rows read
 
-**A LoRA trained through the pack.** Two LoRAs were trained on one artist's
-30 images (`@channel (caststation)`), 12 of them with Japanese text
-clauses. The recipe was `make lora` defaults (8 epochs, 240 steps), and the
-two differ only in the text path. One ran through preview3 with routing
-on; the other ran with no pack. Compared by eye, the pack-trained LoRA
-shows **no visible degradation** against the stock one. Nothing was
-scored. Configs and TE caches: `output/vocab_cmp/`.
+The seed's floor (`floor_score.md` § New seed), read routed at s = 1 (the
+preview4 rows) against the older seed:
+
+| ruler | seed rows | older seed |
+|---|---|---|
+| acceptance strings (はい おしい やったネ ちょっと来い こんにちは, 80) | **37** | 8 |
+| kana words, 7 × 16 | **25** | 0 |
+| kanji words (山田太郎 … 愛してる), ≤ 1 edit / 96 | **45** | 3 |
+| lone あ / い, native (64) | 33 | 46 |
+| `en` (24) | 24 | 24 |
+
+Every acceptance string moves the same way (paired +32 / −3). Exact reads of
+kanji words stay low (7 / 96), and lone あ is the one drop.
+
+**A LoRA trained through the pack** (on `preview3`, the kana + b1 rows): two
+LoRAs on one artist's 30 images, 12 with Japanese text clauses, `make lora`
+defaults, differing only in the text path. By eye, the pack-trained LoRA
+shows no visible degradation against the stock one. Nothing was scored.
 
 ## Open
 
-- **Doubling.** Candidate causes: window length 2–6 vs whole lines, the row
-  count, window variety, the shared direction in row space.
-- **Kanji batches b2, b3**, then the new seed: `paths.SEED_ROWS` moves, the
-  floor is re-rendered once, and the bake ships routing on.
-- **Token scaling.** Users render at the 1024 tier (≈ 4 k tokens), but the
-  rows train at 1 k. A pilot (`plan_polish.md`,
-  `experiments/polish_rows`) warm-trains the kana rows on `scenes_t4k`
-  composites. It runs at batch 1, native size, σ over the full [0, 1], with
-  the kana px set by the erased EN anchor's px.
-- **An OCR reward on the rows** (`future.md` § 2). It is an option because
-  real pages cannot supervise a row through the FM loss.
+- **Repeats.** Glyphs drawn more than once, or a word filling more slots than
+  it has (`こんんにちちは`). The base decides the text region and its slot
+  count; the rows fill it (`project/cjk_anima_scale/proposal_seed_synthesis.md`).
+  Rescaling the stick does not lower them.
+- **The reseed** (`project/cjk_anima_reseed/`): cold kana rows on a flattened
+  data table aimed at manga-size dialogue. Its arms so far read under the
+  seed (≤ 1 edit 18 vs 34 / 64); the gap is in the per-row residuals, not the
+  shared direction.
+- **Token scaling.** Users render at the 1024 tier (≈ 4 k tokens); the rows
+  train at 1 k.
+- **An OCR reward on the rows** (`future.md`), since real pages cannot
+  supervise a row through the FM loss.

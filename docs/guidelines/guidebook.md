@@ -46,7 +46,11 @@ Paste this one line into PowerShell. It installs `uv`, the CUDA 13.2 toolkit, Py
 irm https://raw.githubusercontent.com/sorryhyun/anima_lora/main/install.ps1 | iex
 ```
 
-- Installs into `.\anima_lora\` (change with `$env:ANIMA_DIR`, pin a version with `$env:ANIMA_VERSION='v1.4.0'`).
+> **New feature:** Try caption with Japanese text in the image — e.g. `1girl, solo, speech bubble. Japanese text reads as "何言ってるの?".` ([§4.1](#41-caption-writing-tips))
+>
+> **v2.0.0** — Anima with the [CJK vocab pack](../methods/cjk_vocab_pack.md): it renders Japanese text natively, and you can train LoRAs on it. The pack is on by default and installed with the models in §3; English prompts are unchanged.
+
+- Installs into `.\anima_lora\` (change with `$env:ANIMA_DIR`, pin a version with `$env:ANIMA_VERSION='v2.0.0'`).
 - If it asks for a reboot (common after the CUDA step), reboot and re-run the same one-liner — it picks up where it left off.
 - To reopen it later, use the "Anima LoRA GUI" desktop shortcut.
 
@@ -111,6 +115,7 @@ absurdres, safe, 1girl, chitanda eru, hyouka, @channel (caststation), full body,
 
 - Omit quality tags such as `absurdres`, `highres`, and `masterpiece`, or keep them to a minimum. (Once the officially released mod guidance is available, you can skip them entirely.)
 - Don't want to caption by hand? In the GUI's Dataset tab, select an image and click Autotag — the built-in Anima Tagger fills the caption in the correct order ([§6.3](#63-dataset-tab-autotag--grouping)). Treat the result as a starting point: review the tags, especially character/series/artist names, before training.
+- Want Japanese text drawn in the image? Keep the tags in English and put the text in double quotes inside an English clause: `1girl, solo, speech bubble. Japanese text reads as "はい".` LoRA captions use the same form, so a LoRA can learn to render that text. Write Japanese as text to draw, not as tags (`猫耳` → `cat ears`). Details: [CJK vocab pack](../methods/cjk_vocab_pack.md#intended-use).
 
 ---
 
