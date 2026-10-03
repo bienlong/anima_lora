@@ -354,7 +354,7 @@ STRINGS: dict[str, str] = {
     "visit_github": "访问 GitHub 页面",
     # Models dialog
     "models_title": "下载模型",
-    "models_intro": "训练 / 推理运行所需的权重, 按包分组显示。「下载首次运行套件」会获取 3 个 Anima 权重、PE、CJK 词表包(v2 起默认启用)、标注器检查点与标签 DB。SAM3(遮罩)与 OCR 是「策展」标签页中的可选包。文件保存于 models/ 下。",
+    "models_intro": "训练 / 推理运行所需的权重, 按包分组显示。「下载首次运行套件」会获取 3 个 Anima 权重、PE-Spatial (REPA)、CJK 词表包(v2 起默认启用)、标注器检查点与标签 DB。SAM3(遮罩)与 OCR 是「策展」标签页中的可选包。文件保存于 models/ 下。",
     "models_download_all": "下载首次运行套件",
     "models_download": "下载",
     "models_redownload": "重新下载",
@@ -379,7 +379,7 @@ STRINGS: dict[str, str] = {
     "models_pack_anima": "Anima 基础",
     "models_pack_anima_desc": "DiT、Qwen3-0.6B 文本编码器与 Qwen-Image VAE — 每次训练 / 推理运行都需要这三者。",
     "models_pack_pe": "PE-Core",
-    "models_pack_pe_desc": "PE-Core-L14-336: CMMD 验证与 IP-Adapter 条件化。分组塔 PE-Spatial 位于「分组」包。",
+    "models_pack_pe_desc": "PE-Core-L14-336: 仅用于 CMMD 验证指标 (use_cmmd, 默认关闭)。REPA 特征缓存使用 PE-Spatial — 位于「策展」标签页的「分组」包。",
     "models_pack_cjk": "CJK 词表包",
     "models_pack_cjk_desc": "面向日文 / 韩文 / 中文标注与提示词片段的额外文本编码器行。v2 起默认启用; 英文文本无论启用与否都逐位一致。",
     "models_pack_tagger": "标注器",
@@ -391,7 +391,7 @@ STRINGS: dict[str, str] = {
     "models_pack_ocr": "OCR",
     "models_pack_ocr_desc": "AnimeText 文本块检测器与漫画 VL 阅读器(PaddleOCR-VL-1.6 基础 + SFX 微调)。可选。",
     "models_pack_grouping": "分组",
-    "models_pack_grouping_desc": "PE-Spatial-B16-512, 近似图像分组塔。",
+    "models_pack_grouping_desc": "PE-Spatial-B16-512: REPA 特征缓存 (preprocess-pe) 与近似图像分组塔。",
     "model_danbooru_tags": "Danbooru 标签 DB — 标注顺序校正",
     "model_tagger": "Anima Tagger — caformer_b36 主干 (受限)",
     # HuggingFace 认证（模型对话框）

@@ -406,7 +406,7 @@ STRINGS: dict[str, str] = {
     "visit_github": "GitHub 페이지 방문",
     # Models dialog
     "models_title": "모델 다운로드",
-    "models_intro": "학습 / 추론 실행에 필요한 가중치를 팩 단위로 묶어 보여줍니다. '첫 실행 세트 다운로드'는 Anima 가중치 3종, PE, CJK 어휘 팩(v2부터 기본 활성), 태거 체크포인트, 태그 DB를 받습니다. SAM3(마스킹)와 OCR은 '큐레이션' 탭의 선택 팩입니다. 파일은 models/ 아래에 저장됩니다.",
+    "models_intro": "학습 / 추론 실행에 필요한 가중치를 팩 단위로 묶어 보여줍니다. '첫 실행 세트 다운로드'는 Anima 가중치 3종, PE-Spatial(REPA), CJK 어휘 팩(v2부터 기본 활성), 태거 체크포인트, 태그 DB를 받습니다. SAM3(마스킹)와 OCR은 '큐레이션' 탭의 선택 팩입니다. 파일은 models/ 아래에 저장됩니다.",
     "models_download_all": "첫 실행 세트 다운로드",
     "models_download": "다운로드",
     "models_redownload": "재다운로드",
@@ -431,7 +431,7 @@ STRINGS: dict[str, str] = {
     "models_pack_anima": "Anima 베이스",
     "models_pack_anima_desc": "DiT, Qwen3-0.6B 텍스트 인코더, Qwen-Image VAE — 모든 학습 / 추론 실행에 세 가지가 모두 필요합니다.",
     "models_pack_pe": "PE-Core",
-    "models_pack_pe_desc": "PE-Core-L14-336: CMMD 검증과 IP-Adapter 조건화. 그룹화 타워인 PE-Spatial은 '그룹화' 팩에 있습니다.",
+    "models_pack_pe_desc": "PE-Core-L14-336: CMMD 검증 지표 전용 (use_cmmd, 기본 OFF). REPA 특징 캐시는 PE-Spatial을 씁니다 — '큐레이션' 탭의 '그룹화' 팩.",
     "models_pack_cjk": "CJK 어휘 팩",
     "models_pack_cjk_desc": "일본어 / 한국어 / 중국어 캡션·프롬프트 구간용 추가 텍스트 인코더 행. v2부터 기본 활성이며, 영어 텍스트는 어느 쪽이든 비트 단위로 동일합니다.",
     "models_pack_tagger": "태거",
@@ -443,7 +443,7 @@ STRINGS: dict[str, str] = {
     "models_pack_ocr": "OCR",
     "models_pack_ocr_desc": "AnimeText 텍스트 블록 검출기와 만화 VL 리더(PaddleOCR-VL-1.6 베이스 + SFX 파인튠). 선택 사항.",
     "models_pack_grouping": "그룹화",
-    "models_pack_grouping_desc": "PE-Spatial-B16-512, 유사 이미지 그룹화 타워.",
+    "models_pack_grouping_desc": "PE-Spatial-B16-512: REPA 특징 캐시 (preprocess-pe)와 유사 이미지 그룹화 타워.",
     "model_danbooru_tags": "Danbooru 태그 DB — 캡션 순서 교정",
     "model_tagger": "Anima Tagger — caformer_b36 백본 (접근 승인 필요)",
     # HuggingFace 인증 (모델 다이얼로그)

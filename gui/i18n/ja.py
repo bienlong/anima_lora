@@ -365,7 +365,7 @@ STRINGS: dict[str, str] = {
     "visit_github": "GitHub ページを開く",
     # Models dialog
     "models_title": "モデルのダウンロード",
-    "models_intro": "学習 / 推論の実行に必要な重みをパック単位で表示します。「初回セットをダウンロード」で Anima の重み 3 点、PE、CJK 語彙パック(v2 から既定で有効)、タガーのチェックポイント、タグ DB を取得します。SAM3(マスキング)と OCR は「キュレーション」タブの任意パックです。ファイルは models/ に保存されます。",
+    "models_intro": "学習 / 推論の実行に必要な重みをパック単位で表示します。「初回セットをダウンロード」で Anima の重み 3 点、PE-Spatial (REPA)、CJK 語彙パック(v2 から既定で有効)、タガーのチェックポイント、タグ DB を取得します。SAM3(マスキング)と OCR は「キュレーション」タブの任意パックです。ファイルは models/ に保存されます。",
     "models_download_all": "初回セットをダウンロード",
     "models_download": "ダウンロード",
     "models_redownload": "再ダウンロード",
@@ -390,7 +390,7 @@ STRINGS: dict[str, str] = {
     "models_pack_anima": "Anima ベース",
     "models_pack_anima_desc": "DiT、Qwen3-0.6B テキストエンコーダー、Qwen-Image VAE — すべての学習 / 推論の実行に 3 点とも必要です。",
     "models_pack_pe": "PE-Core",
-    "models_pack_pe_desc": "PE-Core-L14-336: CMMD 検証と IP-Adapter 条件付け。グルーピング用タワーの PE-Spatial は「グルーピング」パックにあります。",
+    "models_pack_pe_desc": "PE-Core-L14-336: CMMD 検証メトリック専用 (use_cmmd、既定で無効)。REPA の特徴キャッシュは PE-Spatial を使います — 「キュレーション」タブの「グルーピング」パック。",
     "models_pack_cjk": "CJK 語彙パック",
     "models_pack_cjk_desc": "日本語 / 韓国語 / 中国語のキャプション・プロンプト区間向けの追加テキストエンコーダー行。v2 から既定で有効で、英語テキストはどちらでもビット単位で同一です。",
     "models_pack_tagger": "タガー",
@@ -402,7 +402,7 @@ STRINGS: dict[str, str] = {
     "models_pack_ocr": "OCR",
     "models_pack_ocr_desc": "AnimeText テキストブロック検出器と漫画 VL リーダー(PaddleOCR-VL-1.6 ベース + SFX ファインチューン)。任意。",
     "models_pack_grouping": "グルーピング",
-    "models_pack_grouping_desc": "PE-Spatial-B16-512、類似画像グルーピング用タワー。",
+    "models_pack_grouping_desc": "PE-Spatial-B16-512: REPA の特徴キャッシュ (preprocess-pe) と類似画像グルーピング用タワー。",
     "model_danbooru_tags": "Danbooru タグ DB — キャプション順序補正",
     "model_tagger": "Anima Tagger — caformer_b36 バックボーン (ゲート付き)",
     # HuggingFace 認証 (モデルダイアログ)

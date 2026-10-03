@@ -419,7 +419,7 @@ STRINGS: dict[str, str] = {
     "visit_github": "Visit GitHub page",
     # Models dialog
     "models_title": "Download Models",
-    "models_intro": "The weights a training or inference run needs, grouped by pack. 'Download the first-run set' fetches the three Anima weights, PE, the CJK vocab pack (on by default since v2), the tagger checkpoint and the tag DB. SAM3 (masking) and OCR are opt-in packs on the Curation tab. Files are saved under models/.",
+    "models_intro": "The weights a training or inference run needs, grouped by pack. 'Download the first-run set' fetches the three Anima weights, PE-Spatial (REPA), the CJK vocab pack (on by default since v2), the tagger checkpoint and the tag DB. SAM3 (masking) and OCR are opt-in packs on the Curation tab. Files are saved under models/.",
     "models_download_all": "Download the first-run set",
     "models_download": "Download",
     "models_redownload": "Re-download",
@@ -448,7 +448,7 @@ STRINGS: dict[str, str] = {
     "models_pack_anima": "Anima base",
     "models_pack_anima_desc": "The DiT, the Qwen3-0.6B text encoder and the Qwen-Image VAE — every training and inference run needs all three.",
     "models_pack_pe": "PE-Core",
-    "models_pack_pe_desc": "PE-Core-L14-336: CMMD validation and IP-Adapter conditioning. PE-Spatial, the grouping tower, is the Grouping pack.",
+    "models_pack_pe_desc": "PE-Core-L14-336: the CMMD validation metric only (use_cmmd, off by default). The REPA feature cache uses PE-Spatial — the Grouping pack on the Curation tab.",
     "models_pack_cjk": "CJK vocab pack",
     "models_pack_cjk_desc": "Extra text-encoder rows for Japanese / Korean / Chinese caption and prompt spans. On by default since v2; English text is bit-exact either way.",
     "models_pack_tagger": "Tagger",
@@ -460,7 +460,7 @@ STRINGS: dict[str, str] = {
     "models_pack_ocr": "OCR",
     "models_pack_ocr_desc": "The AnimeText text-block detector and the manga VL reader (PaddleOCR-VL-1.6 base + the SFX fine-tune). Opt-in.",
     "models_pack_grouping": "Grouping",
-    "models_pack_grouping_desc": "PE-Spatial-B16-512, the near-twin grouping tower.",
+    "models_pack_grouping_desc": "PE-Spatial-B16-512: the REPA feature cache (preprocess-pe) and the near-twin grouping tower.",
     "model_danbooru_tags": "Danbooru tag DB — caption order correction",
     "model_tagger": "Anima Tagger — caformer_b36 backbone (gated)",
     # HuggingFace authentication (Models dialog)

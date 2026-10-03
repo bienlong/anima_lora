@@ -320,7 +320,7 @@ Model download
 
 ```bash
 hf auth login                # Same token cache as the GUI sign-in
-make download-models         # First-run set: DiT + text encoder + VAE + PE + CJK vocab pack + tagger + tag DB
+make download-models         # First-run set: DiT + text encoder + VAE + PE-Spatial + CJK vocab pack + tagger + tag DB
 make download-list           # What is installed and what is missing, grouped by pack (offline, no network)
 make download-anima          # Retry pieces individually if a download breaks
 make download-sam3           # Masking is opt-in — run this once SAM3 access is approved

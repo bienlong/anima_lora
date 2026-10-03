@@ -18,7 +18,7 @@ routed via a three-axis surface — `use_moe_style` /
 ```bash
 uv sync                    # Install dependencies (Python 3.13)
 hf auth login              # Authenticate for model downloads
-make download-models       # first-run set: DiT, TE, VAE, PE, CJK vocab pack, tagger, tag DB
+make download-models       # first-run set: DiT, TE, VAE, PE-Spatial, CJK vocab pack, tagger, tag DB
 # Training images go in image_dataset/ with .txt caption sidecars
 make preprocess            # Resize → post_image_dataset/resized/, cache → post_image_dataset/lora/
 ```

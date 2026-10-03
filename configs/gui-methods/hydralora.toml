@@ -35,6 +35,12 @@ blocks_to_swap = 0
 
 use_cmmd = false
 
+use_repa = true
+repa_mode = "relational"
+repa_weight = 0.05
+repa_layer = 8
+repa_encoder = "pe_spatial"
+
 [variant]
 family = "hydralora"
 label = "HydraLoRA"

@@ -62,8 +62,8 @@ ANIMA_DIT_FILE = "anima-base-v1.0.safetensors"
 ANIMA_TE_FILE = "qwen_3_06b_base.safetensors"
 ANIMA_VAE_FILE = "qwen_image_vae.safetensors"
 
-# PE-Core-L14-336 — global/CLIP-aligned vision features (CMMD validation,
-# IP-Adapter). PE-Spatial, the REPA/grouping tower, is the package's row.
+# PE-Core-L14-336 — global/CLIP-aligned vision features (CMMD validation
+# only). PE-Spatial, the REPA/grouping tower, is the package's row.
 PE_CORE_REPO = "facebook/PE-Core-L14-336"
 PE_CORE_FILENAME = "PE-Core-L14-336.pt"
 PE_DIR = "pe"
@@ -107,8 +107,8 @@ TRAINER_PACKS: tuple[Pack, ...] = (
     Pack(
         "pe",
         "PE-Core",
-        "PE-Core-L14-336: CMMD validation and IP-Adapter conditioning. "
-        "PE-Spatial, the grouping tower, is the Grouping pack.",
+        "PE-Core-L14-336: the CMMD validation metric (use_cmmd, off by default). "
+        "REPA caches PE-Spatial instead — the Grouping pack.",
     ),
     Pack(
         "cjk",
@@ -190,7 +190,7 @@ def catalog() -> tuple[Asset, ...]:
             repo=PE_CORE_REPO,
             files=(PE_CORE_FILENAME,),
             dest=models_dir() / PE_DIR,
-            used_by="CMMD validation metric · IP-Adapter conditioning",
+            used_by="CMMD validation metric (use_cmmd)",
             notes="Global/CLIP-aligned features. The REPA and grouping tower is "
             "PE-Spatial, a separate row.",
         ),
@@ -269,15 +269,15 @@ GROUPS: dict[str, tuple[str, ...]] = {
 }
 
 # What a first-run `make download-models` fetches — the mandatory set: the
-# Anima base, both PE towers, the tagger checkpoint, the tag KB, and the CJK
-# vocab pack, because ``configs/base.toml`` enables it. Not
+# Anima base, PE-Spatial (the REPA feature cache), the tagger checkpoint, the
+# tag KB, and the CJK vocab pack, because ``configs/base.toml`` enables it. Not
 # "everything missing": SAM3 is gated and masking is opt-in (``make
-# download-sam3``), and the OCR stack is opt-in (``make download-model ocr``).
+# download-sam3``), the OCR stack is opt-in (``make download-model ocr``), and
+# PE-Core only serves CMMD (off by default; its loader fetches it on first use).
 DEFAULT_SET: tuple[str, ...] = (
     "anima_dit",
     "anima_te",
     "anima_vae",
-    "pe_core",
     "pe_spatial",
     "vocab_pack",
     "tagger",
