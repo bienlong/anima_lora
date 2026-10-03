@@ -43,8 +43,10 @@ GRID_FRAMES = {
 # the plain grid caption (user, 2026-10-02 — grid_small's `recap` leg): no
 # `manga`, no language tag, the clause without its language, and the clause's
 # wording one of `GRID_CLAUSES` (`{u}` = the cell's unit)
+# `tint`: a flat canvas that is not full white (reseed, user 10-03)
 GRID_FRAMES_PLAIN = {
     "flat": "white background, simple background, no humans, text focus.",
+    "tint": "simple background, no humans, text focus.",
     "bubble": "simple background, no humans, multiple speech bubbles.",
 }
 GRID_CLAUSES = {
@@ -138,7 +140,12 @@ EVAL_GROUPS = (
 )
 
 NATIVE_PROMPTS = (
-    REPO / "project" / "finished" / "cjk_aware_anima" / "assets" / "unmask_eval_prompts.txt"
+    REPO
+    / "project"
+    / "finished"
+    / "cjk_aware_anima"
+    / "assets"
+    / "unmask_eval_prompts.txt"
 )
 # the user's own target captions (ComfyUI, 2026-09-17), rendered verbatim by
 # ``--stage target`` (the line's copy: ``project/cjk_anima_scale/assets/``)

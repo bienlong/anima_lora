@@ -311,10 +311,12 @@ def grid(pools: Pools, rng: random.Random, p: dict):
         kw["bubble_fit"] = tuple(p["bubble_fit"])
     if p.get("cell_jitter") is not None:
         kw["cell_jitter"] = float(p["cell_jitter"])
+    bgs = []
     im, boxes = render_grid(
-        got, cols, rows, size, pools.fonts, rng, bubble, (fill, fill), **kw
+        got, cols, rows, size, pools.fonts, rng, bubble, (fill, fill), bgs=bgs, **kw
     )
-    frame = "bubble" if bubble else "flat"
+    # a flat canvas not full white is captioned `simple background` alone
+    frame = "bubble" if bubble else "flat" if bgs[0] == "white" else "tint"
     clause = rng.choice(
         sorted(c for c in GRID_CLAUSES if bubble or c not in GRID_CLAUSES_BUBBLE)
     )
@@ -330,6 +332,7 @@ def grid(pools: Pools, rng: random.Random, p: dict):
         extra={
             "grid": name,
             "bubble": bubble,
+            "bg": bgs[0] if isinstance(bgs[0], str) else list(bgs[0]),
             "fill": round(fill, 3),
             "clause": clause,
         },
