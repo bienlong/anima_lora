@@ -88,22 +88,48 @@ _FILE_BROWSE_KEYS = frozenset(
 )
 
 
+# 有中文习惯叫法的键：下拉显示本地化标签，_read 经 _value_map 还原为
+# TOML 值。标签缺失的语言回退英文（t() 链），值本身永远是规范 TOML 值。
+_OPTION_LABEL_KEYS = {
+    "lr_scheduler": {
+        "constant": "opt_sched_constant",
+        "cosine": "opt_sched_cosine",
+        "cosine_with_restarts": "opt_sched_cosine_restart",
+        "linear": "opt_sched_linear",
+        "polynomial": "opt_sched_polynomial",
+        "piecewise_constant": "opt_sched_piecewise",
+        "adafactor": "opt_sched_adafactor",
+    },
+}
+
+
 def _enum_combo(key: str, v) -> QWidget:
     """Quick-pick combo for an enum-ish TOML key (see _COMBO_CHOICES)."""
+    from gui.i18n import t
+
     options, editable = _COMBO_CHOICES[key]
     w = QComboBox()
-    w.addItems(options)
+    labels = _OPTION_LABEL_KEYS.get(key, {})
+    value_map: dict[str, str] = {}
+    for opt in options:
+        lk = labels.get(opt)
+        display = t(lk) if lk else opt
+        w.addItem(display)
+        value_map[display] = opt
+    w.setProperty("_value_map", value_map)
     w.setEditable(editable)
     cur = "" if v is None else str(v)
-    if w.findText(cur) < 0:
+    # 保存值 → 显示标签（有映射时）
+    cur_display = next((d for d, val in value_map.items() if val == cur), cur)
+    if w.findText(cur_display) < 0:
         if editable:
-            w.setCurrentText(cur)
-        elif cur:
+            w.setCurrentText(cur_display)
+        elif cur_display:
             # Never silently change an unknown saved value.
-            w.addItem(cur)
-            w.setCurrentText(cur)
+            w.addItem(cur_display)
+            w.setCurrentText(cur_display)
     else:
-        w.setCurrentText(cur)
+        w.setCurrentText(cur_display)
     return _no_wheel(w)
 
 
@@ -191,6 +217,9 @@ def _read(w: QWidget, orig: Any = None) -> Any:
         ]
     if isinstance(w, QComboBox):
         txt = w.currentText()
+        value_map = w.property("_value_map")
+        if isinstance(value_map, dict) and txt in value_map:
+            return value_map[txt]
         # Editable numeric combos round-trip as their orig type; plain string
         # combos (attn_mode, …) have string origs and fall through.
         if isinstance(orig, float):
