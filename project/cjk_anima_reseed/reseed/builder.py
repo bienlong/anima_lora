@@ -13,6 +13,7 @@ build's rng (deterministic per seed × workers).
 from __future__ import annotations
 
 import json
+import math
 import multiprocessing as mp
 import os
 import random
@@ -108,6 +109,9 @@ def build(run: Run, workers: int | None = None, frac: float = 1.0) -> Path:
             "small": T.SMALL_POOL,
             "mono_share": T.MONO_SHARE,
             "horizontal_frac": T.HORIZONTAL_FRAC,
+            "scene_cap": T.SCENE_CAP,
+            "bubble_edge_min": T.BUBBLE_EDGE_MIN,
+            "erase_left_max": T.ERASE_LEFT_MAX,
         },
         "table": [
             {
@@ -169,7 +173,10 @@ def _build_tier(t: T.Tier, n: int, pools, rng, out: Path, first: int, workers: i
             rejects.update(rj)
             px_seen += px
             tries += tr
-        pools.used.update(Counter(r["scene"] for r in kept if "scene" in r))
+        j_of = {(sc["pool"], sc["i"]): j for j, sc in enumerate(pools.scenes)}
+        pools.used.update(
+            Counter(j_of[r["scene_pool"], r["scene"]] for r in kept if "scene" in r)
+        )
     if len(kept) < n:
         print(
             f"  {t.name}: WARNING {len(kept)}/{n} after {tries} tries "
@@ -199,6 +206,8 @@ def _build_tier(t: T.Tier, n: int, pools, rng, out: Path, first: int, workers: i
 def _draw_loop(t: T.Tier, n: int, pools, rng, out: Path, first: int):
     draw = RECIPES[t.recipe]
     lo, hi = t.px_keep
+    pools.tier_used = Counter()
+    pools.scene_cap = max(1, math.ceil(T.SCENE_CAP * n))
     kept, rejects, px_seen = [], Counter(), []
     tries, max_tries = 0, 4 * n + 50
     while len(kept) < n and tries < max_tries:

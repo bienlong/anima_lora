@@ -44,6 +44,9 @@ SHAPES = "448,512:2,448x512,512x448"  # a lone glyph's canvas
 # ring-median fill is not the bubble's — a dark bubble, a box over its edge)
 BUBBLE_EDGE_MIN = 15
 ERASE_LEFT_MAX = 0.3
+# a scene takes at most this share of a tier's items (of each worker's draw):
+# the long column windows fit 30 scenes and one took 151 of 533 (10-03)
+SCENE_CAP = 0.01
 
 GRIDS = "2x2:1,3x3:1,2x3:1,3x2:1"
 LONE = "1x1:1"
@@ -110,7 +113,13 @@ TABLE = (
         "bubbleN",
         0.21,
         (0.45, 0.7),
-        {"fill": [0.7, 1.0], "min_glyph": 28},
+        {
+            "fill": [0.7, 1.0],
+            "min_glyph": 28,
+            # the pool drew 7 / 18 / 27 / 25 / 22 %; 6 glyphs in a column at
+            # 34 px fit 30 scenes (user, 10-03: 3 most, then 2, 4, 5, 6)
+            "lengths": {2: 0.22, 3: 0.32, 4: 0.20, 5: 0.16, 6: 0.10},
+        },
         px_keep=(None, 64),
     ),
     # windows at font px, in bubbles they fill ≥ 0.5 along and ≥ 0.3 across

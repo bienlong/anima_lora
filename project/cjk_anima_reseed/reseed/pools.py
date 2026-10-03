@@ -27,7 +27,12 @@ class Pools:
     mono: set  # greyscale / line-art scenes
     shapes: object  # data.stage.ShapePool
     windows: dict = field(default_factory=dict)  # glyph → its windows
+    windows_len: dict = field(default_factory=dict)  # glyph → length → its windows
     used: Counter = field(default_factory=Counter)  # scene → items drawn on it
+    tier_used: Counter = field(
+        default_factory=Counter
+    )  # the draw loop's: scene → items
+    scene_cap: int | None = None  # the draw loop's: items a scene may take
     decks: dict = field(default_factory=dict)
 
 
@@ -328,6 +333,10 @@ def add_windows(pools: Pools, read: tuple, out: Path) -> dict:
         ids[c] = a[0]
     ok = [w for w in ws if ext(True, w) == [ids[c] for c in w]]
     pools.windows = {g: v for g in sorted(glyphs) if (v := [w for w in ok if g in w])}
+    pools.windows_len = {
+        g: {k: [w for w in v if len(w) == k] for k in sorted({len(w) for w in v})}
+        for g, v in pools.windows.items()
+    }
     n = sorted(len(v) for v in pools.windows.values())
     stats = {
         "length": list(WINDOW_LEN),

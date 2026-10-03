@@ -112,10 +112,12 @@ def _draw_scene(
     horiz = n > 1 and rng.random() < T.HORIZONTAL_FRAC
     if horiz:
         cands = sorted(pools.horiz_idx)
+    cap = pools.scene_cap
     fitting = [
         j
         for j in cands
-        if region_capacity(
+        if (cap is None or pools.tier_used[j] < cap)
+        and region_capacity(
             pools.scenes[j]["region"],
             min_glyph,
             fill,
@@ -175,6 +177,7 @@ def _draw_scene(
         im, box = drawn
         assert list(im.size) == list(sc["shape"]), (sc["i"], im.size, sc["shape"])
         pools.used[j] += 1
+        pools.tier_used[j] += 1
         return Item(
             image=im,
             vocabs=[text],
@@ -233,7 +236,13 @@ def bubble1(pools: Pools, rng: random.Random, p: dict):
 
 def bubbleN(pools: Pools, rng: random.Random, p: dict):
     glyph = rng.choice(list(pools.windows))
-    word = rng.choice(pools.windows[glyph])
+    lengths = p.get("lengths")  # window length → share (else the pool's own mix)
+    if lengths:
+        by = pools.windows_len[glyph]
+        ks = [k for k in lengths if k in by]
+        word = rng.choice(by[rng.choices(ks, weights=[lengths[k] for k in ks])[0]])
+    else:
+        word = rng.choice(pools.windows[glyph])
     f = p.get("fill", [0.7, 1.0])
     lo, hi = f if isinstance(f, list) else (f, f)
     held = set().union(*pools.opt_in.values())
