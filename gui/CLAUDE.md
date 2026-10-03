@@ -1,8 +1,9 @@
 # gui/CLAUDE.md
 
 PySide6 (Qt6) desktop GUI. Root `CLAUDE.md` owns the training/config/daemon contracts this
-GUI drives. Most of the surface is `tabs/config_tab.py` and the `tabs/preprocess/` package;
-`tabs/image_tab.py`'s autotag worker is `tabs/_autotag.py`. For recipe-style changes
+GUI drives. Most of the surface is `tabs/config_tab.py` and the `tabs/preprocess/` package.
+The GUI does not curate — captions, tagging, masks, grouping and exclusion are the
+`anime_tools` web panel's, launched from the Preprocess tab. For recipe-style changes
 (new training field / variant / language, job submission, a new job-submitting tab,
 action-button colors) **load the `gui-changes` skill**.
 
@@ -35,7 +36,7 @@ must not appear.
   overlay toggles / ⚙ Settings → `settings_dialog.py::SettingsDialog`: language, theme,
   MCP registration; a language change offers an in-place rebuild via `_reload_ui`) over
   one tab set in a `QStackedWidget` shared with the Queue and TensorBoard overlays. Tabs:
-  Config (MethodsTab over the LoRA family + Turbo), Preprocess, Dataset, Merge,
+  Config (MethodsTab over the LoRA family + Turbo), Preprocess, Merge,
   Experimental (MethodsTab over research methods + soup), EasyControl. Theme applied by
   `_dark()` → `theme.apply_theme`.
 - **Lazy construction.** Tabs inherit `LazyTabMixin` (first directory scan deferred to
@@ -44,7 +45,7 @@ must not appear.
   Config, `PreprocessingTab` (the Train auto-chain needs it) and the TensorBoard panel.
   Consequences: a lazy tab's `_try_reattach` runs on first open, not at launch; code
   reaching into a lazy tab from outside goes through the holder's `.inner` (None until
-  built — see `MainWindow._reload_image_tab_kb`).
+  built).
 - **`tabs/methods_tab.py::MethodsTab`** — plain `QWidget`: a Method dropdown over an inner
   `ConfigTab` (flat `train.py --method` methods) + the distill editors (`TurboTrainTab`,
   soup) in a `QStackedWidget`. `EasyControlTab` extends `ConfigTab`; `_DistillConfigTab`
@@ -65,7 +66,15 @@ must not appear.
   PE). Curation (autotag, position clauses, SAM masks) is the `anime_tools` panel's:
   every env the tab builds, the Train auto-chain's included, pins `CAPTION_AUTOTAG` /
   `CAPTION_POSITION_CLAUSES` to `0` (`knobs.CURATION_GATES_OFF`), so a
-  `preprocess.toml` that turns one on never starts it from the GUI. Method/variant bar,
+  `preprocess.toml` that turns one on never starts it from the GUI. The status row's
+  **Open anime_tools** button is `gui/anime_tools_panel.py` (Qt-free): it seeds the
+  panel's `<home>/.anime_tools_gui.json` (Export form → `sidecars_only`; `dataset.src`
+  only when `source_image_dir` isn't `image_dataset`), reuses a panel already serving
+  this home (ports 8790+, `/api/info`), else spawns `python -m anime_tools.gui --home …
+  --open` detached (not a daemon job; it exits with its window). The status line flags a
+  workspace caption/mask newer than the last applied Export. **Resize preview**
+  (`resize_preview.py`, a non-modal dialog) lists each source image's bucket / tier /
+  kept share under the tab's live resize widgets and draws the crop. Method/variant bar,
   Save + Run split buttons, status row,
   explanation panel, log, daemon observer, and the ConfigTab contract (`set_variant` /
   `preprocess_env` / `preprocess_overrides` / `preprocess_config_snapshot` /
@@ -90,8 +99,8 @@ must not appear.
     Save/Run (`_validate_stages`). Field labels/help come from
     `explanations/guides/<lang>/_stage_fields.json` (English from the schema as fallback).
   - Legacy `tab.<widget>` names (`source_dir_edit`, `shuffle_spin`, …) resolve via
-    `_WIDGET_ALIASES` in `__getattr__` for one release — tests and `image_tab` still use
-    them; new code uses `values()` / `stage_values()` / `tab.<section>.widgets[dest]`.
+    `_WIDGET_ALIASES` in `__getattr__` for one release — tests and the resize preview
+    still use them; new code uses `values()` / `stage_values()` / `tab.<section>.widgets[dest]`.
     Tests monkeypatching `_load_preprocess_toml` / `read_gui_settings` must patch
     `gui.tabs.preprocess.tab`.
 - **`tabs/preprocess/knobs.py`** — the **trainer-native knob table** (`KNOBS:
@@ -127,7 +136,7 @@ must not appear.
   `sample_prompts.py`, `image_view.py`, `_qt_utils.py` (leaf helpers like `_no_wheel`).
   Imports are one-way — `fields.py`/`mixins.py` import the domain widgets, never the
   reverse — and nothing here imports `gui.daemon`.
-- **`i18n/`** — `en/ko/ja/cn.py`, each `STRINGS: dict[str,str]` (~540–590 keys).
+- **`i18n/`** — `en/ko/ja/cn.py`, each `STRINGS: dict[str,str]` (~420–470 keys).
   `t(key, **kwargs)` falls back to English, then to the key itself. New language: see the
   `gui-changes` skill.
 - **`explanations/`** — lazy-loaded help under `guides/<lang>/`: `_fields.json` (field

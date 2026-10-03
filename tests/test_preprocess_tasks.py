@@ -332,7 +332,6 @@ def test_master_stages_inherit_an_explicit_path_pattern(monkeypatch):
     monkeypatch.setenv("CAPTION_AUTOTAG", "1")
     monkeypatch.setenv("CAPTION_POSITION_CLAUSES", "1")
     monkeypatch.delenv("PREPROCESS_PATH_PATTERN", raising=False)
-    _stages_env(monkeypatch, autotag={"mode": "merge", "min_confidence": 0.0})
 
     preprocess.cmd_preprocess_captions(["--path_pattern", "artistA/*"])
 
@@ -551,8 +550,7 @@ def test_preprocess_chains_autotag_first(monkeypatch):
     _patch_run(monkeypatch, fake_run)
     monkeypatch.setenv("CAPTION_AUTOTAG", "1")
     monkeypatch.setenv("CAPTION_POSITION_CLAUSES", "1")
-    # The GUI's autotag form (the retired CAPTION_AUTOTAG_MODE env's successor).
-    _stages_env(monkeypatch, autotag={"mode": "merge", "min_confidence": 0.0})
+    monkeypatch.delenv("PREPROCESS_STAGES_JSON", raising=False)
 
     preprocess.cmd_preprocess([])
 
@@ -564,19 +562,6 @@ def test_preprocess_chains_autotag_first(monkeypatch):
         "anime_tools.stages.cli.autotag_captions",
     ]
     assert "--apply" in autotag_cmd
-    assert autotag_cmd[autotag_cmd.index("--mode") + 1] == "merge"
-
-
-def test_preprocess_autotag_blank_form_confidence_is_zero(monkeypatch):
-    """The GUI writes ``""`` for an empty field — that must not raise."""
-    from scripts.tasks.preprocess import _caption_correction_config
-
-    monkeypatch.setenv("CAPTION_AUTOTAG", "1")
-    _stages_env(monkeypatch, autotag={"mode": "merge", "min_confidence": ""})
-
-    config, _ = _caption_correction_config([])
-    assert config["autotag_min_confidence"] == 0.0
-    assert config["autotag_mode"] == "merge"
 
 
 def test_gui_forms_fold_into_the_caption_config(monkeypatch):

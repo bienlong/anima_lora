@@ -1,8 +1,8 @@
 """Filesystem discovery helpers for the dataset / adapter / image browsers.
 
-Qt-free directory walks shared by the Image, Merge, and adapter tabs: list the
-images under a tree, the safetensors in a dir, and the well-known
-adapter/image roots that actually exist on disk.
+Qt-free directory walks shared by the Merge and adapter tabs: list the
+images under a tree, the safetensors in a dir, and the well-known adapter
+roots that actually exist on disk.
 """
 
 from __future__ import annotations
@@ -46,8 +46,8 @@ def _safetensors_in(d: Path) -> list[Path]:
 def _adapter_dirs() -> dict[str, Path]:
     """Directories likely to contain LoRA adapter checkpoints.
 
-    Mirrors ``_image_dirs``: returns only paths that exist and actually have
-    .safetensors files, keyed by a short display name.
+    Returns only paths that exist and actually have .safetensors files, keyed
+    by a short display name.
     """
     dirs: dict[str, Path] = {}
     for name, path in [
@@ -72,19 +72,4 @@ def _adapter_dirs() -> dict[str, Path]:
                 and any(p.glob("*.safetensors"))
             ):
                 dirs[f"{label}/{p.name}"] = p
-    return dirs
-
-
-def _image_dirs() -> dict[str, Path]:
-    dirs: dict[str, Path] = {}
-    for name, path in [
-        ("image_dataset", ROOT / "image_dataset"),
-        ("post_image_dataset/resized", ROOT / "post_image_dataset" / "resized"),
-        ("ip-adapter-dataset", ROOT / "ip-adapter-dataset"),
-        ("easycontrol-dataset", ROOT / "easycontrol-dataset"),
-        ("output/tests", ROOT / "output" / "tests"),
-        ("output/ckpt/sample", ROOT / "output" / "ckpt" / "sample"),
-    ]:
-        if path.exists():
-            dirs[name] = path
     return dirs

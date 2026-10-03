@@ -256,3 +256,37 @@ def test_preprocess_tab_is_cache_only(monkeypatch):
 
         if tab is not None:
             tab.deleteLater()
+
+
+def test_resize_preview_lists_each_source_with_its_bucket(tmp_path, monkeypatch):
+    """The Preprocess tab's resize preview reads the tab's live tiers and
+    source dir, and leaves an excluded image out like the resize does."""
+    from PySide6.QtGui import QImage
+
+    from gui.i18n import t
+    from gui.tabs.preprocess import resize_preview as RP
+    from library.preprocess.resize_preview import compute_resize_preview
+
+    src = tmp_path / "src"
+    (src / "a").mkdir(parents=True)
+    QImage(1600, 900, QImage.Format_RGB32).save(str(src / "a" / "wide.png"))
+    QImage(800, 1200, QImage.Format_RGB32).save(str(src / "tall.png"))
+    QImage(640, 640, QImage.Format_RGB32).save(str(src / "gone.png"))
+    monkeypatch.setattr(RP, "excluded_rels", lambda: ("gone.png",))
+    monkeypatch.setattr(RP, "workspace_excluded_rels", lambda: ())
+
+    tab = _make_tab()
+    tab.source_dir_edit.setText(str(src))
+    tab._set_target_res_widget([768, 1024])
+    dlg = RP.ResizePreviewDialog(tab)
+    dlg.refresh()
+
+    rows = {
+        dlg.tree.topLevelItem(i).text(0): dlg.tree.topLevelItem(i)
+        for i in range(dlg.tree.topLevelItemCount())
+    }
+    assert set(rows) == {"a/wide.png", "tall.png"}
+    pv = compute_resize_preview(1600, 900, [768, 1024])
+    assert rows["a/wide.png"].text(2) == "{}×{}".format(*pv.bucket_size)
+    assert rows["a/wide.png"].text(3) == str(pv.target_edge)
+    assert t("preprocess_resize_preview_skipped", n=1) in dlg.summary.text()

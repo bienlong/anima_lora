@@ -1,0 +1,99 @@
+"""``gui.anime_tools_panel``: the panel's settings seed, the stale-Export check
+and the launch argv. Qt-free."""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+
+from gui import anime_tools_panel as P
+
+
+def _settings(home):
+    return json.loads(P.settings_path(home).read_text(encoding="utf-8"))
+
+
+def test_seed_defaults_export_to_sidecars_only_and_keeps_other_settings(tmp_path):
+    P.settings_path(tmp_path).write_text(
+        json.dumps(
+            {
+                "stage_defaults": {"tagger_dir": "models/tagger"},
+                "values": {
+                    "autotag": {"mode": "merge"},
+                    "export": {"resize_cap": True, "webp": True, "combine_ocr": True},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    seeded = P.seed_settings("image_dataset", home=tmp_path)
+
+    data = _settings(tmp_path)
+    assert data["stage_defaults"] == {"tagger_dir": "models/tagger"}
+    assert data["values"]["autotag"] == {"mode": "merge"}
+    # The form passes ExportRequest's validation: sidecars_only refuses both.
+    assert data["values"]["export"] == {"combine_ocr": True, "sidecars_only": True}
+    assert "dataset" not in data
+    assert seeded.warnings == []
+
+
+def test_seed_points_src_at_a_non_default_source_and_blanks_it_back(tmp_path):
+    P.seed_settings("my_images/set_a", home=tmp_path)
+    assert _settings(tmp_path)["dataset"]["src"] == "my_images/set_a"
+
+    outside = tmp_path.parent / "elsewhere"
+    P.seed_settings(outside, home=tmp_path)
+    assert _settings(tmp_path)["dataset"]["src"] == str(outside.resolve())
+
+    P.seed_settings("image_dataset", home=tmp_path)
+    assert _settings(tmp_path)["dataset"]["src"] == ""
+
+
+def test_seed_warns_when_a_workspace_root_points_into_the_trainer_tree(tmp_path):
+    P.settings_path(tmp_path).write_text(
+        json.dumps({"dataset": {"dst": "post_image_dataset/resized", "masks": ""}}),
+        encoding="utf-8",
+    )
+    seeded = P.seed_settings("image_dataset", home=tmp_path)
+    assert seeded.warnings == ["dst = post_image_dataset/resized"]
+    # Warned about, not rewritten: that is the user's call in the panel.
+    assert _settings(tmp_path)["dataset"]["dst"] == "post_image_dataset/resized"
+
+
+def _touch(path, mtime):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("x", encoding="utf-8")
+    os.utime(path, (mtime, mtime))
+
+
+def test_export_is_stale_tracks_workspace_edits_against_an_applied_export(tmp_path):
+    assert not P.export_is_stale(tmp_path)  # no workspace yet
+
+    now = time.time()
+    caption = tmp_path / "workspace" / "resized" / "a" / "x.txt"
+    _touch(caption, now - 100)
+    assert P.export_is_stale(tmp_path)  # never exported
+
+    report = P.export_report_path(tmp_path)
+    report.parent.mkdir(parents=True)
+    report.write_text(json.dumps({"apply": False}), encoding="utf-8")
+    assert P.export_is_stale(tmp_path)  # a dry run published nothing
+
+    report.write_text(json.dumps({"apply": True}), encoding="utf-8")
+    os.utime(report, (now - 50, now - 50))
+    assert not P.export_is_stale(tmp_path)
+
+    _touch(tmp_path / "workspace" / "masks" / "a" / "x_mask.png", now)
+    assert P.export_is_stale(tmp_path)
+
+
+def test_launch_argv_opens_the_panel_on_this_home(tmp_path):
+    argv = P.launch_argv(tmp_path)
+    assert argv[1:] == [
+        "-m",
+        "anime_tools.gui",
+        "--home",
+        str(tmp_path.resolve()),
+        "--open",
+    ]

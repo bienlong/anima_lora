@@ -114,7 +114,7 @@ absurdres, safe, 1girl, chitanda eru, hyouka, @channel (caststation), full body,
 ```
 
 - Omit quality tags such as `absurdres`, `highres`, and `masterpiece`, or keep them to a minimum. (Once the officially released mod guidance is available, you can skip them entirely.)
-- Don't want to caption by hand? In the GUI's Dataset tab, select an image and click Autotag — the built-in Anima Tagger fills the caption in the correct order ([§6.3](#63-dataset-tab-autotag--grouping)). Treat the result as a starting point: review the tags, especially character/series/artist names, before training.
+- Don't want to caption by hand? Open the anime_tools panel (Preprocess tab → **Open anime_tools**) and run Autotag — the built-in Anima Tagger fills captions in the correct order ([§6.3](#63-curation-the-anime_tools-panel)). Treat the result as a starting point: review the tags, especially character/series/artist names, before training.
 - Want Japanese text drawn in the image? Keep the tags in English and put the text in double quotes inside an English clause: `1girl, solo, speech bubble. Japanese text reads as "はい".` LoRA captions use the same form, so a LoRA can learn to render that text. Write Japanese as text to draw, not as tags (`猫耳` → `cat ears`). Details: [CJK vocab pack](../methods/cjk_vocab_pack.md#intended-use).
 
 ---
@@ -141,11 +141,11 @@ PE vision feature caching (`{stem}_anima_pe.safetensors`) is an optional step ne
 
 ## 6. Using the GUI
 
-Edit configs, browse the dataset, preprocess, start/monitor training, and merge LoRA — all in one window.
+Edit configs, preprocess, start/monitor training, and merge LoRA — all in one window.
 
 - Training Config: pick a variant from the dropdown (recommended: `tlora`) and your card in the Hardware dropdown (Default 16GB+ / Low VRAM 8GB), edit the training keys, then start training. Data scope (`sample_ratio`, `artists_shard`) is a plain form field in the Basic section.
 - Preprocess: resize + VAE + text embedding caching in one shot.
-- Dataset: preview and edit images/captions, Autotag, and Grouping ([§6.3](#63-dataset-tab-autotag--grouping)).
+- Curation — captions, Autotag, masks, Grouping, excluding images — happens in the anime_tools panel, opened from the Preprocess tab ([§6.3](#63-curation-the-anime_tools-panel)).
 - Merge: bake a trained LoRA into the base DiT to produce a standalone ComfyUI checkpoint (base LoRA / T-LoRA only).
 
 The GUI reads `configs/gui-methods/<variant>.toml` (one clean file per variant) and calls `train.py` internally, so any GUI setup is reproducible from the CLI ([Appendix A](#appendix-a-cli-reference)).
@@ -168,16 +168,19 @@ Training does not run inside the GUI window — pressing `Train` hands the job t
 - Exceptions: `Test` and `Preprocess` run as in-window subprocesses, so closing the GUI cancels them.
 - To shut training down completely and release the GPU, use the CLI's `make daemon-terminate` ([Appendix A](#appendix-a-cli-reference)).
 
-### 6.3 Dataset Tab: Autotag & Grouping
+### 6.3 Curation: the anime_tools panel
 
-Autotag — caption generation. Select an image and click Autotag: the Anima Tagger predicts tags in the correct `[meta] [character] [series] [artist] [general]` order and fills the caption box. The first click downloads the tagger model, so it takes a moment; afterwards the model stays warm in the background and subsequent images are near-instant. The tagger releases its GPU memory automatically before any other GPU job starts.
+Captioning, Autotag, position clauses, masks, Grouping and excluding images happen in the anime_tools panel, a separate window. Open it with the Preprocess tab's **Open anime_tools** button. A second click goes to the panel that is already running, and closing the panel's window stops it.
 
-Grouping — clustering similar images. Click Group to cluster near-duplicates and images showing the same scene/character; they collapse into green group headers in the image list. Use it to drop duplicates or rebalance how much weight each concept gets.
+The panel never edits the images in `image_dataset/`. It works in its own `workspace/` folder and publishes only its decisions:
 
-- It compares visual content, not filenames or captions, and computes groups per top-level folder (artist/character buckets), so images from different folders never merge.
-- Cached features are reused, so re-clicking Group after adding images is cheap.
+1. Curate in the panel.
+2. Run **Export** in the panel. The GUI sets Export to *sidecars only*: captions go to `post_image_dataset/resized/`, masks to `post_image_dataset/masks/`, and the revised master caption back next to the image in `image_dataset/`. No images are copied.
+3. Run preprocessing in the Preprocess tab. Resize skips the images you excluded, and the text cache re-encodes every caption that is newer than its cache.
 
-> Both work on the original `image_dataset/` images and do not touch preprocessing caches — run them *before* preprocessing to clean up captions.
+The Preprocess tab's status line says when the panel has edits newer than its last Export.
+
+**Resize preview** (Preprocess tab) lists each source image with the bucket and tier it lands in under the current resize settings, and draws the crop on the selected image.
 
 ---
 

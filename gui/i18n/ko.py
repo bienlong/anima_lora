@@ -9,7 +9,6 @@ STRINGS: dict[str, str] = {
     "tab_easycontrol": "EasyControl",
     "tab_turbo": "Turbo",
     "tab_experimental": "실험기능",
-    "tab_images": "데이터셋 뷰어",
     "tab_merge": "병합",
     "tab_queue": "큐 현황",
     "tab_preprocess": "전처리",
@@ -92,12 +91,28 @@ STRINGS: dict[str, str] = {
     "preprocess_status_caches": "캐시 — latents: {lat}, text: {te}, PE: {pe}",
     "preprocess_status_masks": "마스크: {masks}장",
     "preprocess_status_no_resized": "리사이즈된 이미지가 없습니다.",
-    "preprocess_no_resized_to_process": (
-        "post_image_dataset/resized/에 리사이즈된 이미지가 없습니다. 먼저 전처리"
-        "(리사이즈)를 실행하세요 — 마스킹과 그룹화는 리사이즈된 이미지를 대상으로 동작합니다."
-    ),
     "preprocess_open_dataset_dir": "캐시 폴더 열기",
     "preprocess_open_dataset_dir_tooltip": "post_image_dataset/ 폴더(리사이즈된 이미지 + 캐시)를 파일 탐색기에서 엽니다.",
+    "preprocess_status_export_stale": "anime_tools에 마지막 Export 이후의 편집이 있습니다",
+    "preprocess_resize_preview": "리사이즈 미리보기",
+    "preprocess_resize_preview_tooltip": "원본 이미지별로 아래 설정에서 리사이즈가 고르는 bucket과 tier, 그리고 크롭 영역을 보여줍니다. 원본 파일은 변경하지 않습니다.",
+    "preprocess_resize_preview_title": "리사이즈 미리보기",
+    "preprocess_resize_preview_refresh": "새로고침",
+    "preprocess_resize_preview_col_image": "이미지",
+    "preprocess_resize_preview_col_source": "원본",
+    "preprocess_resize_preview_col_bucket": "Bucket",
+    "preprocess_resize_preview_col_tier": "Tier",
+    "preprocess_resize_preview_col_kept": "유지",
+    "preprocess_resize_preview_summary": "이미지 {n}개, bucket {buckets}개",
+    "preprocess_resize_preview_skipped": "{n}개 제외됨",
+    "preprocess_resize_preview_unreadable": "{n}개 읽기 실패",
+    "preprocess_resize_preview_empty": "{path} 아래에 이미지가 없습니다",
+    "preprocess_open_anime_tools": "anime_tools 열기",
+    "preprocess_open_anime_tools_tooltip": "이 체크아웃에서 anime_tools 큐레이션 패널(캡션, 태깅, 마스크, 그룹, 제외)을 엽니다. 패널에서 큐레이션하고 Export(sidecars only)를 실행한 뒤, 여기서 리사이즈와 캐시를 실행하세요.",
+    "preprocess_anime_tools_reused": "anime_tools가 이미 실행 중입니다 → {url}",
+    "preprocess_anime_tools_started": "anime_tools 시작 중… (로그: {log})",
+    "preprocess_anime_tools_failed": "anime_tools를 시작할 수 없습니다: {err}",
+    "preprocess_anime_tools_root_warning": "패널에 저장된 루트가 post_image_dataset/ 안을 가리킵니다({roots}). 패널의 스테이지가 트레이너의 트리를 덮어쓰게 됩니다. 패널의 ⚙ 설정(또는 {path})에서 비워 주세요.",
     "preprocess_clear_scope_cache": "현재 scope 캐시 삭제",
     "preprocess_clear_scope_cache_tooltip": "현재 path_scope가 적용된 리사이즈 이미지와 LoRA 캐시 폴더를 삭제합니다.",
     "preprocess_clear_scope_cache_all_scope": "전체 scope 없음",
@@ -321,140 +336,8 @@ STRINGS: dict[str, str] = {
     "soup_ft_args": "파인튜닝 인자",
     "soup_ft_args_tip": "각 파인튜닝 실행에 전달할 추가 CLI 인자. 예: --network_dim 32 --max_train_epochs 8.",
     "soup_path_pattern_required": "Soup에는 경로 패턴이 필요합니다(예: 'sincos/*' 또는 'art_a/*|art_b/*').",
-    "n_images": "이미지 {n}개",
-    # ImageViewerTab
+    # Shared labels
     "directory": "디렉토리:",
-    "dataset_reload": "새로고침",
-    "dataset_reload_tooltip": "현재 디렉토리를 다시 스캔해서 이미지 목록과 선택을 갱신합니다.",
-    "dataset_open_dir": "열기",
-    "dataset_open_dir_tooltip": "현재 디렉토리를 시스템 파일 관리자에서 엽니다.",
-    "dataset_add_dir": "디렉토리 추가…",
-    "dataset_add_dir_tooltip": "다른 디렉토리를 골라 이번 세션 동안 드롭다운에 추가합니다.",
-    "dataset_add_dir_picker": "추가할 디렉토리 선택",
-    "dataset_add_dir_already": "'{name}' 디렉토리는 이미 목록에 있습니다.",
-    "dataset_search_placeholder": "파일 이름 검색…",
-    "dataset_sort_asc_tooltip": "오름차순 정렬 (A→Z, 클릭하여 반전)",
-    "dataset_sort_desc_tooltip": "내림차순 정렬 (Z→A, 클릭하여 반전)",
-    "dataset_group_first_tooltip": "그룹 우선 정렬: 묶인 이미지를 폴더 구분 없이 맨 위로 모아서 보여줍니다 (그룹 외 이미지는 아래에 폴더 트리로).",
-    "dataset_view_group": "그룹",
-    "dataset_view_tree": "트리",
-    "dataset_group_sort_tooltip": "그룹 내부 이미지 정렬 기준입니다. 방향키 이동은 왼쪽 트리에 보이는 순서를 따릅니다.",
-    "dataset_group_sort_name": "이름순",
-    "dataset_group_sort_name_desc": "이름 역순",
-    "dataset_group_sort_size": "용량순",
-    "dataset_group_sort_size_desc": "용량 역순",
-    "dataset_group_sort_resolution": "해상도순",
-    "dataset_group_sort_resolution_desc": "해상도 역순",
-    "dataset_mask_overlay": "마스크 오버레이 표시",
-    "dataset_resize_preview": "리사이즈 미리보기 표시",
-    "dataset_resize_preview_tooltip": "전처리 target_res가 선택할 중앙 크롭 영역과 최종 bucket을 표시합니다. 원본 파일은 변경하지 않습니다.",
-    "dataset_resize_preview_label": "{width}x{height} @ {edge}",
-    "dataset_preprocess_skip_short": "생략 (S)",
-    "dataset_preprocess_skip_tooltip": "현재 이미지를 전처리 resize 단계에서 생략하도록 표시합니다. 원본 파일은 변경하지 않습니다.",
-    "dataset_preprocess_clear_short": "해제 (F)",
-    "dataset_preprocess_clear_tooltip": "현재 이미지의 사용/생략/이동 표시를 해제합니다. 우측 메뉴에서 전체 표시를 해제할 수 있습니다.",
-    "dataset_preprocess_clear_all": "전체 표시 해제",
-    "dataset_preprocess_save": "전처리 결정 저장",
-    "dataset_preprocess_save_tooltip": "전처리에서 사용할 이미지별 사용/생략/이동 결정을 JSON으로 저장합니다. 이동 표시는 실제 이동 전에도 전처리에서 제외됩니다.",
-    "dataset_preprocess_saved": "전처리 결정이 저장되었습니다:\n{path}",
-    "dataset_preprocess_decision_use": "전처리 결정: 사용",
-    "dataset_preprocess_decision_skip": "전처리 결정: 생략",
-    "dataset_preprocess_decision_move": "현재 상태: 이동 예정",
-    "dataset_image_meta_empty": "이미지 없음",
-    "dataset_image_meta": "{width}x{height} · {size} · {fmt}",
-    "dataset_image_meta_resize": "리사이즈 {width}x{height} @ {edge}",
-    "dataset_delete": "제외 (D)",
-    "dataset_delete_tooltip": "Delete 또는 D 키로 표시한 이미지를 제외합니다: 리사이즈 사본, 캡션 사이드카, 마스크, OCR이 post_image_dataset/_excluded/로 이동하고 해당 원장이 리사이즈 대상에서 제외 상태를 유지합니다. 원본 이미지는 image_dataset/에 그대로 남습니다. 복원…으로 되돌릴 수 있습니다.",
-    "dataset_delete_confirm_title": "이미지 제외",
-    "dataset_delete_confirm_body": "이미지 {n}개를 제외할까요? 작업용 파일은 post_image_dataset/_excluded/로 이동하며 원본 이미지는 그대로 남습니다.",
-    "dataset_delete_failed": "일부 이미지를 제외하지 못했습니다:\n{err}",
-    "dataset_restore": "복원…",
-    "dataset_restore_tooltip": "제외된 이미지를 되돌립니다: post_image_dataset/_excluded/ 원장에서 항목을 선택하면 해당 파일이 리사이즈/마스크/OCR 트리로 돌아갑니다.",
-    "dataset_restore_title": "제외된 이미지 복원",
-    "dataset_restore_body": "파이프라인으로 되돌릴 이미지를 선택하세요.",
-    "dataset_restore_failed": "복원하지 못했습니다:\n{err}",
-    "dataset_restore_kept": "일부 파일은 실제 경로가 다시 사용 중이라 _excluded/에 그대로 남았습니다:\n{items}",
-    "dataset_group_label": "그룹 {n} — {size}장",
-    "dataset_group_rebuild": "그룹화",
-    "dataset_group_rebuild_tooltip": "PE-Spatial 시각적 유사도로 이미지 그룹화 (작가별). 작업 큐에서 실행됩니다.",
-    "dataset_group_queued": "그룹화 작업이 큐에 추가됨 (작업 {job_id}). 완료되면 이 디렉터리를 새로고침하면 그룹이 보입니다.",
-    "n_images_filtered": "{shown} / {total} 이미지",
-    "caption": "캡션:",
-    "no_caption": "(캡션 없음)",
-    "caption_save": "저장",
-    "caption_revert": "되돌리기",
-    "caption_autotag": "자동 태깅",
-    "caption_autotag_tooltip": (
-        "Anima Tagger를 이 이미지에 실행해 예측된 태그를 캡션에 추가합니다. "
-        "모델은 최초 사용 시 자동으로 내려받습니다. 결과를 확인한 뒤 저장하면 "
-        ".txt 파일에 기록됩니다."
-    ),
-    "caption_autotag_running": "자동 태깅 중…",
-    "caption_autotag_loading": "태거 로딩 중…",
-    "caption_autotag_ready": "태거 로드됨 · 대기 중",
-    "caption_autotag_busy": (
-        "다른 작업(학습 / 전처리 / 그룹화)이 GPU를 사용 중입니다. "
-        "완료된 뒤 다시 자동 태깅하세요."
-    ),
-    "caption_autotag_error": "자동 태깅 실패: {err}",
-    "caption_autotag_empty": "태거가 이 이미지에서 태그를 찾지 못했습니다.",
-    "caption_autotag_model_missing": (
-        "Anima Tagger 모델이 아직 다운로드되지 않았습니다. 모델 창에서 Tagger 팩을 "
-        "받거나 터미널에서 `make download-tagger-model` 을 실행한 뒤 다시 시도하세요."
-    ),
-    "caption_autotag_model_gated": (
-        "caformer_b36 백본은 접근 승인이 필요한 저장소입니다. HuggingFace 에 "
-        "로그인한 뒤 아래 페이지에서 약관에 먼저 동의해야 합니다:\n{url}"
-    ),
-    "caption_autotag_open_models": "모델 창 열기",
-    "caption_autotag_open_gated": "모델 페이지 열기",
-    "caption_correct": "순서 교정",
-    "caption_correct_tooltip": (
-        "danbooru_tags_classified.csv를 사용해 캡션을 ANIMA 권장 순서로 "
-        "재배치하고, 설정에 따라 @no-artist를 삽입합니다."
-    ),
-    "caption_correct_visible": "현재 목록 전체 교정",
-    "caption_correct_visible_confirm": "현재 목록의 캡션 {n}개를 교정할까요?",
-    "caption_correct_visible_done": "캡션 {n}개를 교정했습니다.",
-    "caption_correct_visible_failed": "캡션 {n}개를 교정했습니다.\n\n실패:\n{err}",
-    "caption_correct_no_change": "교정할 변경사항이 없습니다.",
-    "tag_kb_posts": "게시물 {n}개",
-    "tag_kb_unknown": "{tag} — 태그 지식베이스에 없음",
-    "caption_correct_db_missing": (
-        "danbooru_tags_classified.csv를 찾을 수 없습니다.\n\n"
-        "모델 창에서 Danbooru 태그 DB를 다운로드하거나 다음 위치에 배치하세요:\n{paths}"
-    ),
-    "caption_correct_db_failed": "태그 DB 로드 실패: {err}",
-    "caption_versions": "이력…",
-    "caption_variant_training": "학습 캡션",
-    "caption_variants_tooltip": (
-        "전처리가 생성한 학습용 캡션 변형(셔플 / 태그 드롭아웃 / 정체성 무작위화)을 "
-        "미리 봅니다. 읽기 전용이며 편집 가능한 학습 캡션에는 영향을 주지 않습니다."
-    ),
-    "caption_dirty_marker": " *",
-    "caption_diff_stats": "(+{add} / −{rem})",
-    "caption_diff_clean": "(변경 없음)",
-    "caption_save_failed": "캡션 저장 실패: {err}",
-    "caption_unsaved_title": "저장되지 않은 캡션",
-    "caption_unsaved_body": "캡션 편집 사항이 저장되지 않았습니다. 전환하기 전에 저장할까요?",
-    "caption_versions_title": "캡션 이력 — {name}",
-    "caption_versions_empty": "(이전 버전 없음)",
-    "caption_versions_restore": "선택 버전으로 되돌리기",
-    "caption_versions_close": "닫기",
-    "caption_no_history": "이 캡션에는 아직 이력이 없습니다.",
-    "caption_guideline_html": (
-        "<b>순서:</b> 등급 → 인원수 → 캐릭터 (작품) → 작품 → "
-        "<span style='color:#c9a227;'>@작가</span> → 내용 태그. "
-        "영역별 하위 섹션: 직전 태그를 <code>.</code> 으로 끝낸 뒤 "
-        "<span style='color:#5e8eb0;'>On the&nbsp;…,</span> 또는 "
-        "<span style='color:#5e8eb0;'>In the&nbsp;…,</span> 로 시작. "
-        "첫 <code>@작가</code> 태그까지는 순서가 고정되고, 그 이후는 "
-        "섹션 내에서 셔플됩니다. "
-        "<b>작가 정보가 없을 때:</b> "
-        "<span style='color:#c9a227;'>@no-artist</span> 를 자리표시자로 "
-        "넣어주세요 — 셔플 경계 역할만 하고 토큰화 직전에 제거되어 "
-        "모델까지 전달되지 않습니다."
-    ),
     # Language
     "language": "언어:",
     # Settings dialog
@@ -462,31 +345,6 @@ STRINGS: dict[str, str] = {
     "settings_btn_tooltip": "앱 설정 — 언어, 환경설정, MCP 서버 등록",
     "settings_title": "설정",
     "settings_prefs_header": "환경설정",
-    "settings_autotag_confidence": "자동 태그 신뢰도:",
-    "settings_autotag_confidence_tooltip": (
-        "태거의 태그별 임계값 위에 추가로 적용되는 확률 하한(0–1)입니다. "
-        "높을수록 더 확실한 태그만 적게 남습니다. 기본값 0.50."
-    ),
-    "settings_caption_insert_no_artist": "캡션 교정 시 @no-artist 삽입",
-    "settings_caption_insert_no_artist_tooltip": (
-        "교정 결과에 작가 태그가 없으면 작가 위치에 @no-artist를 넣습니다. "
-        "캡션 셔플 경계로만 쓰이며 토큰화 직전에 제거됩니다."
-    ),
-    "settings_caption_validate_artist_tags": "작가 태그를 DB로 검증",
-    "settings_caption_validate_artist_tags_tooltip": (
-        "켜면 danbooru_tags_classified.csv에서 작가로 분류된 @태그만 작가 위치로 "
-        "옮깁니다. 끄면 @로 시작하는 태그를 작가 태그로 취급합니다."
-    ),
-    "settings_group_match_frac": "그룹화 엄격도:",
-    "settings_group_match_frac_tooltip": (
-        "데이터셋 탭에서 그룹화를 누를 때 두 이미지를 묶는 데 필요한 일치 "
-        "비율(0–1)입니다. 높을수록 더 엄격하고 깔끔한 그룹이 됩니다. 기본값 0.25."
-    ),
-    "settings_group_cell_match": "그룹화 셀 일치도:",
-    "settings_group_cell_match_tooltip": (
-        "데이터셋 그룹화 시 셀 단위 일치로 인정하는 코사인 하한(0–1)입니다. "
-        "높을수록 셀 일치 기준이 엄격해집니다. 기본값 0.93."
-    ),
     "settings_theme": "테마:",
     "settings_theme_tooltip": (
         "인터페이스 전체 색상 테마입니다. 즉시 적용되며, 설정 창을 닫으면 "
@@ -546,7 +404,6 @@ STRINGS: dict[str, str] = {
     "report_issue": "이슈 신고",
     "report_issue_tooltip": "브라우저에서 GitHub 이슈 트래커 열기",
     "visit_github": "GitHub 페이지 방문",
-    "open_in_system_viewer": "시스템 뷰어로 열기",
     # Models dialog
     "models_title": "모델 다운로드",
     "models_intro": "학습 / 추론 실행에 필요한 가중치를 팩 단위로 묶어 보여줍니다. '첫 실행 세트 다운로드'는 Anima 가중치 3종, PE, CJK 어휘 팩(v2부터 기본 활성), 태거 체크포인트, 태그 DB를 받습니다. SAM3(마스킹)와 OCR은 '큐레이션' 탭의 선택 팩입니다. 파일은 models/ 아래에 저장됩니다.",

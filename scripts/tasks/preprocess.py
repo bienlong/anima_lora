@@ -269,20 +269,10 @@ def _caption_correction_config(extra) -> tuple[dict[str, object], list[str]]:
         # across the WHOLE master (destructive with autotag merge/overwrite).
         "path_pattern": _resolved_path_pattern(extra),
     }
-    # The GUI's stage forms (``PREPROCESS_STAGES_JSON``): the `autotag` /
-    # `correct` requests are built from them (`_autotag_request`,
-    # `cmd_preprocess_captions`); the knobs the chain reasons about are
-    # mirrored here so the run-or-skip logic below sees one dict.
-    forms = gui_stage_values()
-    autotag_form = forms.get("autotag")
-    if isinstance(autotag_form, dict):
-        config["autotag_form"] = autotag_form
-        if autotag_form.get("mode"):
-            config["autotag_mode"] = str(autotag_form["mode"]).strip()
-        config["autotag_min_confidence"] = _floatish(
-            autotag_form.get("min_confidence"), default=0.0
-        )
-    correct_form = forms.get("correct")
+    # The GUI's `correct` stage form (``PREPROCESS_STAGES_JSON``) builds the
+    # request in `cmd_preprocess_captions`; the knobs the chain reasons about
+    # are mirrored here so the run-or-skip logic below sees one dict.
+    correct_form = gui_stage_values().get("correct")
     if isinstance(correct_form, dict):
         config["correct_form"] = correct_form
         config["correct_order"] = not _boolish(correct_form.get("no_correct"), False)
@@ -387,19 +377,6 @@ def _autotag_request(config: dict[str, object]):
     captions."""
     mode = str(config.get("autotag_mode") or "missing")
     min_confidence = float(config.get("autotag_min_confidence") or 0.0)
-    form = config.get("autotag_form")
-    if isinstance(form, dict):
-        # The GUI's form: every other knob the stage has rides along, the
-        # roots and the scope are the trainer's.
-        return request_from_form(
-            "autotag",
-            form,
-            roots=_stage_roots(),
-            settings={"path_pattern": _stage_path_pattern(config)},
-            apply=True,
-            mode=mode,
-            min_confidence=min_confidence,
-        )
     from anime_tools.stages.requests import AutotagRequest
 
     return AutotagRequest(

@@ -247,12 +247,17 @@ fallback) and always write the revised caption, so a master hand-edit reaches tr
 only through a caption stage run, and a dataset that skips every caption stage caches
 empty prompts.
 
-Curation **exclusion** (Image tab **Exclude (D)** / **Restore…**) is `anime_tools.exclude`
-on the trainer's trees (`library/datasets/curation_actions.py`): workspace files (resized
-copy, caption sidecars, mask, OCR) move under `post_image_dataset/_excluded/`, the source
-under `image_dataset/` stays. That ledger, the package GUI's `workspace/_excluded` ledger
-and the `skip` / `move` marks in `curation_decisions.json` are unioned into
-`ResizeRequest.skip`. A `post_image_dataset/moved/` tree (pre-0.6) is inert.
+**The trainer GUI does not curate.** Its Preprocess tab's **Open anime_tools** button
+(`gui/anime_tools_panel.py`) launches the package's web panel on this checkout; the panel
+curates in `workspace/` and its Export — seeded to `sidecars_only` — publishes captions /
+masks / the revised master, never images. Order: Export → `make preprocess`.
+
+Curation **exclusion** is unioned into `ResizeRequest.skip` from three sources
+(`library/datasets/curation_actions.py`): the panel's `workspace/_excluded` ledger, the
+trainer ledger `post_image_dataset/_excluded/` (written by the retired Dataset tab via
+`anime_tools.exclude`; the source under `image_dataset/` stays), and the `skip` / `move`
+marks in a legacy `curation_decisions.json`. A `post_image_dataset/moved/` tree (pre-0.6)
+is inert.
 
 ### Curation lives in `anime_tools`
 

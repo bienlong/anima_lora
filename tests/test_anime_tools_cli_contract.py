@@ -18,7 +18,6 @@ from __future__ import annotations
 import ast
 import importlib
 import importlib.util
-import json
 import os
 from pathlib import Path
 
@@ -68,16 +67,9 @@ def _build(cmd: list[str]):
 
 
 def _mask_yaml(monkeypatch, cfg: dict) -> None:
-    """Pin the CLI path: no GUI forms, this yaml, no daemon job (which would
-    otherwise take the in-process path and load SAM3)."""
-    monkeypatch.delenv("PREPROCESS_STAGES_JSON", raising=False)
+    """Pin this yaml and no daemon job (which would otherwise take the
+    in-process path and load SAM3)."""
     monkeypatch.setattr("scripts.tasks.masking._load_mask_config", lambda: cfg)
-    monkeypatch.delenv("ANIMA_DAEMON_JOB_DIR", raising=False)
-
-
-def _mask_forms(monkeypatch, cards: list[dict]) -> None:
-    """The GUI path: one ``masks_sam`` form per rule card."""
-    monkeypatch.setenv("PREPROCESS_STAGES_JSON", json.dumps({"masks_sam": cards}))
     monkeypatch.delenv("ANIMA_DAEMON_JOB_DIR", raising=False)
 
 
@@ -134,55 +126,11 @@ def test_mask_rules_yaml_builds_sam_and_merge_requests(monkeypatch):
     assert Path(merge.output_dir) == masking._mask_output_dir()
 
 
-def test_mask_gui_cards_build_sam_and_merge_requests(monkeypatch):
-    """The GUI's rule cards go through the package's ``build_argv``: the
-    card's own ``path_pattern`` is the run's scope, the resized tree the root,
-    and the argv the child gets reads back as the same request."""
-    from scripts.tasks import masking
-
-    calls = _capture(monkeypatch, masking)
-    _mask_forms(
-        monkeypatch,
-        [
-            {"masks": ["ignore:text:bubble"], "threshold": 0.7},
-            {
-                "path_pattern": "character_a/*",
-                "masks": "keep:text:girl",
-                "dilate": 8,
-                # Retired in anime_tools 0.7.0 (it batched nothing and held
-                # every inference state resident). A card saved before that
-                # still carries it, so the form path must drop it silently
-                # rather than fail the run.
-                "batch_size": 4,
-            },
-        ],
-    )
-
-    masking.cmd_mask([])
-
-    assert [c[2] for c in calls] == [
-        "anime_tools.masking.cli.generate_masks",
-        "anime_tools.masking.cli.generate_masks",
-        "anime_tools.masking.cli.merge_masks",
-    ]
-    sam_a, sam_b, merge = (_build(c) for c in calls)
-    assert _specs(sam_a) == ["ignore:text:bubble"]
-    assert sam_a.threshold == 0.7 and sam_a.path_pattern is None
-    assert Path(sam_a.image_dir) == masking.RESIZED_IMAGE_DIR
-    assert sam_a.recursive
-    assert _specs(sam_b) == ["keep:text:girl"]
-    assert sam_b.dilate == 8 and not hasattr(sam_b, "batch_size")
-    assert sam_b.path_pattern == "character_a/*"
-    assert merge.mask_dirs == (sam_a.mask_dir, sam_b.mask_dir)
-    assert sam_a.mask_dir != sam_b.mask_dir
-
-
 def test_mask_flat_yaml_config_builds_one_sam_request(monkeypatch):
     """Direct ``make mask`` reads ``configs/sam_mask.yaml``: the shipped flat form."""
     from scripts.tasks import masking
 
     calls = _capture(monkeypatch, masking)
-    monkeypatch.delenv("PREPROCESS_STAGES_JSON", raising=False)
     monkeypatch.delenv("ANIMA_DAEMON_JOB_DIR", raising=False)
 
     masking.cmd_mask([])
@@ -204,12 +152,9 @@ def test_mask_under_a_daemon_job_runs_the_stages_in_process(monkeypatch, tmp_pat
     from scripts.tasks import masking
 
     calls = _capture(monkeypatch, masking)
-    _mask_forms(
+    _mask_yaml(
         monkeypatch,
-        [
-            {"masks": ["ignore:text:a"]},
-            {"masks": ["ignore:text:b"]},
-        ],
+        {"rules": [{"masks": ["ignore:text:a"]}, {"masks": ["ignore:text:b"]}]},
     )
     monkeypatch.setenv("ANIMA_DAEMON_JOB_DIR", str(tmp_path))
     monkeypatch.delenv("ANIMA_HOME", raising=False)
@@ -670,15 +615,11 @@ def test_caption_index_argv_keeps_the_trainer_output_path(monkeypatch):
 
 
 def test_no_hand_copied_contract_constants():
-    """The three copies the API-first audit found are now the package's own."""
+    """The copies the API-first audit found are now the package's own."""
     from anime_tools import contract
 
-    from gui.tabs import _autotag
     from scripts.tasks import preprocess
 
-    assert _autotag._AUTOTAG_READY is contract.AUTOTAG_READY
-    assert _autotag._AUTOTAG_RESULT_PREFIX is contract.AUTOTAG_RESULT_PREFIX
-    assert _autotag._AUTOTAG_ERROR_PREFIX is contract.AUTOTAG_ERROR_PREFIX
     assert preprocess.AUTOTAG_MODES is contract.AUTOTAG_MODES
     # The tagger's file set is no longer copied at all: the download surface is
     # the package's own catalog row (see tests/test_downloads.py).

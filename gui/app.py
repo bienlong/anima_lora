@@ -33,7 +33,6 @@ from gui.widgets import LazyTabHolder, action_button, wrap_tooltip
 from gui.i18n import load_language, t
 from gui.settings_dialog import SettingsDialog
 from gui.tabs.easycontrol_tab import EasyControlTab
-from gui.tabs.image_tab import ImageViewerTab
 from gui.tabs.merge_tab import MergeTab
 from gui.tabs.methods_tab import MethodsTab
 from gui.tabs.preprocess import PreprocessingTab
@@ -96,11 +95,7 @@ class MainWindow(QMainWindow):
 
         self.models_btn = QPushButton(t("models_btn"))
         self.models_btn.setToolTip(t("models_btn_tooltip"))
-        self.models_btn.clicked.connect(
-            lambda: open_models_dialog(
-                self, on_models_changed=self._reload_image_tab_kb
-            )
-        )
+        self.models_btn.clicked.connect(lambda: open_models_dialog(self))
         lang_bar.addWidget(self.models_btn)
 
         self.update_btn = QPushButton(t("update_btn"))
@@ -162,12 +157,8 @@ class MainWindow(QMainWindow):
             t("tab_config"),
         )
         self.tabs.addTab(self._preprocess_tab, t("tab_preprocess"))
-        # Every tab after Config is a LazyTabHolder: built on first open, keeping
-        # the launch path to Config + Preprocess only.
-        self._image_tab = LazyTabHolder(
-            lambda: ImageViewerTab(preprocess_tab=self._preprocess_tab)
-        )
-        self.tabs.addTab(self._image_tab, t("tab_images"))
+        # Every tab after Preprocess is a LazyTabHolder: built on first open,
+        # keeping the launch path to Config + Preprocess only.
         self.tabs.addTab(LazyTabHolder(MergeTab), t("tab_merge"))
         # EasyControl keeps a dedicated tab (own preprocess/dataset lifecycle).
         self.tabs.addTab(
@@ -222,11 +213,6 @@ class MainWindow(QMainWindow):
         self._queue_tab.cleanup_subprocess()
         self._gpu_bar.cleanup()
         super().closeEvent(event)
-
-    def _reload_image_tab_kb(self) -> None:
-        """Refresh the Images tab's tag KB after a Models-dialog download."""
-        if self._image_tab.inner is not None:
-            self._image_tab.inner.reload_tag_knowledge_base()
 
     def _show_update_available(self, latest_tag: str) -> None:
         self.update_btn.setText(t("update_btn_available"))

@@ -17,9 +17,6 @@ from gui._paths import (
     CONFIGS_DIR,
     CUSTOM_DIR,
     CUSTOM_VARIANTS_DIR,
-    DEFAULT_AUTOTAG_CONFIDENCE,
-    DEFAULT_GROUP_CELL_MATCH_MIN,
-    DEFAULT_GROUP_MATCH_FRAC_MIN,
     DEFAULT_THEME_COLOR,
     GUI_METHODS_DIR,
     GUI_SETTINGS_FILE,
@@ -72,7 +69,6 @@ from gui.dialogs import (
 )
 from gui.discovery import (
     _adapter_dirs,
-    _image_dirs,
     _imgs,
     _safetensors_in,
 )
@@ -104,9 +100,6 @@ __all__ = [
     "CUSTOM_DIR",
     "CUSTOM_VARIANTS_DIR",
     "GUI_SETTINGS_FILE",
-    "DEFAULT_AUTOTAG_CONFIDENCE",
-    "DEFAULT_GROUP_CELL_MATCH_MIN",
-    "DEFAULT_GROUP_MATCH_FRAC_MIN",
     "DEFAULT_THEME_COLOR",
     "get_setting",
     "set_setting",
@@ -162,7 +155,6 @@ __all__ = [
     "_imgs",
     "_safetensors_in",
     "_adapter_dirs",
-    "_image_dirs",
     "main",
 ]
 

@@ -17,14 +17,6 @@ IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 # Separate from configs/ so it survives a config reset.
 GUI_SETTINGS_FILE = Path(__file__).resolve().parent / "gui_settings.json"
 
-# Autotagger probability floor on top of the model's per-tag F1 thresholds.
-DEFAULT_AUTOTAG_CONFIDENCE = 0.5
-DEFAULT_CAPTION_INSERT_NO_ARTIST = True
-DEFAULT_CAPTION_VALIDATE_ARTIST_TAGS = False
-# Dataset-tab grouping defaults (`curate-group`); mirrors
-# anime_tools.grouping.groups.DEFAULT_* so the GUI stays torch-free.
-DEFAULT_GROUP_MATCH_FRAC_MIN = 0.25
-DEFAULT_GROUP_CELL_MATCH_MIN = 0.93
 DEFAULT_THEME_COLOR = "#3c78c8"  # backward compat; live accent comes from gui/theme.py
 DEFAULT_THEME = "dark"  # one of "dark" / "light" / "sepia" (gui/theme.py THEMES)
 

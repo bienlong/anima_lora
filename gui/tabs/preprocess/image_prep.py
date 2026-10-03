@@ -195,8 +195,8 @@ class ImagePrepSection(StageFormSection):
     def _make_widget(self, fd: dict) -> QWidget:
         dest = fd["dest"]
         if dest == "target_res":
-            # Dual-use: preprocess resizes to these tiers, and the tab's status
-            # / the Dataset tab's resize preview read the same widget.
+            # Dual-use: preprocess resizes to these tiers, and the tab's resize
+            # preview reads the same widget.
             self.target_res = _TargetResWidget(fd.get("default") or [1024])
             return self.target_res
         if dest == "resize_crop_anchor":

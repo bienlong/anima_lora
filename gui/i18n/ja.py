@@ -9,7 +9,6 @@ STRINGS: dict[str, str] = {
     "tab_easycontrol": "EasyControl",
     "tab_turbo": "Turbo",
     "tab_experimental": "実験機能",
-    "tab_images": "データセットViewer",
     "tab_merge": "マージ",
     "tab_queue": "キュー状況",
     "tab_preprocess": "前処理",
@@ -94,12 +93,28 @@ STRINGS: dict[str, str] = {
     "preprocess_status_caches": "キャッシュ — 潜在変数: {lat}, テキスト: {te}, PE: {pe}",
     "preprocess_status_masks": "マスク: {masks}",
     "preprocess_status_no_resized": "リサイズ済み画像がありません。",
-    "preprocess_no_resized_to_process": (
-        "post_image_dataset/resized/ にリサイズ済み画像がありません。先に前処理"
-        "（リサイズ）を実行してください — マスク生成とグループ化はリサイズ済み画像を対象に動作します。"
-    ),
     "preprocess_open_dataset_dir": "cacheフォルダを開く",
     "preprocess_open_dataset_dir_tooltip": "post_image_dataset/ フォルダ（リサイズ済み画像 + キャッシュ）をファイルマネージャーで開きます。",
+    "preprocess_status_export_stale": "anime_tools に最後の Export より新しい編集があります",
+    "preprocess_resize_preview": "リサイズプレビュー",
+    "preprocess_resize_preview_tooltip": "元画像ごとに、下の設定でリサイズが選ぶ bucket と tier、そしてクロップ領域を表示します。元ファイルは変更しません。",
+    "preprocess_resize_preview_title": "リサイズプレビュー",
+    "preprocess_resize_preview_refresh": "更新",
+    "preprocess_resize_preview_col_image": "画像",
+    "preprocess_resize_preview_col_source": "元サイズ",
+    "preprocess_resize_preview_col_bucket": "Bucket",
+    "preprocess_resize_preview_col_tier": "Tier",
+    "preprocess_resize_preview_col_kept": "保持",
+    "preprocess_resize_preview_summary": "画像 {n} 枚、bucket {buckets} 個",
+    "preprocess_resize_preview_skipped": "{n} 枚除外",
+    "preprocess_resize_preview_unreadable": "{n} 枚読み込み不可",
+    "preprocess_resize_preview_empty": "{path} に画像がありません",
+    "preprocess_open_anime_tools": "anime_tools を開く",
+    "preprocess_open_anime_tools_tooltip": "このチェックアウトで anime_tools キュレーションパネル（キャプション、タグ付け、マスク、グループ、除外）を開きます。パネルでキュレーションし Export（sidecars only）を実行してから、ここでリサイズとキャッシュを実行してください。",
+    "preprocess_anime_tools_reused": "anime_tools は既に起動しています → {url}",
+    "preprocess_anime_tools_started": "anime_tools を起動中…（ログ: {log}）",
+    "preprocess_anime_tools_failed": "anime_tools を起動できません: {err}",
+    "preprocess_anime_tools_root_warning": "パネルに保存されたルートが post_image_dataset/ 内を指しています（{roots}）。パネルのステージがトレーナーのツリーを上書きします。パネルの ⚙ 設定（または {path}）で空にしてください。",
     "preprocess_clear_scope_cache": "現在scopeのキャッシュ削除",
     "preprocess_clear_scope_cache_tooltip": "現在の path_scope に対応するリサイズ画像と LoRA キャッシュフォルダーを削除します。",
     "preprocess_clear_scope_cache_all_scope": "scopeなし / 全体",
@@ -280,141 +295,8 @@ STRINGS: dict[str, str] = {
     "soup_ft_args": "ファインチューニング引数",
     "soup_ft_args_tip": "各ファインチューニング実行に渡す追加 CLI 引数。例: --network_dim 32 --max_train_epochs 8。",
     "soup_path_pattern_required": "Soup にはパスパターンが必要です（例: 'sincos/*' や 'art_a/*|art_b/*'）。",
-    "n_images": "{n} 枚の画像",
-    # ImageViewerTab
+    # Shared labels
     "directory": "ディレクトリ:",
-    "dataset_reload": "再読み込み",
-    "dataset_reload_tooltip": "現在のディレクトリを再スキャンして画像リストと選択を更新します。",
-    "dataset_open_dir": "開く",
-    "dataset_open_dir_tooltip": "現在のディレクトリをシステムのファイルマネージャーで開きます。",
-    "dataset_add_dir": "ディレクトリを追加…",
-    "dataset_add_dir_tooltip": "別のディレクトリを選択してこのセッションのドロップダウンに追加します。",
-    "dataset_add_dir_picker": "追加するディレクトリを選択",
-    "dataset_add_dir_already": "ディレクトリ '{name}' は既にリストにあります。",
-    "dataset_search_placeholder": "ファイル名を検索…",
-    "dataset_sort_asc_tooltip": "A→Z 順 (クリックで逆順)",
-    "dataset_sort_desc_tooltip": "Z→A 順 (クリックで逆順)",
-    "dataset_group_first_tooltip": "グループ優先表示: グループ化された画像をフォルダを跨いで最上部にまとめて表示 (グループ外の画像は下にフォルダツリーで表示)。",
-    "dataset_view_group": "グループ",
-    "dataset_view_tree": "ツリー",
-    "dataset_group_sort_tooltip": "各グループ内の画像の並び順です。矢印キー移動は左のツリー表示順に従います。",
-    "dataset_group_sort_name": "名前順",
-    "dataset_group_sort_name_desc": "名前逆順",
-    "dataset_group_sort_size": "容量順",
-    "dataset_group_sort_size_desc": "容量逆順",
-    "dataset_group_sort_resolution": "解像度順",
-    "dataset_group_sort_resolution_desc": "解像度逆順",
-    "dataset_mask_overlay": "マスクオーバーレイを表示",
-    "dataset_resize_preview": "リサイズプレビューを表示",
-    "dataset_resize_preview_tooltip": "前処理 target_res が選択する中央クロップ領域と最終 bucket を表示します。元ファイルは変更しません。",
-    "dataset_resize_preview_label": "{width}x{height} @ {edge}",
-    "dataset_preprocess_skip_short": "スキップ (S)",
-    "dataset_preprocess_skip_tooltip": "現在の画像を前処理 resize でスキップするようにマークします。元ファイルは変更しません。",
-    "dataset_preprocess_clear_short": "解除 (F)",
-    "dataset_preprocess_clear_tooltip": "現在の画像の使用/スキップ/移動マークを解除します。右側メニューですべてのマークを解除できます。",
-    "dataset_preprocess_clear_all": "すべてのマークを解除",
-    "dataset_preprocess_save": "前処理決定を保存",
-    "dataset_preprocess_save_tooltip": "前処理用の画像別使用/スキップ/移動決定を JSON として保存します。移動マークは実際に移動する前でも前処理から除外されます。",
-    "dataset_preprocess_saved": "前処理決定を保存しました:\n{path}",
-    "dataset_preprocess_decision_use": "前処理決定: 使用",
-    "dataset_preprocess_decision_skip": "前処理決定: スキップ",
-    "dataset_preprocess_decision_move": "現在の状態: 移動予定",
-    "dataset_image_meta_empty": "画像なし",
-    "dataset_image_meta": "{width}x{height} · {size} · {fmt}",
-    "dataset_image_meta_resize": "リサイズ {width}x{height} @ {edge}",
-    "dataset_delete": "除外 (D)",
-    "dataset_delete_tooltip": "Delete または D キーで印を付けた画像を除外します。リサイズ済みコピー、キャプションのサイドカー、マスク、OCR が post_image_dataset/_excluded/ へ移動し、そこの台帳がリサイズ対象から外れた状態を保持します。元画像は image_dataset/ にそのまま残ります。復元…で元に戻せます。",
-    "dataset_delete_confirm_title": "画像を除外",
-    "dataset_delete_confirm_body": "{n} 枚の画像を除外しますか？ 作業用ファイルは post_image_dataset/_excluded/ へ移動し、元画像はそのまま残ります。",
-    "dataset_delete_failed": "一部の画像を除外できませんでした:\n{err}",
-    "dataset_restore": "復元…",
-    "dataset_restore_tooltip": "除外した画像を元に戻します。post_image_dataset/_excluded/ の台帳から項目を選ぶと、リサイズ・マスク・OCR の各ツリーにファイルが戻ります。",
-    "dataset_restore_title": "除外画像の復元",
-    "dataset_restore_body": "パイプラインに戻す画像を選択してください。",
-    "dataset_restore_failed": "復元できませんでした:\n{err}",
-    "dataset_restore_kept": "一部のファイルは実際のパスが再び使用されているため _excluded/ に残りました:\n{items}",
-    "dataset_group_label": "グループ {n} — {size} 枚",
-    "dataset_group_rebuild": "グループ化",
-    "dataset_group_rebuild_tooltip": "PE-Spatial の視覚的類似度で画像をグループ化 (作者ごと). ジョブキューで実行されます.",
-    "dataset_group_queued": "グループ化をキューに追加しました (ジョブ {job_id}). 完了後にこのディレクトリを再読み込みするとグループが表示されます.",
-    "n_images_filtered": "{shown} / {total} 枚の画像",
-    "caption": "キャプション:",
-    "no_caption": "(キャプションなし)",
-    "caption_save": "保存",
-    "caption_revert": "元に戻す",
-    "caption_autotag": "自動タグ付け",
-    "caption_autotag_tooltip": (
-        "Anima Tagger をこの画像に実行し、予測されたタグをキャプションに追加します。"
-        "モデルは初回使用時に自動でダウンロードされます。結果を確認してから保存すると "
-        ".txt に書き込まれます。"
-    ),
-    "caption_autotag_running": "自動タグ付け中…",
-    "caption_autotag_loading": "タガーを読み込み中…",
-    "caption_autotag_ready": "タガー読み込み済み · 待機中",
-    "caption_autotag_busy": (
-        "GPU が別のジョブ（学習 / 前処理 / グルーピング）で使用中です。"
-        "完了後にもう一度自動タグ付けしてください。"
-    ),
-    "caption_autotag_error": "自動タグ付けに失敗しました: {err}",
-    "caption_autotag_empty": "タガーはこの画像のタグを返しませんでした。",
-    "caption_autotag_model_missing": (
-        "Anima Tagger のモデルがまだダウンロードされていません。モデル画面から "
-        "Tagger パックを取得するか、ターミナルで `make download-tagger-model` を"
-        "実行してから、もう一度お試しください。"
-    ),
-    "caption_autotag_model_gated": (
-        "caformer_b36 バックボーンはゲート付きリポジトリです。HuggingFace に"
-        "ログインし、次のページで先に利用規約へ同意してください:\n{url}"
-    ),
-    "caption_autotag_open_models": "モデル画面を開く",
-    "caption_autotag_open_gated": "モデルページを開く",
-    "caption_correct": "順序補正",
-    "caption_correct_tooltip": (
-        "danbooru_tags_classified.csv を使ってキャプションを ANIMA 推奨順に並べ替え、"
-        "設定に応じて @no-artist を挿入します。"
-    ),
-    "caption_correct_visible": "現在の一覧を一括補正",
-    "caption_correct_visible_confirm": "現在の一覧のキャプション {n} 件を補正しますか？",
-    "caption_correct_visible_done": "キャプション {n} 件を補正しました。",
-    "caption_correct_visible_failed": "キャプション {n} 件を補正しました。\n\n失敗:\n{err}",
-    "caption_correct_no_change": "補正する変更はありません。",
-    "tag_kb_posts": "{n} 件の投稿",
-    "tag_kb_unknown": "{tag} — タグ知識ベースにありません",
-    "caption_correct_db_missing": (
-        "danbooru_tags_classified.csv が見つかりません。\n\n"
-        "モデル画面から Danbooru タグ DB をダウンロードするか、次の場所に置いてください:\n{paths}"
-    ),
-    "caption_correct_db_failed": "タグ DB の読み込みに失敗: {err}",
-    "caption_versions": "履歴…",
-    "caption_variant_training": "学習キャプション",
-    "caption_variants_tooltip": (
-        "前処理が生成した学習用キャプションのバリアント（シャッフル / タグドロップ"
-        "アウト / アイデンティティのランダム化）をプレビューします。読み取り専用で、"
-        "編集可能な学習キャプションには影響しません。"
-    ),
-    "caption_dirty_marker": " *",
-    "caption_diff_stats": "(+{add} / −{rem})",
-    "caption_diff_clean": "(変更なし)",
-    "caption_save_failed": "キャプションの保存に失敗しました: {err}",
-    "caption_unsaved_title": "未保存のキャプション",
-    "caption_unsaved_body": "キャプションに未保存の編集があります。切り替える前に保存しますか?",
-    "caption_versions_title": "キャプション履歴 — {name}",
-    "caption_versions_empty": "(過去のバージョンなし)",
-    "caption_versions_restore": "選択したバージョンを復元",
-    "caption_versions_close": "閉じる",
-    "caption_no_history": "このキャプションにはまだ履歴がありません。",
-    "caption_guideline_html": (
-        "<b>順序:</b> レーティング → カウント → キャラクター (シリーズ) → シリーズ → "
-        "<span style='color:#c9a227;'>@artist</span> → コンテンツタグ。"
-        "リージョンごとのサブセクション: 前のタグを <code>.</code> で終了し、"
-        "次を <span style='color:#5e8eb0;'>On the&nbsp;…,</span> "
-        "または <span style='color:#5e8eb0;'>In the&nbsp;…,</span> で開始します。"
-        "最初の <code>@artist</code> 以前のタグは固定されます;"
-        "それ以降はセクション内でシャッフルされます。"
-        "<b>アーティストがいない場合は</b> "
-        "<span style='color:#c9a227;'>@no-artist</span> をプレースホルダーとして使用してください — "
-        "同じようにシャッフル境界を固定し、トークン化前に除去されるためモデルには届きません。"
-    ),
     # Language
     "language": "言語:",
     # Settings dialog
@@ -422,31 +304,6 @@ STRINGS: dict[str, str] = {
     "settings_btn_tooltip": "アプリ設定 — 言語、環境設定、MCP サーバー登録",
     "settings_title": "設定",
     "settings_prefs_header": "環境設定",
-    "settings_autotag_confidence": "自動タグの信頼度:",
-    "settings_autotag_confidence_tooltip": (
-        "タガーのタグ別しきい値に追加で適用する確率の下限（0–1）です。"
-        "高いほど確信度の高いタグだけが少数残ります。既定値 0.50。"
-    ),
-    "settings_caption_insert_no_artist": "補正時に @no-artist を挿入",
-    "settings_caption_insert_no_artist_tooltip": (
-        "補正後のキャプションに作家タグがない場合、作家位置に @no-artist を入れます。"
-        "キャプションシャッフルの境界としてのみ使われ、トークン化前に除去されます。"
-    ),
-    "settings_caption_validate_artist_tags": "作家タグを DB で検証",
-    "settings_caption_validate_artist_tags_tooltip": (
-        "有効にすると danbooru_tags_classified.csv で作家に分類された @タグだけを"
-        "作家位置へ移動します。無効なら @ で始まるタグを作家タグとして扱います。"
-    ),
-    "settings_group_match_frac": "グループ化の厳しさ:",
-    "settings_group_match_frac_tooltip": (
-        "データセットタブでグループ化を押したとき、2枚の画像をまとめるのに必要な"
-        "一致割合（0–1）です。高いほど厳密で整ったグループになります。既定値 0.25。"
-    ),
-    "settings_group_cell_match": "グループ化のセル一致:",
-    "settings_group_cell_match_tooltip": (
-        "データセットのグループ化でセル単位の一致とみなすコサイン下限（0–1）です。"
-        "高いほどセル一致の基準が厳しくなります。既定値 0.93。"
-    ),
     "settings_theme": "テーマ:",
     "settings_theme_tooltip": (
         "インターフェース全体のカラーテーマです。即時に反映され、設定画面を閉じると"
@@ -506,7 +363,6 @@ STRINGS: dict[str, str] = {
     "report_issue": "問題を報告",
     "report_issue_tooltip": "ブラウザで GitHub Issue トラッカーを開きます",
     "visit_github": "GitHub ページを開く",
-    "open_in_system_viewer": "システムビューアで開く",
     # Models dialog
     "models_title": "モデルのダウンロード",
     "models_intro": "学習 / 推論の実行に必要な重みをパック単位で表示します。「初回セットをダウンロード」で Anima の重み 3 点、PE、CJK 語彙パック(v2 から既定で有効)、タガーのチェックポイント、タグ DB を取得します。SAM3(マスキング)と OCR は「キュレーション」タブの任意パックです。ファイルは models/ に保存されます。",

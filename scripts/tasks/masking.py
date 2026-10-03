@@ -10,29 +10,22 @@ under the project root.
 
 Every stage runs as an ``anime_tools`` **request object**
 (``anime_tools.masking.requests.{SamMaskRequest,MergeMasksRequest}``) through
-``_common.execute_stage``: in-process under a daemon job (every GUI run, and
-``make daemon-run ARGS="tasks.py mask"``), so one SAM3 load is shared by every
+``_common.execute_stage``: in-process under a daemon job (``make daemon-run
+ARGS="tasks.py mask"``), so one SAM3 load is shared by every
 rule pass and the package's ``_progress`` heartbeat keeps a quiet model load from
 tripping the daemon's stall watchdog; a ``python -m`` child per stage from a plain
 shell.
 
-Where the rules come from:
+The rules come from ``configs/sam_mask.yaml``: a flat ``masks`` list
+(``ROLE:KIND:VALUE`` regions) or a ``rules:`` list routed by ``path_pattern``,
+plus the optional ``run_sam`` switch. A pre-0.6.4 ``prompts`` /
+``focus_prompts`` pair still reads (``library.config.sam_masks``). Every knob
+absent from the config falls back to the package's request default; the trainer
+carries no literal of its own. The GUI does not mask — that is the
+``anime_tools`` panel's.
 
-- **The GUI** sends its SAM rule cards as ``masks_sam`` stage forms
-  (``PREPROCESS_STAGES_JSON``, one ``{dest: value}`` per card, each carrying
-  its own ``path_pattern`` scope); ``_common.request_from_form`` builds each
-  ``SamMaskRequest`` through the package's ``build_argv`` with the resized
-  tree and a per-card tempdir as the roots.
-- **The CLI** reads ``configs/sam_mask.yaml``: a flat ``masks`` list
-  (``ROLE:KIND:VALUE`` regions) or a ``rules:`` list routed by
-  ``path_pattern``, plus the optional ``run_sam`` switch. A pre-0.6.4
-  ``prompts`` / ``focus_prompts`` pair still reads
-  (``library.config.sam_masks``). Every knob absent from the config falls
-  back to the package's request default; the trainer carries no literal of
-  its own.
-
-Either way a rule becomes one SAM pass into its own temp dir; the merge
-step's pixel-min union composes them (ignore regions unioned).
+Each rule becomes one SAM pass into its own temp dir; the merge step's
+pixel-min union composes them (ignore regions unioned).
 """
 
 from __future__ import annotations
@@ -45,8 +38,6 @@ from ._common import (
     ROOT,
     _path,
     execute_stage,
-    gui_stage_values,
-    request_from_form,
     stage_by_id,
 )
 
@@ -193,26 +184,6 @@ def _sam_request(image_dir: Path, out_dir: Path, rule: dict, path_pattern: str |
         raise SystemExit(f"SAM mask rule {rule!r}: {exc}") from exc
 
 
-def _sam_request_from_form(image_dir: Path, tmp_root: Path, form: dict):
-    """The ``SamMaskRequest`` one GUI rule card runs as: the card's values
-    through the package's ``build_argv`` (its ``__post_init__`` — "nothing to
-    mask" — fires here), the resized tree as the ``dst`` root, this card's
-    own tempdir as the mask root (``<tmp>/masks_sam``), the card's
-    ``path_pattern`` as the run's scope (blank / ``*`` = everything). A
-    pre-0.6.4 card (a job queued before the upgrade) is migrated first."""
-    from library.config.sam_masks import migrate_card
-
-    pattern = str(form.get("path_pattern") or "").strip()
-    return request_from_form(
-        "masks_sam",
-        migrate_card(form),
-        roots={"dst": str(image_dir)},
-        settings={"path_pattern": pattern if pattern and pattern != "*" else None},
-        mask_root=str(tmp_root),
-        recursive=True,
-    )
-
-
 def _merge_request(sources: list[str], output_dir: Path):
     from anime_tools.masking.requests import MergeMasksRequest
 
@@ -232,16 +203,9 @@ def _execute(stage_id: str, req) -> None:
 
 
 def _sam_requests(resized_dir: Path, tmp_root: Path) -> list:
-    """Every SAM pass this run makes: one per GUI rule card when the job
-    carries the forms, else one per ``sam_mask.yaml`` rule (``run_sam: false``
-    → none). Built up front so validation fires before the first model load."""
-    forms = gui_stage_values().get("masks_sam")
-    if isinstance(forms, list):
-        return [
-            _sam_request_from_form(resized_dir, tmp_root / f"sam{i}", form)
-            for i, form in enumerate(forms)
-            if isinstance(form, dict)
-        ]
+    """Every SAM pass this run makes: one per ``sam_mask.yaml`` rule
+    (``run_sam: false`` → none). Built up front so validation fires before the
+    first model load."""
     cfg = _load_mask_config()
     if not _config_flag(cfg, "run_sam"):
         return []
@@ -257,7 +221,7 @@ def cmd_mask(extra):
     if extra:
         raise SystemExit(
             f"make mask takes no ARGS ({' '.join(extra)!r}); the knobs live in "
-            f"{SAM_CONFIG.relative_to(ROOT)} (or the GUI's Preprocessing tab)."
+            f"{SAM_CONFIG.relative_to(ROOT)}."
         )
     resized_dir = _resized_image_dir()
     mask_output_dir = _scoped_mask_output_dir(resized_dir)

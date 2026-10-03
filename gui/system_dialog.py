@@ -387,8 +387,7 @@ class ModelsDialog(_StreamingDialog):
     """
 
     # Emitted after any successful (exit_code 0) download run so live tabs can
-    # pick up freshly-installed assets — e.g. ImageViewerTab reloading the
-    # danbooru tag KB — without an app restart.
+    # pick up freshly-installed assets without an app restart.
     models_changed = Signal()
 
     def __init__(self, parent=None):

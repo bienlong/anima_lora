@@ -62,9 +62,9 @@ STAGE_IDS: tuple[str, ...] = ("resize", "correct")
 curation stages are the ``anime_tools`` panel's)."""
 
 STAGE_VALUES_ENV = "PREPROCESS_STAGES_JSON"
-"""The env var a preprocess / mask job receives its stage forms in: a JSON
-``{stage_id: {dest: value}}`` (``masks_sam``: a *list* of dicts, one per rule
-card). Read by ``scripts/tasks/_common.gui_stage_values``."""
+"""The env var a preprocess job receives its stage forms in: a JSON
+``{stage_id: {dest: value}}``. Read by
+``scripts/tasks/_common.gui_stage_values``."""
 
 # ``--apply`` is the run bar's Dry-run / Apply choice, not a form row: the
 # package's ``build_argv`` sets it from its ``apply`` keyword regardless of

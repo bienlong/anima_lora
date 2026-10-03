@@ -900,8 +900,8 @@ def execute_stage(stage, req) -> None:
 
 
 STAGE_VALUES_ENV = "PREPROCESS_STAGES_JSON"
-"""The GUI's stage forms, one ``{dest: value}`` dict per stage id
-(``masks_sam``: a list, one per rule card), as JSON. Written by
+"""The GUI's stage forms (``resize``, ``correct``), one ``{dest: value}`` dict
+per stage id, as JSON. Written by
 ``gui/tabs/preprocess/tab.py::preprocess_env`` (``stage_form.STAGE_VALUES_ENV``
 is the same name); ``request_from_form`` turns one into a request."""
 

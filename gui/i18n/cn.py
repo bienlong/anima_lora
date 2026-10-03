@@ -13,7 +13,6 @@ STRINGS: dict[str, str] = {
     "tab_easycontrol": "EasyControl",
     "tab_turbo": "Turbo",
     "tab_experimental": "实验功能",
-    "tab_images": "数据集Viewer",
     "tab_merge": "合并",
     "tab_queue": "队列状况",
     "tab_preprocess": "预处理",
@@ -92,12 +91,28 @@ STRINGS: dict[str, str] = {
     "preprocess_status_caches": "缓存 — latents: {lat}, text: {te}, PE: {pe}",
     "preprocess_status_masks": "蒙版: {masks}",
     "preprocess_status_no_resized": "尚无已调整大小的图像。",
-    "preprocess_no_resized_to_process": (
-        "post_image_dataset/resized/ 中没有已调整大小的图像。请先运行预处理"
-        "（调整大小）——蒙版和分组都基于已调整大小的图像。"
-    ),
     "preprocess_open_dataset_dir": "打开cache文件夹",
     "preprocess_open_dataset_dir_tooltip": "在文件管理器中打开 post_image_dataset/ 文件夹（已调整大小的图像 + 缓存）。",
+    "preprocess_status_export_stale": "anime_tools 有比上次 Export 更新的编辑",
+    "preprocess_resize_preview": "resize 预览",
+    "preprocess_resize_preview_tooltip": "按源图像显示在下方设置下 resize 选择的 bucket 和 tier，以及裁剪区域。不会修改源文件。",
+    "preprocess_resize_preview_title": "resize 预览",
+    "preprocess_resize_preview_refresh": "刷新",
+    "preprocess_resize_preview_col_image": "图像",
+    "preprocess_resize_preview_col_source": "源尺寸",
+    "preprocess_resize_preview_col_bucket": "Bucket",
+    "preprocess_resize_preview_col_tier": "Tier",
+    "preprocess_resize_preview_col_kept": "保留",
+    "preprocess_resize_preview_summary": "{n} 张图像，{buckets} 个 bucket",
+    "preprocess_resize_preview_skipped": "已排除 {n} 张",
+    "preprocess_resize_preview_unreadable": "{n} 张无法读取",
+    "preprocess_resize_preview_empty": "{path} 下没有图像",
+    "preprocess_open_anime_tools": "打开 anime_tools",
+    "preprocess_open_anime_tools_tooltip": "在此仓库上打开 anime_tools 整理面板（标注、打标、蒙版、分组、排除）。在面板中整理并运行 Export（sidecars only），然后在这里运行调整大小和缓存。",
+    "preprocess_anime_tools_reused": "anime_tools 已在运行 → {url}",
+    "preprocess_anime_tools_started": "正在启动 anime_tools……（日志: {log}）",
+    "preprocess_anime_tools_failed": "无法启动 anime_tools: {err}",
+    "preprocess_anime_tools_root_warning": "面板保存的根目录指向 post_image_dataset/ 内部（{roots}），其阶段会覆盖训练器的目录树。请在面板的 ⚙ 设置（或 {path}）中清空它们。",
     "preprocess_clear_scope_cache": "删除当前 scope 缓存",
     "preprocess_clear_scope_cache_tooltip": "删除当前 path_scope 对应的已调整大小图像和 LoRA 缓存文件夹。",
     "preprocess_clear_scope_cache_all_scope": "无 scope / 全部",
@@ -273,137 +288,8 @@ STRINGS: dict[str, str] = {
     "soup_ft_args": "微调参数",
     "soup_ft_args_tip": "转发给每次微调运行的额外 CLI 参数，例如 --network_dim 32 --max_train_epochs 8。",
     "soup_path_pattern_required": "Soup 需要一个路径模式（例如 'sincos/*' 或 'art_a/*|art_b/*'）。",
-    "n_images": "{n} 张图像",
-    # ImageViewerTab
+    # Shared labels
     "directory": "目录:",
-    "dataset_reload": "重新加载",
-    "dataset_reload_tooltip": "重新扫描当前目录并刷新图像列表和选择。",
-    "dataset_open_dir": "打开",
-    "dataset_open_dir_tooltip": "在系统文件管理器中打开当前目录。",
-    "dataset_add_dir": "添加目录……",
-    "dataset_add_dir_tooltip": "选择另一个目录并在本次会话中加入下拉框。",
-    "dataset_add_dir_picker": "选择要添加的目录",
-    "dataset_add_dir_already": "目录 '{name}' 已在列表中。",
-    "dataset_search_placeholder": "搜索文件名……",
-    "dataset_sort_asc_tooltip": "升序 A→Z (点击反转)",
-    "dataset_sort_desc_tooltip": "降序 Z→A (点击反转)",
-    "dataset_group_first_tooltip": "分组优先排序：将已分组的图片跨文件夹汇总到最上方显示（未分组图片在下方以文件夹树显示）。",
-    "dataset_view_group": "分组",
-    "dataset_view_tree": "树形",
-    "dataset_group_sort_tooltip": "每个分组内部的图片排序方式。方向键导航会跟随左侧树中的显示顺序。",
-    "dataset_group_sort_name": "按名称",
-    "dataset_group_sort_name_desc": "按名称倒序",
-    "dataset_group_sort_size": "按文件大小",
-    "dataset_group_sort_size_desc": "按文件大小倒序",
-    "dataset_group_sort_resolution": "按分辨率",
-    "dataset_group_sort_resolution_desc": "按分辨率倒序",
-    "dataset_mask_overlay": "显示蒙版覆盖",
-    "dataset_resize_preview": "显示 resize 预览",
-    "dataset_resize_preview_tooltip": "显示预处理 target_res 选择的中心裁剪区域和最终 bucket。不会修改源文件。",
-    "dataset_resize_preview_label": "{width}x{height} @ {edge}",
-    "dataset_preprocess_skip_short": "跳过 (S)",
-    "dataset_preprocess_skip_tooltip": "将当前图像标记为在预处理 resize 阶段跳过。不会修改源文件。",
-    "dataset_preprocess_clear_short": "清除 (F)",
-    "dataset_preprocess_clear_tooltip": "清除当前图像的使用/跳过/移动标记。可通过右侧菜单清除所有标记。",
-    "dataset_preprocess_clear_all": "清除所有标记",
-    "dataset_preprocess_save": "保存预处理决定",
-    "dataset_preprocess_save_tooltip": "将逐图像使用/跳过/移动决定保存为预处理使用的 JSON。移动标记即使在文件实际移动前也会从预处理中排除。",
-    "dataset_preprocess_saved": "预处理决定已保存:\n{path}",
-    "dataset_preprocess_decision_use": "预处理决定: 使用",
-    "dataset_preprocess_decision_skip": "预处理决定: 跳过",
-    "dataset_preprocess_decision_move": "当前状态: 已标记为移动",
-    "dataset_image_meta_empty": "无图像",
-    "dataset_image_meta": "{width}x{height} · {size} · {fmt}",
-    "dataset_image_meta_resize": "调整大小 {width}x{height} @ {edge}",
-    "dataset_delete": "排除 (D)",
-    "dataset_delete_tooltip": "排除用 Delete 或 D 键标记的图像：其缩放副本、说明文字 sidecar、蒙版和 OCR 会移动到 post_image_dataset/_excluded/，该处的台账会让它们保持在缩放范围之外。源图像仍留在 image_dataset/ 中。可用“恢复…”还原。",
-    "dataset_delete_confirm_title": "排除图像",
-    "dataset_delete_confirm_body": "要排除 {n} 张图像吗？其工作区文件将移动到 post_image_dataset/_excluded/，源图像保持不变。",
-    "dataset_delete_failed": "部分图像无法排除:\n{err}",
-    "dataset_restore": "恢复…",
-    "dataset_restore_tooltip": "将已排除的图像恢复：从 post_image_dataset/_excluded/ 台账中选择条目，其文件将返回缩放、蒙版和 OCR 目录树。",
-    "dataset_restore_title": "恢复已排除的图像",
-    "dataset_restore_body": "选择要放回流程的图像。",
-    "dataset_restore_failed": "无法恢复:\n{err}",
-    "dataset_restore_kept": "部分文件因当前路径已被占用而仍留在 _excluded/ 中:\n{items}",
-    "dataset_group_label": "分组 {n} — {size} 张",
-    "dataset_group_rebuild": "分组",
-    "dataset_group_rebuild_tooltip": "按 PE-Spatial 视觉相似度对图像分组 (按作者). 在任务队列中运行.",
-    "dataset_group_queued": "分组任务已加入队列 (任务 {job_id}). 完成后重新加载此目录即可看到分组.",
-    "n_images_filtered": "{shown} / {total} 张图像",
-    "caption": "标注:",
-    "no_caption": "(无标注)",
-    "caption_save": "保存",
-    "caption_revert": "还原",
-    "caption_autotag": "自动标注",
-    "caption_autotag_tooltip": (
-        "对该图像运行 Anima Tagger，并将预测的标签追加到标注中。"
-        "模型在首次使用时自动下载；确认结果后保存即可写入 .txt 文件。"
-    ),
-    "caption_autotag_running": "自动标注中……",
-    "caption_autotag_loading": "正在加载标注器……",
-    "caption_autotag_ready": "标注器已加载 · 待命",
-    "caption_autotag_busy": (
-        "GPU 正被其他任务（训练 / 预处理 / 分组）占用。完成后再重试自动标注。"
-    ),
-    "caption_autotag_error": "自动标注失败：{err}",
-    "caption_autotag_empty": "标注器未为该图像返回任何标签。",
-    "caption_autotag_model_missing": (
-        "Anima Tagger 模型尚未下载。请在「模型」窗口中获取 Tagger 包，或在终端运行 "
-        "`make download-tagger-model`，然后重新点击自动标注。"
-    ),
-    "caption_autotag_model_gated": (
-        "其 caformer_b36 主干位于受限仓库 — 请先登录 HuggingFace 并在以下页面"
-        "同意其条款：\n{url}"
-    ),
-    "caption_autotag_open_models": "打开模型窗口",
-    "caption_autotag_open_gated": "打开模型页面",
-    "caption_correct": "校正顺序",
-    "caption_correct_tooltip": (
-        "使用 danbooru_tags_classified.csv 将标注按 ANIMA 推荐顺序重排，"
-        "并可按设置插入 @no-artist。"
-    ),
-    "caption_correct_visible": "校正当前列表",
-    "caption_correct_visible_confirm": "要校正当前列表中的 {n} 个标注吗？",
-    "caption_correct_visible_done": "已校正 {n} 个标注。",
-    "caption_correct_visible_failed": "已校正 {n} 个标注。\n\n失败:\n{err}",
-    "caption_correct_no_change": "没有需要校正的更改。",
-    "tag_kb_posts": "{n} 个帖子",
-    "tag_kb_unknown": "{tag} — 不在标签知识库中",
-    "caption_correct_db_missing": (
-        "找不到 danbooru_tags_classified.csv。\n\n"
-        "请在模型窗口下载 Danbooru 标签 DB，或将它放到以下位置:\n{paths}"
-    ),
-    "caption_correct_db_failed": "标签 DB 加载失败: {err}",
-    "caption_versions": "历史……",
-    "caption_variant_training": "训练标注",
-    "caption_variants_tooltip": (
-        "预览预处理生成的训练用标注变体（打乱 / 标签丢弃 / 身份随机化）。"
-        "只读，不影响可编辑的训练标注。"
-    ),
-    "caption_dirty_marker": " *",
-    "caption_diff_stats": "(+{add} / −{rem})",
-    "caption_diff_clean": "(无变化)",
-    "caption_save_failed": "保存标注失败: {err}",
-    "caption_unsaved_title": "未保存的标注",
-    "caption_unsaved_body": "标注编辑尚未保存。切换前先保存吗?",
-    "caption_versions_title": "标注历史 — {name}",
-    "caption_versions_empty": "(无历史版本)",
-    "caption_versions_restore": "恢复所选版本",
-    "caption_versions_close": "关闭",
-    "caption_no_history": "此标注尚无历史记录。",
-    "caption_guideline_html": (
-        "<b>顺序:</b> 评级 → 人数 → 角色 (作品) → 作品 → "
-        "<span style='color:#c9a227;'>@艺术家</span> → 内容标签。"
-        "区域子分节: 在前一个标签末尾加上 <code>.</code>,然后用 "
-        "<span style='color:#5e8eb0;'>On the&nbsp;…,</span> 或 "
-        "<span style='color:#5e8eb0;'>In the&nbsp;…,</span> 开始下一节。"
-        "首个 <code>@艺术家</code> 标签 (含) 之前的顺序保持固定,"
-        "其后的标签在各分节内打乱。"
-        "<b>没有艺术家?</b> 用 "
-        "<span style='color:#c9a227;'>@no-artist</span> 作为占位符 —— "
-        "它仅起到锚定打乱边界的作用,会在 tokenize 之前剥离,因此不会进入模型。"
-    ),
     # Language
     "language": "语言:",
     # Settings dialog
@@ -411,31 +297,6 @@ STRINGS: dict[str, str] = {
     "settings_btn_tooltip": "应用设置 —— 语言、偏好设置、MCP 服务器注册",
     "settings_title": "设置",
     "settings_prefs_header": "偏好设置",
-    "settings_autotag_confidence": "自动打标置信度:",
-    "settings_autotag_confidence_tooltip": (
-        "在打标器各标签阈值之上额外应用的概率下限（0–1）。"
-        "数值越高，保留的标签越少但越可靠。默认 0.50。"
-    ),
-    "settings_caption_insert_no_artist": "校正时插入 @no-artist",
-    "settings_caption_insert_no_artist_tooltip": (
-        "如果校正后的标注没有作者标签，则在作者位置插入 @no-artist。"
-        "它只用于固定标注打乱边界，并会在分词前移除。"
-    ),
-    "settings_caption_validate_artist_tags": "用 DB 验证作者标签",
-    "settings_caption_validate_artist_tags_tooltip": (
-        "启用后，只有在 danbooru_tags_classified.csv 中分类为作者的 @标签"
-        "才会移动到作者位置。关闭时，所有 @开头的标签都视为作者标签。"
-    ),
-    "settings_group_match_frac": "分组严格度:",
-    "settings_group_match_frac_tooltip": (
-        "在数据集标签页点击分组时，将两张图片归为一组所需的匹配比例（0–1）。"
-        "数值越高，分组越严格、越干净。默认 0.25。"
-    ),
-    "settings_group_cell_match": "分组单元匹配:",
-    "settings_group_cell_match_tooltip": (
-        "数据集分组时判定单元匹配的余弦下限（0–1）。数值越高，单元匹配越严格。"
-        "默认 0.93。"
-    ),
     "settings_theme": "主题:",
     "settings_theme_tooltip": (
         "界面整体配色主题，立即生效；关闭设置窗口时会重建窗口以完全重绘。"
@@ -491,7 +352,6 @@ STRINGS: dict[str, str] = {
     "report_issue": "提交问题",
     "report_issue_tooltip": "在浏览器中打开 GitHub 问题追踪",
     "visit_github": "访问 GitHub 页面",
-    "open_in_system_viewer": "在系统查看器中打开",
     # Models dialog
     "models_title": "下载模型",
     "models_intro": "训练 / 推理运行所需的权重, 按包分组显示。「下载首次运行套件」会获取 3 个 Anima 权重、PE、CJK 词表包(v2 起默认启用)、标注器检查点与标签 DB。SAM3(遮罩)与 OCR 是「策展」标签页中的可选包。文件保存于 models/ 下。",

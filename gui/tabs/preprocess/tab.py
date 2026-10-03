@@ -60,6 +60,7 @@ from gui import (
     merged_gui_variant_preset,
     variant_path,
 )
+from gui import anime_tools_panel
 from gui import daemon as gui_daemon
 from gui._job_mixin import DaemonJobMixin
 from gui._paths import read_gui_settings
@@ -71,6 +72,7 @@ from gui.tabs.preprocess.captions import CaptionEditingSection
 from gui.tabs.preprocess.image_prep import ImagePrepSection
 from gui.tabs.preprocess.knobs import (
     DEFAULT_PREPROCESS_PATH_PATTERN,
+    DEFAULT_SOURCE_IMAGE_DIR,
     DEFAULT_TE_TAG_DROPOUT,
     PREPROCESS_ONLY_KEYS,
     load_values,
@@ -104,8 +106,8 @@ LORA_CACHE_DIR = default_lora_cache_dir()
 MASK_DIR = default_mask_dir()
 
 # Legacy widget attribute names → (section attribute, key). Kept for
-# one release so tests and ``image_tab`` that reach into ``tab.<widget>`` stay
-# valid; new code should go through ``tab.values()`` / ``tab.stage_values()``
+# one release so tests and the resize preview that reach into ``tab.<widget>``
+# stay valid; new code should go through ``tab.values()`` / ``tab.stage_values()``
 # or the owning section instead. A key is a knob-table key for a trainer row
 # (``knob_widgets``) or a stage dest (``widgets``).
 _WIDGET_ALIASES: dict[str, tuple[str, str]] = {
@@ -190,6 +192,7 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         # Kept alive here because setStyle() does not take ownership.
         self._split_styles: list[SplitButtonStyle] = []
         self._variant: str | None = None
+        self._resize_preview = None  # ResizePreviewDialog, built on first open
         self._loading_variant = False
         self._dirty = False
 
@@ -288,11 +291,21 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         self.status_lbl.setStyleSheet(f"color:{tok('text')}; padding: 2px 0;")
         row.addWidget(self.status_lbl)
         row.addStretch()
+        self.resize_preview_btn = QToolButton()
+        self.resize_preview_btn.setText("🔍 " + t("preprocess_resize_preview"))
+        self.resize_preview_btn.setToolTip(t("preprocess_resize_preview_tooltip"))
+        self.resize_preview_btn.clicked.connect(self._open_resize_preview)
+        row.addWidget(self.resize_preview_btn)
         self.open_dataset_btn = QToolButton()
         self.open_dataset_btn.setText("📂 " + t("preprocess_open_dataset_dir"))
         self.open_dataset_btn.setToolTip(t("preprocess_open_dataset_dir_tooltip"))
         self.open_dataset_btn.clicked.connect(self._open_dataset_dir)
         row.addWidget(self.open_dataset_btn)
+        self.open_anime_tools_btn = QToolButton()
+        self.open_anime_tools_btn.setText("🖌 " + t("preprocess_open_anime_tools"))
+        self.open_anime_tools_btn.setToolTip(t("preprocess_open_anime_tools_tooltip"))
+        self.open_anime_tools_btn.clicked.connect(self._open_anime_tools)
+        row.addWidget(self.open_anime_tools_btn)
         self.clear_scope_cache_btn = QToolButton()
         self.clear_scope_cache_btn.setText(t("preprocess_clear_scope_cache"))
         self.clear_scope_cache_btn.setToolTip(t("preprocess_clear_scope_cache_tooltip"))
@@ -417,6 +430,8 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         self.set_stage_values(self._load_stage_values(meta))
         if hasattr(self, "status_lbl"):
             self._refresh_status()
+        if self._resize_preview is not None and self._resize_preview.isVisible():
+            self._resize_preview.refresh()
         self._clear_dirty()
 
     @staticmethod
@@ -481,7 +496,7 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         finally:
             self._loading_variant = False
 
-    # Thin delegates kept for the tests / image_tab that call them directly.
+    # Thin delegates kept for the tests that call them directly.
     def _set_target_res_widget(self, values) -> None:
         self.image_section.set_target_res(values)
 
@@ -565,6 +580,8 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
             ),
             t("preprocess_status_masks", masks=mask_n),
         ]
+        if anime_tools_panel.export_is_stale():
+            lines.append(t("preprocess_status_export_stale"))
         self.status_lbl.setText("  |  ".join(lines))
 
     def _open_dataset_dir(self) -> None:
@@ -576,6 +593,46 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         if not target.is_dir():
             target = ROOT
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
+
+    def _open_resize_preview(self) -> None:
+        if self._resize_preview is None:
+            from gui.tabs.preprocess.resize_preview import ResizePreviewDialog
+
+            self._resize_preview = ResizePreviewDialog(self)
+        self._resize_preview.show()
+        self._resize_preview.raise_()
+        self._resize_preview.activateWindow()
+
+    def _open_anime_tools(self) -> None:
+        """Open the ``anime_tools`` curation panel on this checkout: seed its
+        settings (source tree, Export → sidecars only), then focus a running
+        server or start one."""
+        try:
+            seeded = anime_tools_panel.seed_settings(
+                self.values().get("source_image_dir") or DEFAULT_SOURCE_IMAGE_DIR
+            )
+            url = anime_tools_panel.find_running()
+            if url is not None:
+                QDesktopServices.openUrl(QUrl(url))
+                self.log.appendPlainText(t("preprocess_anime_tools_reused", url=url))
+            else:
+                log = anime_tools_panel.launch()
+                self.log.appendPlainText(t("preprocess_anime_tools_started", log=log))
+        except Exception as exc:  # noqa: BLE001 — surface any launch failure
+            QMessageBox.warning(
+                self, t("error"), t("preprocess_anime_tools_failed", err=exc)
+            )
+            return
+        if seeded.warnings:
+            QMessageBox.warning(
+                self,
+                t("preprocess_open_anime_tools"),
+                t(
+                    "preprocess_anime_tools_root_warning",
+                    roots=", ".join(seeded.warnings),
+                    path=seeded.path,
+                ),
+            )
 
     @staticmethod
     def _snapshot_path(snapshot: dict[str, object], key: str, default: Path) -> Path:

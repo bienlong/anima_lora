@@ -9,7 +9,6 @@ STRINGS: dict[str, str] = {
     "tab_easycontrol": "EasyControl",
     "tab_turbo": "Turbo",
     "tab_experimental": "Experimental",
-    "tab_images": "Dataset Viewer",
     "tab_merge": "Merge",
     "tab_queue": "Queue",
     "tab_preprocess": "Preprocessing",
@@ -96,12 +95,28 @@ STRINGS: dict[str, str] = {
     "preprocess_status_caches": "Caches — latents: {lat}, text: {te}, PE: {pe}",
     "preprocess_status_masks": "Masks: {masks}",
     "preprocess_status_no_resized": "No resized images yet.",
-    "preprocess_no_resized_to_process": (
-        "No resized images found in post_image_dataset/resized/. Run Preprocess "
-        "(resize) first — masking and grouping operate on the resized images."
-    ),
     "preprocess_open_dataset_dir": "Open cache folder",
     "preprocess_open_dataset_dir_tooltip": "Open the post_image_dataset/ folder (resized images + caches) in your file manager.",
+    "preprocess_status_export_stale": "anime_tools has edits newer than its last Export",
+    "preprocess_resize_preview": "Resize preview",
+    "preprocess_resize_preview_tooltip": "Per source image: the bucket and tier the resize picks under the settings below, and the crop it takes. Source files are not modified.",
+    "preprocess_resize_preview_title": "Resize preview",
+    "preprocess_resize_preview_refresh": "Refresh",
+    "preprocess_resize_preview_col_image": "Image",
+    "preprocess_resize_preview_col_source": "Source",
+    "preprocess_resize_preview_col_bucket": "Bucket",
+    "preprocess_resize_preview_col_tier": "Tier",
+    "preprocess_resize_preview_col_kept": "Kept",
+    "preprocess_resize_preview_summary": "{n} images in {buckets} buckets",
+    "preprocess_resize_preview_skipped": "{n} excluded",
+    "preprocess_resize_preview_unreadable": "{n} unreadable",
+    "preprocess_resize_preview_empty": "No images under {path}",
+    "preprocess_open_anime_tools": "Open anime_tools",
+    "preprocess_open_anime_tools_tooltip": "Open the anime_tools curation panel (captions, tagging, masks, grouping, exclusion) on this checkout. Curate there, run Export (sidecars only), then Resize and the caches here.",
+    "preprocess_anime_tools_reused": "anime_tools is already running → {url}",
+    "preprocess_anime_tools_started": "Starting anime_tools… (log: {log})",
+    "preprocess_anime_tools_failed": "Could not start anime_tools: {err}",
+    "preprocess_anime_tools_root_warning": "The panel's saved roots point into post_image_dataset/ ({roots}), so its stages would write over the trainer's tree. Clear them in the panel's ⚙ Settings (or in {path}).",
     "preprocess_clear_scope_cache": "Delete current-scope cache",
     "preprocess_clear_scope_cache_tooltip": "Delete resized images and LoRA cache folders for the current path_scope.",
     "preprocess_clear_scope_cache_all_scope": "no scope / all",
@@ -334,142 +349,8 @@ STRINGS: dict[str, str] = {
     "soup_ft_args": "Fine-tune args",
     "soup_ft_args_tip": "Extra CLI args forwarded to each fine-tune run, e.g. --network_dim 32 --max_train_epochs 8.",
     "soup_path_pattern_required": "Soup needs a path pattern (e.g. 'sincos/*' or 'art_a/*|art_b/*').",
-    "n_images": "{n} images",
-    # ImageViewerTab
+    # Shared labels
     "directory": "Directory:",
-    "dataset_reload": "Reload",
-    "dataset_reload_tooltip": "Re-scan the current directory and refresh the image list and selection.",
-    "dataset_open_dir": "Open",
-    "dataset_open_dir_tooltip": "Open the current directory in the system file manager.",
-    "dataset_add_dir": "Add directory…",
-    "dataset_add_dir_tooltip": "Pick another directory and add it to the dropdown for this session.",
-    "dataset_add_dir_picker": "Pick a directory to add",
-    "dataset_add_dir_already": "Directory '{name}' is already in the list.",
-    "dataset_search_placeholder": "Search filename…",
-    "dataset_sort_asc_tooltip": "Sort A→Z (click to reverse)",
-    "dataset_sort_desc_tooltip": "Sort Z→A (click to reverse)",
-    "dataset_group_first_tooltip": "Group-first ordering: float every group to the top, flattened across folders (ungrouped images follow below in the folder tree).",
-    "dataset_view_group": "Groups",
-    "dataset_view_tree": "Tree",
-    "dataset_group_sort_tooltip": "Sort order inside each group. Arrow-key navigation follows the visible tree order.",
-    "dataset_group_sort_name": "Name",
-    "dataset_group_sort_name_desc": "Name desc",
-    "dataset_group_sort_size": "File size",
-    "dataset_group_sort_size_desc": "File size desc",
-    "dataset_group_sort_resolution": "Resolution",
-    "dataset_group_sort_resolution_desc": "Resolution desc",
-    "dataset_mask_overlay": "Show mask overlay",
-    "dataset_resize_preview": "Show resize preview",
-    "dataset_resize_preview_tooltip": "Show the center-crop area and final bucket selected by preprocessing target_res. Source files are not modified.",
-    "dataset_resize_preview_label": "{width}x{height} @ {edge}",
-    "dataset_preprocess_skip_short": "Skip (S)",
-    "dataset_preprocess_skip_tooltip": "Mark the current image to be skipped by preprocess resize. Source files are not modified.",
-    "dataset_preprocess_clear_short": "Clear (F)",
-    "dataset_preprocess_clear_tooltip": "Clear the current image's use/skip/move mark. Use the right-side menu to clear all marks.",
-    "dataset_preprocess_clear_all": "Clear all marks",
-    "dataset_preprocess_save": "Save preprocess decisions",
-    "dataset_preprocess_save_tooltip": "Save per-image use/skip/move decisions as JSON for preprocessing. Move marks are excluded from preprocessing even before files are moved.",
-    "dataset_preprocess_saved": "Preprocess decisions saved:\n{path}",
-    "dataset_preprocess_decision_use": "Preprocess decision: use",
-    "dataset_preprocess_decision_skip": "Preprocess decision: skip",
-    "dataset_preprocess_decision_move": "Current state: marked to move",
-    "dataset_image_meta_empty": "No image",
-    "dataset_image_meta": "{width}x{height} · {size} · {fmt}",
-    "dataset_image_meta_resize": "Resize {width}x{height} @ {edge}",
-    "dataset_delete": "Exclude (D)",
-    "dataset_delete_tooltip": "Exclude the images marked with the Delete or D key: their resized copy, caption sidecars, mask and OCR move to post_image_dataset/_excluded/ and the ledger there keeps them out of resize. The source image stays in image_dataset/. Restore… puts them back.",
-    "dataset_delete_confirm_title": "Exclude images",
-    "dataset_delete_confirm_body": "Exclude {n} image(s)? Their workspace files move to post_image_dataset/_excluded/; the source images stay.",
-    "dataset_delete_failed": "Some images could not be excluded:\n{err}",
-    "dataset_restore": "Restore…",
-    "dataset_restore_tooltip": "Put excluded images back: pick entries from the post_image_dataset/_excluded/ ledger and their files return to the resized, mask and OCR trees.",
-    "dataset_restore_title": "Restore excluded images",
-    "dataset_restore_body": "Select the images to put back into the pipeline.",
-    "dataset_restore_failed": "Could not restore:\n{err}",
-    "dataset_restore_kept": "Some files stayed under _excluded/ because the live path is occupied again:\n{items}",
-    "dataset_group_label": "Group {n} — {size} imgs",
-    "dataset_group_rebuild": "Group",
-    "dataset_group_rebuild_tooltip": "Group images by PE-Spatial visual similarity (per-artist). Runs in the job queue.",
-    "dataset_group_queued": "Grouping queued (job {job_id}). Reload this directory when it finishes to see the groups.",
-    "n_images_filtered": "{shown} / {total} images",
-    "caption": "Caption:",
-    "no_caption": "(no caption)",
-    "caption_save": "Save",
-    "caption_revert": "Revert",
-    "caption_autotag": "Autotag",
-    "caption_autotag_tooltip": (
-        "Run the Anima Tagger on this image and append its predicted tags to "
-        "the caption. The model is downloaded automatically on first use; "
-        "review the result, then Save to write the .txt."
-    ),
-    "caption_autotag_running": "Autotagging…",
-    "caption_autotag_loading": "Loading tagger…",
-    "caption_autotag_ready": "Tagger loaded · ready",
-    "caption_autotag_busy": (
-        "The GPU is busy with another job (training / preprocessing / "
-        "grouping). Try autotagging again once it finishes."
-    ),
-    "caption_autotag_error": "Autotag failed: {err}",
-    "caption_autotag_empty": "The tagger returned no tags for this image.",
-    "caption_autotag_model_missing": (
-        "The Anima Tagger model is not downloaded yet. Open Models and fetch the "
-        "Tagger pack (or run `make download-tagger-model` in a terminal), then try "
-        "Autotag again."
-    ),
-    "caption_autotag_model_gated": (
-        "Its caformer_b36 backbone lives in a gated repository — sign in to "
-        "HuggingFace and accept the terms on this page first:\n{url}"
-    ),
-    "caption_autotag_open_models": "Open Models…",
-    "caption_autotag_open_gated": "Open the model page",
-    "caption_correct": "Correct order",
-    "caption_correct_tooltip": (
-        "Use danbooru_tags_classified.csv to reorder this caption into the "
-        "recommended ANIMA order, optionally inserting @no-artist."
-    ),
-    "caption_correct_visible": "Correct current list",
-    "caption_correct_visible_confirm": "Correct {n} caption(s) in the current list?",
-    "caption_correct_visible_done": "Corrected {n} caption(s).",
-    "caption_correct_visible_failed": "Corrected {n} caption(s).\n\nFailed:\n{err}",
-    "caption_correct_no_change": "No caption changes to apply.",
-    "tag_kb_posts": "{n} posts",
-    "tag_kb_unknown": "{tag} — not in the tag knowledge base",
-    "caption_correct_db_missing": (
-        "danbooru_tags_classified.csv was not found.\n\n"
-        "Download the Danbooru tag DB from the Models dialog, or place it here:\n{paths}"
-    ),
-    "caption_correct_db_failed": "Failed to load tag DB: {err}",
-    "caption_versions": "Versions…",
-    "caption_variant_training": "Training caption",
-    "caption_variants_tooltip": (
-        "Preview the train-time caption variants (shuffle / tag-dropout / "
-        "identity-randomize) written by preprocess. Read-only — the editable "
-        "training caption is unaffected."
-    ),
-    "caption_dirty_marker": " *",
-    "caption_diff_stats": "(+{add} / −{rem})",
-    "caption_diff_clean": "(no changes)",
-    "caption_save_failed": "Failed to save caption: {err}",
-    "caption_unsaved_title": "Unsaved caption",
-    "caption_unsaved_body": "You have unsaved caption edits. Save before switching?",
-    "caption_versions_title": "Caption history — {name}",
-    "caption_versions_empty": "(no prior versions)",
-    "caption_versions_restore": "Restore selected",
-    "caption_versions_close": "Close",
-    "caption_no_history": "No history yet for this caption.",
-    "caption_guideline_html": (
-        "<b>Order:</b> rating → count → character (series) → series → "
-        "<span style='color:#c9a227;'>@artist</span> → content tags. "
-        "Per-region sub-sections: end the previous tag with <code>.</code> and "
-        "start the next with <span style='color:#5e8eb0;'>On the&nbsp;…,</span> "
-        "or <span style='color:#5e8eb0;'>In the&nbsp;…,</span>. "
-        "Tags up to and including the first <code>@artist</code> are kept fixed; "
-        "everything after is shuffled within each section. "
-        "<b>No artist?</b> Drop in "
-        "<span style='color:#c9a227;'>@no-artist</span> as a placeholder — "
-        "it anchors the shuffle boundary the same way and is stripped before "
-        "tokenization, so it never reaches the model."
-    ),
     # Language
     "language": "Language:",
     # Settings dialog
@@ -477,31 +358,6 @@ STRINGS: dict[str, str] = {
     "settings_btn_tooltip": "Application settings — language, preferences, MCP server registration",
     "settings_title": "Settings",
     "settings_prefs_header": "Preferences",
-    "settings_autotag_confidence": "Autotag confidence:",
-    "settings_autotag_confidence_tooltip": (
-        "Extra probability floor (0–1) applied on top of the tagger's per-tag "
-        "thresholds. Higher = fewer, more confident tags. Default 0.50."
-    ),
-    "settings_caption_insert_no_artist": "Insert @no-artist during caption correction",
-    "settings_caption_insert_no_artist_tooltip": (
-        "If the corrected caption has no artist tag, insert @no-artist at the "
-        "artist position. It only anchors caption shuffle and is stripped before tokenization."
-    ),
-    "settings_caption_validate_artist_tags": "Validate artist tags with DB",
-    "settings_caption_validate_artist_tags_tooltip": (
-        "When enabled, only @tags classified as artists in danbooru_tags_classified.csv "
-        "move to the artist position. When disabled, any @tag is treated as an artist tag."
-    ),
-    "settings_group_match_frac": "Grouping tightness:",
-    "settings_group_match_frac_tooltip": (
-        "Inlier fraction (0–1) needed to group two Dataset images when you press "
-        "Group. Higher = tighter, cleaner groups. Default 0.25."
-    ),
-    "settings_group_cell_match": "Grouping cell match:",
-    "settings_group_cell_match_tooltip": (
-        "Per-cell cosine floor (0–1) for an inlier match during Dataset grouping. "
-        "Higher = stricter cell agreement. Default 0.93."
-    ),
     "settings_theme": "Theme:",
     "settings_theme_tooltip": (
         "Overall color theme for the interface. Applies immediately; the window "
@@ -561,7 +417,6 @@ STRINGS: dict[str, str] = {
     "report_issue": "Report Issue",
     "report_issue_tooltip": "Open the GitHub issue tracker in your browser",
     "visit_github": "Visit GitHub page",
-    "open_in_system_viewer": "Open in system viewer",
     # Models dialog
     "models_title": "Download Models",
     "models_intro": "The weights a training or inference run needs, grouped by pack. 'Download the first-run set' fetches the three Anima weights, PE, the CJK vocab pack (on by default since v2), the tagger checkpoint and the tag DB. SAM3 (masking) and OCR are opt-in packs on the Curation tab. Files are saved under models/.",
