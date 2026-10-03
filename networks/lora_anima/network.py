@@ -514,6 +514,8 @@ class LoRANetwork(_NetworkMetricsMixin, torch.nn.Module):
                 # DoRA / DoKr: hand the module its saved magnitude when
                 # rebuilding from a checkpoint (fresh training seeds from W0's
                 # row norms; load_state_dict overwrites either way).
+                if effective_module_class is DoRALoRAModule and cfg.dora_detach_norm:
+                    extra_kwargs["dora_detach_norm"] = True
                 if (
                     effective_module_class in (DoRALoRAModule, DoKrLoRAModule)
                     and cfg.dora_scales_dict

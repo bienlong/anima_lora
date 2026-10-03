@@ -16,6 +16,10 @@ use_cmmd = false
 # plain LoRA; slightly more VRAM. Saves as a ComfyUI-loadable DoRA file.
 use_dora = true
 rs_lora = false
+# 范数不进梯度图：速度与普通 LoRA 持平（实测 1.51 vs 1.48 秒/步）、显存
+# 从 15.9GB 降到 1GB。代价是范数对低秩方向的二阶梯度为零（社区常见近似）。
+# 改回 false = 标准 DoRA 语义，但速度慢一个量级。
+dora_detach_norm = true
 
 [variant]
 family = "lora"

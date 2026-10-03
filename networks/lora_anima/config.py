@@ -241,6 +241,9 @@ class LoRANetworkCfg:
     # See docs/methods/svd-down-lora.md.
     down_init: str = "kaiming"
 
+    # DoRA 范数 detach 开关：范数不进梯度图（速度≈普通 LoRA，牺牲范数对
+    # up/down 的二阶梯度）。默认 False（标准 DoRA 语义，速度慢一个量级）。
+    dora_detach_norm: bool = False
     # rs-LoRA: effective scale = alpha / sqrt(r) instead of alpha / r —
     # high-rank (>32) training keeps a sane update magnitude. Applied by
     # scaling the per-module alpha by sqrt(dim) at construction (network.py),
@@ -447,6 +450,7 @@ class LoRANetworkCfg:
         if lokr_factor != -1 and not use_lokr:
             logger.warning("lokr_factor set but use_lokr is off — ignored.")
         rs_lora = _as_bool(kwargs.get("rs_lora"))
+        dora_detach_norm = _as_bool(kwargs.get("dora_detach_norm"))
         # rs-LoRA applies wherever scale = alpha / lora_dim holds: the plain
         # two-GEMM family and the kron family alike (use_w2 LoKr forces
         # scale=1, which is rs-inert by construction).
@@ -785,6 +789,7 @@ class LoRANetworkCfg:
             use_ortho_init=use_ortho_init,
             down_init=down_init,
             rs_lora=rs_lora,
+            dora_detach_norm=dora_detach_norm,
             lokr_factor=lokr_factor,
             fera_fecl_weight=fera_fecl_weight,
             fera_num_bands=fera_num_bands,

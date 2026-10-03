@@ -15,11 +15,13 @@
 # saved file loads in stock ComfyUI without a converter.
 #
 # SPEED REALITY (measured, RTX 5060 Ti, 2.9B DiT, rank 8): plain LoRA
-# ~1.5 s/step; this DoRA ~30-40 s/step. The per-module full-weight norm
-# (out×in reduction + checkpoint recompute ×280 modules) is inherent to
-# eager DoRA — closing the gap needs fused kernels (LyCORIS triton route).
-# Use plain LoRA for day-to-day runs; DoRA when convergence quality is
-# worth an overnight run.
+# ~1.5 s/step; DoRA with the norm in the autograd graph ~30-40 s/step at
+# 15.9/16.3 GB VRAM — NOT FLOPs but allocator thrashing at the memory
+# ceiling (each module retains an 8MB V intermediate, 280 of them ≈ 2.2GB).
+# With ``dora_detach_norm = true`` (DoRA variant default) the norm leaves
+# the graph: 1.51 s/step at ~1 GB — parity with plain LoRA. Cost: the norm's
+# second-order gradient to the factors is dropped (a common community
+# approximation). Set the flag false for the strict paper semantics.
 
 import logging
 from typing import Dict
@@ -54,12 +56,14 @@ class DoRALoRAModule(LoRAModule):
         channel_scale=None,
         down_init="kaiming",
         dora_scale=None,
+        dora_detach_norm=False,
     ):
         if org_module.__class__.__name__ != "Linear":
             raise ValueError(
                 f"DoRA supports Linear targets only, got "
                 f"{org_module.__class__.__name__} at {lora_name}."
             )
+        self.detach_norm = bool(dora_detach_norm)
         super().__init__(
             lora_name,
             org_module,
@@ -101,6 +105,13 @@ class DoRALoRAModule(LoRAModule):
         return self.dora_scale.to(V.dtype).unsqueeze(1) / norms
 
     def _norm_scale(self, *, grad: bool) -> torch.Tensor:
+        if self.detach_norm:
+            # 范数不参与梯度：无 V 保留、无 checkpoint 段——速度与普通 LoRA
+            # 同级。代价：范数对 up/down 的二阶贡献为零（社区常见近似）。
+            with torch.no_grad():
+                return self._norm_scale_fn(
+                    self.lora_up.weight, self.lora_down.weight
+                ).detach()
         up_w = self.lora_up.weight if grad else self.lora_up.weight.detach()
         down_w = self.lora_down.weight if grad else self.lora_down.weight.detach()
         if grad and torch.is_grad_enabled():
