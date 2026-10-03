@@ -168,6 +168,7 @@ def _draw_scene(
             horizontal=horiz,
             tategaki=lettering,
             vert_forms=lettering,
+            keep_outline=True,
         )
         if drawn is None:
             continue

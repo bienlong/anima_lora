@@ -34,6 +34,13 @@ sizes, `reseed_recap`'s shares and `hp` bands, `fit`'s bubble sizing
 `vert_forms`), no window opening on `scene.NO_HEAD` or a small kana (`V_SMALL` — anchor's rule let ぁぃぅぇぉゎ through), plain grid captions. A
 3 % build lands every tier's median px on `run1003_reseed_anchor_fit`'s.
 
+Whole bubbles (10-03, after that build): the erase spares the bubble outline
+(`render_into_scene(keep_outline=True)` — the interior mask holds the
+outline, and the erase rectangle painted it away at its sides on 186 of
+2 690 scenes), and `pools.whole_bubbles` drops the scenes whose anchor
+bubble sits under `BUBBLE_EDGE_MIN` px from the canvas edge (500 of 2 480:
+the edge cuts the outline) or whose erase would leave the letters (15).
+
 Left out against the scale builder: the ！ / ？ marks and EN cells (the
 `anchor` read: singles lower, words tied), the band law's gate and its groups
 (each tier carries its band; `px_keep` is the size cut the gate made), the

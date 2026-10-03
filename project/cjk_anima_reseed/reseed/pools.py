@@ -95,7 +95,7 @@ def build_pools(rows: list, rng: random.Random) -> Pools:
         srng = random.Random(T.SEED + 47)
         inv.evals["single"] = sorted(srng.sample(singles, min(18, len(singles))))
 
-    scenes = load_scenes(T.SCENES, 0.0, 0, "", T.ONE_BUBBLE)
+    scenes = whole_bubbles(load_scenes(T.SCENES, 0.0, 0, "", T.ONE_BUBBLE))
     single_pools = set(T.SINGLE_SCENES.split(","))
 
     def single_ok(sc) -> bool:
@@ -109,7 +109,7 @@ def build_pools(rows: list, rng: random.Random) -> Pools:
     horiz = set(T.HORIZONTAL_SCENES.split(","))
     horiz_idx = {j for j, sc in enumerate(scenes) if sc["pool"] in horiz}
     n0 = len(scenes)
-    scenes += load_scenes(T.SMALL_POOL, 0.0, 0, "", "")
+    scenes += whole_bubbles(load_scenes(T.SMALL_POOL, 0.0, 0, "", ""))
     opt_in = {T.SMALL_POOL: set(range(n0, len(scenes)))}
     mono = mono_scenes(scenes)
     print(
@@ -130,6 +130,70 @@ def build_pools(rows: list, rng: random.Random) -> Pools:
         mono=mono,
         shapes=ShapePool(T.SHAPES, T.SEED),
     )
+
+
+# ----------------------------------------------------------------------------
+# whole bubbles: the outline inside the canvas, the erase sparing it
+
+
+def bubble_check(sc: dict) -> dict:
+    """``edge``: the least px between an anchor bubble's interior and the
+    canvas edge (``None``: no anchor bubble); ``left``: the largest share of
+    an anchor's letter ink the outline-keeping erase leaves."""
+    import numpy as np
+    from common.bubble import ring_median
+    from common.render.scene import erase_paint, outline_ink
+    from PIL import Image
+
+    arr = np.asarray(Image.open(sc["file"]).convert("RGB")).copy()
+    H, W = arr.shape[:2]
+    bubbles = sc.get("bubbles") or [None] * len(sc["regions"])
+    edge = [min(b[0], b[1], W - b[2], H - b[3]) for b in bubbles if b]
+    left = 0.0
+    for tb, reg, bub in zip(sc["boxes_anchor"], sc["regions"], bubbles):
+        paint = erase_paint(arr, tb, reg, open_ok=bub is None)
+        if paint is None:
+            continue
+        x0, y0, x1, y1 = (int(v) for v in tb)
+        box = np.zeros((H, W), dtype=bool)
+        box[y0:y1, x0:x1] = True
+        fill = np.array(ring_median(arr, tb), dtype=np.int16)
+        ink = box & (np.abs(arr.astype(np.int16) - fill).max(axis=2) > 24)
+        kept = outline_ink(arr, tb, paint) & ink
+        left = max(left, float(kept.sum() / max(1, ink.sum())))
+    return {"edge": min(edge) if edge else None, "left": round(left, 4)}
+
+
+def whole_bubbles(scenes: list) -> list:
+    """``scenes`` less those whose bubble the canvas cuts (``BUBBLE_EDGE_MIN``)
+    or whose erase would leave the letters (``ERASE_LEFT_MAX``)."""
+    from cjk_scale.paths import OUT
+
+    path = OUT / "experiments" / "scene_bubble_check.json"
+    cache = json.loads(path.read_text("utf-8")) if path.exists() else {}
+    miss = [s for s in scenes if s["file"] not in cache]
+    for s in miss:
+        cache[s["file"]] = bubble_check(s)
+    if miss:
+        path.write_text(json.dumps(cache, indent=0), encoding="utf-8")
+
+    def cut(s) -> bool:
+        e = cache[s["file"]]["edge"]
+        return e is not None and e < T.BUBBLE_EDGE_MIN
+
+    def left(s) -> bool:
+        return cache[s["file"]]["left"] > T.ERASE_LEFT_MAX
+
+    n_cut = sum(map(cut, scenes))
+    n_left = sum(left(s) and not cut(s) for s in scenes)
+    keep = [s for s in scenes if not cut(s) and not left(s)]
+    print(
+        f"whole bubbles: {len(keep)} / {len(scenes)} scenes kept — {n_cut} cut by "
+        f"the canvas (< {T.BUBBLE_EDGE_MIN} px), {n_left} the erase leaves "
+        f"lettered (> {T.ERASE_LEFT_MAX:g})",
+        flush=True,
+    )
+    return keep
 
 
 # ----------------------------------------------------------------------------

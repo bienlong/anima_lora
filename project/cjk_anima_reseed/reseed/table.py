@@ -38,6 +38,12 @@ HORIZONTAL_FRAC = 0.3  # of the windows: a left-to-right line, marked in the cap
 MONO_SHARE = 0.1  # of every scene draw: a greyscale / line-art scene (user, 10-03)
 COLOR_MIN = 0.08  # under this share of coloured pixels a scene is mono
 SHAPES = "448,512:2,448x512,512x448"  # a lone glyph's canvas
+# a scene kept: every anchor bubble's interior this far (px) inside the
+# canvas (closer, the outline is cut by the edge), and the outline-keeping
+# erase taking the letters (at most this share of their ink left: past it the
+# ring-median fill is not the bubble's — a dark bubble, a box over its edge)
+BUBBLE_EDGE_MIN = 15
+ERASE_LEFT_MAX = 0.3
 
 GRIDS = "2x2:1,3x3:1,2x3:1,3x2:1"
 LONE = "1x1:1"

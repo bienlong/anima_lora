@@ -163,14 +163,18 @@ def region_capacity(
     return max(v_cap, h_cap)
 
 
-def erase_paint(arr, tb, reg, open_ok: bool = False):
+def erase_paint(arr, tb, reg, open_ok: bool = False, keep_outline: bool = False):
     """Bool HxW mask of what the composite erase paints for one anchor: the
     usable region ∪ the text box padded by a quarter of its size (detector
     boxes run tight), clipped to the bubble interior (flood mask, letter
     holes filled — a rectangle's corners would poke past a round outline).
     ``None`` when no bubble mask is found — unless ``open_ok`` (bubble-less
     frames such as `sfx`): then the plain rectangle is painted, a flat
-    ring-median patch on the scene."""
+    ring-median patch on the scene.
+    ``keep_outline`` (opt-in, reseed 2026-10-03; off = every data dir of
+    record): the paint spares ``outline_ink`` — the interior holds the
+    outline, so a rectangle reaching it painted the outline away at its
+    sides (186 of 2 690 scenes; s1 450, s1s 126)."""
     import numpy as np
 
     H, W = arr.shape[:2]
@@ -185,7 +189,29 @@ def erase_paint(arr, tb, reg, open_ok: bool = False):
     paint[ey0:ey1, ex0:ex1] = True
     if m is not None:
         paint &= bubble_interior(m)
+    if keep_outline:
+        paint &= ~outline_ink(arr, tb, paint)
     return paint
+
+
+def outline_ink(arr, tb, paint, tol: int = 24, grow: float = 0.25):
+    """Bool HxW: the ink under ``paint`` that is not the anchor's letters —
+    every 8-connected component of pixels over ``tol`` from the ring-median
+    fill that reaches outside the text box grown by ``grow`` of its size (a
+    bubble outline, its tail, art the rectangle crosses)."""
+    import cv2
+    import numpy as np
+
+    H, W = arr.shape[:2]
+    fill = np.array(ring_median(arr, tb), dtype=np.int16)
+    ink = (np.abs(arr.astype(np.int16) - fill).max(axis=2) > tol).astype(np.uint8)
+    _, lab = cv2.connectedComponents(ink, connectivity=8)
+    x0, y0, x1, y1 = (int(v) for v in tb)
+    gx, gy = int((x1 - x0) * grow) + 2, int((y1 - y0) * grow) + 2
+    near = np.zeros((H, W), dtype=bool)
+    near[max(0, y0 - gy) : min(H, y1 + gy), max(0, x0 - gx) : min(W, x1 + gx)] = True
+    out = np.unique(lab[~near & (ink > 0)])
+    return np.isin(lab, out[out > 0]) & paint
 
 
 def erase_uniform(arr, tb, reg, tol: int = 24, width: int = 3) -> float:
@@ -381,6 +407,7 @@ def render_into_scene(
     horizontal: bool = False,
     tategaki: bool = False,
     vert_forms: bool = False,
+    keep_outline: bool = False,
 ):
     """Erase every anchor bubble's usable region (plus the text box padded by
     a quarter of its size — detector boxes run tight) with the bubble's
@@ -413,6 +440,8 @@ def render_into_scene(
     、。 and brackets are the font's vertical alternates
     (``_draw_vertical_glyph``'s ``vert``) — off, a small kana in a column is
     the horizontal glyph, at the bottom of its cell.
+    ``keep_outline`` (opt-in, reseed 2026-10-03; off = every data dir of
+    record): the erase spares the bubble outline (``erase_paint``).
 
     ``ref_text`` (ΔFM, plan_synth2): a sibling of the same glyph count drawn
     by the *same* fit — same erase, font, size, line lengths, positions,
@@ -435,7 +464,9 @@ def render_into_scene(
     for tb, reg, bub in zip(scene["boxes_anchor"], scene["regions"], bubbles):
         fill = ring_median(arr, tb)
         fills.append(fill)
-        paint = erase_paint(arr, tb, reg, open_ok=bub is None)
+        paint = erase_paint(
+            arr, tb, reg, open_ok=bub is None, keep_outline=keep_outline
+        )
         if paint is None:
             return None
         arr[paint] = fill
@@ -445,7 +476,9 @@ def render_into_scene(
         scene.get("speck_regions", ()),
         scene.get("speck_bubbles", ()),
     ):
-        paint = erase_paint(arr, tb, reg, open_ok=bub is None)
+        paint = erase_paint(
+            arr, tb, reg, open_ok=bub is None, keep_outline=keep_outline
+        )
         if paint is None:
             return None
         arr[paint] = ring_median(arr, tb)
