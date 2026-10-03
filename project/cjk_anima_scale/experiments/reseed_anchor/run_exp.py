@@ -22,7 +22,8 @@ first for its canvases only (user, 10-01). This arm (user, 10-03) is
   swap rule), dropped from the pool before the draw.
 
 **The base's text** (``--variant anchor``, the default; ``fix`` = the
-lettering alone, the control against `reseed_recap`):
+lettering alone, the control against `reseed_recap`; ``fit`` = ``anchor``
+with the small text sized to its bubble, below):
 - ``MARK_FRAC`` of the window draws take a window that a ！ / ？ closes in
   the corpus (the run's last 2–6 glyphs before the mark, the pool's rules),
   with the mark: drawn in the bubble, written in the caption. The pack's
@@ -36,6 +37,24 @@ lettering alone, the control against `reseed_recap`):
   deck deals one glyph fewer. Its clause is the cell's plain one
   (``On the middle, text reads as "SNOW".``); the cell is outside the
   item's kind and px (the band is the kana cells').
+
+``--variant fit`` (user, 10-03: the 32 px glyph and the 18 px windows read
+small in their bubbles — ink 0.25 / 0.20 of the bubble's width against
+``bubble1_52``'s 0.52 — and a lone glyph need not sit at the centre):
+- ``bubble1_32`` fills ``FIT_FILL`` of the bubble's one-glyph fit (was
+  0.2–0.4), its scenes s1 + s1w + the small-bubble pool ``s1s`` (one-glyph
+  fit median 59 px against s1's 74);
+- ``bubbleN_18`` takes ``s1s`` too, and only scenes whose region across the
+  text is at most its px / ``CROSS_MIN`` (``fill_min`` reads the column's
+  length alone);
+- the lone tiers drop ``cell_jitter``: the glyph anywhere its room allows
+  (the caption names no position);
+- greyscale / line-art scenes (`polish_seed`'s ``--color`` test: under
+  ``COLOR_MIN`` of the pixels coloured; 48 % of the pools) take
+  ``MONO_SHARE`` of every scene draw (user, 10-03), the coloured ones the
+  rest.
+``s1s`` is opt-in (`recipes.add_scene_pool`): the other tiers draw the
+scenes they drew.
 
 Both are text the base writes from its own rows, frozen here, in the items
 the cold rows train on — does the base's own text beside them raise what
@@ -59,6 +78,8 @@ Legs, as `reseed_recap`'s:
       --legs train read read_plain"
     # the lettering alone
     … --label fix --variant fix --legs data recap train read read_plain
+    # anchor + the small text fitted to its bubble
+    … --label fit_data --variant fit --legs data recap
 """
 
 from __future__ import annotations
@@ -89,12 +110,21 @@ MARK_FRAC = 0.3  # of the window draws: a window a ！ / ？ closes, with the ma
 EN_FRAC = 0.5  # of the multi-cell grids: one cell an EN word
 MARKS = {"！": "！", "!": "！", "？": "？", "?": "？"}  # corpus mark → the drawn one
 LETTERING = {"tategaki": True, "vert_forms": True}
+FIT_POOL = "s1s"  # the small-bubble scene pool (README § Scene pools)
+FIT_FILL = [0.5, 0.8]  # bubble1_32: of the bubble's one-glyph fit (was 0.2–0.4)
+CROSS_MIN = 0.3  # bubbleN_18: font px / the region across the text
+MONO_SHARE = 0.1  # of a scene draw: a greyscale / line-art scene
+COLOR_MIN = 0.08  # polish_seed's: a scene under this share of coloured pixels is mono
+COLOR_CACHE = OUT / "experiments" / "scene_colorful.json"  # polish_seed's cache
 
 
 def table(base: tuple, lone: str, variant: str, en_words: list) -> tuple:
     """`reseed_recap`'s table with the lettering on its `bubbleN` tiers and,
-    for ``anchor``, the marks on them and the EN cell on its multi-cell grids."""
-    anchor = variant == "anchor"
+    for ``anchor`` / ``fit``, the marks on them and the EN cell on its
+    multi-cell grids; ``fit`` also sizes ``bubble1_32`` / ``bubbleN_18`` to
+    their bubbles and lets the lone glyph off the centre."""
+    anchor = variant in ("anchor", "fit")
+    fit = variant == "fit"
     out = []
     for g in base:
         ts = []
@@ -104,7 +134,14 @@ def table(base: tuple, lone: str, variant: str, en_words: list) -> tuple:
                 extra = LETTERING | ({"mark_frac": MARK_FRAC} if anchor else {})
             elif t.recipe == "grid" and t.params["grids"] != lone and anchor:
                 extra = {"en_frac": EN_FRAC, "en_words": list(en_words)}
-            ts.append(dataclasses.replace(t, params=t.params | extra))
+            params = t.params | extra
+            if fit and t.name == "bubble1_32":
+                params |= {"fill": list(FIT_FILL), "scene_pools": [FIT_POOL]}
+            elif fit and t.name == "bubbleN_18":
+                params |= {"scene_pools": [FIT_POOL], "cross_min": CROSS_MIN}
+            elif fit and t.recipe == "grid" and t.params["grids"] == lone:
+                params = {k: v for k, v in params.items() if k != "cell_jitter"}
+            ts.append(dataclasses.replace(t, params=params))
         out.append(dataclasses.replace(g, tiers=tuple(ts)))
     return tuple(out)
 
@@ -138,6 +175,32 @@ def marked_windows(glyphs: set, lines, held, length: tuple, heads: set) -> list:
     return sorted(out)
 
 
+def colorful(file: str) -> float:
+    """`polish_seed.colorful`: the share of a 128² thumbnail's pixels with
+    HSV saturation and value over 0.15."""
+    import numpy as np
+    from PIL import Image
+
+    im = (
+        np.asarray(Image.open(file).convert("RGB").resize((128, 128)), np.float32) / 255
+    )
+    mx, mn = im.max(-1), im.min(-1)
+    sat = (mx - mn) / np.maximum(mx, 1e-3)
+    return float(((sat > 0.15) & (mx > 0.15)).mean())
+
+
+def mono_scenes(scenes: list) -> set:
+    """Indices of the greyscale / line-art scenes (``COLOR_CACHE`` filled
+    for any scene it lacks)."""
+    cache = json.loads(COLOR_CACHE.read_text("utf-8")) if COLOR_CACHE.exists() else {}
+    miss = [s["file"] for s in scenes if s["file"] not in cache]
+    for f in miss:
+        cache[f] = colorful(f)
+    if miss:
+        COLOR_CACHE.write_text(json.dumps(cache, indent=0), encoding="utf-8")
+    return {j for j, s in enumerate(scenes) if cache[s["file"]] < COLOR_MIN}
+
+
 def prepare(variant: str):
     """`builder.build`'s ``prepare``: the head rule on the window pool, and
     (``anchor``) the marked windows on ``pools.marked``."""
@@ -167,7 +230,20 @@ def prepare(variant: str):
                 "per_glyph_median": n[len(n) // 2],
             },
         }
-        if variant == "anchor":
+        if variant == "fit":
+            from cjk_scale.recipes import add_scene_pool
+
+            stats["scene_pool"] = add_scene_pool(pools, FIT_POOL)
+            pools.mono = mono_scenes(pools.scenes)
+            pools.mono_share = MONO_SHARE
+            by = Counter(s["pool"] for s in pools.scenes)
+            mono = Counter(pools.scenes[j]["pool"] for j in pools.mono)
+            stats["mono"] = {
+                "share": MONO_SHARE,
+                "color_min": COLOR_MIN,
+                "by_pool": {k: f"{mono[k]}/{n}" for k, n in by.items()},
+            }
+        if variant in ("anchor", "fit"):
             lines = [
                 ln.split("\t")[0]
                 for ln in Path(phrase_file()).read_text(encoding="utf-8").splitlines()
@@ -239,7 +315,7 @@ def main():
         default=["data"],
         choices=["data", "recap", "train", "read", "read_plain"],
     )
-    p.add_argument("--variant", default="anchor", choices=["anchor", "fix"])
+    p.add_argument("--variant", default="anchor", choices=["anchor", "fix", "fit"])
     p.add_argument("--workers", type=int, default=None)
     p.add_argument("--dry_run", action="store_true")
     args = p.parse_args()
@@ -247,7 +323,9 @@ def main():
     GL = load_experiment("grid_lone")
     RR = load_experiment("reseed_recap")
     en_words = list(load_experiment("sigma_split").EN_GRID_POOL)
-    data_run = f"run1003_{NAME}" + ("" if args.variant == "anchor" else "_fix")
+    data_run = f"run1003_{NAME}" + (
+        "" if args.variant == "anchor" else f"_{args.variant}"
+    )
     rc, rows = RR.run_config()
     rc = dataclasses.replace(rc, name=data_run)
     tbl = table(RR.table(GS, GL), GL.LONE, args.variant, en_words)
@@ -265,7 +343,7 @@ def main():
         + (
             f"; marks {MARK_FRAC} of the windows, an EN word in {EN_FRAC} of the "
             f"multi-cell grids ({len(en_words)} words)"
-            if args.variant == "anchor"
+            if args.variant != "fix"
             else ""
         )
         + f"; data {data_dir}; {budget}",
@@ -325,9 +403,9 @@ def main():
             f"{RR.ARM}_hp": OUT / "experiments" / f"{RR.ARM}_hp",
             RR.SRC_RUN: OUT / RR.SRC_RUN,
         }
-        other = "fix" if args.variant == "anchor" else "anchor"
-        if (OUT / "experiments" / f"{ARM}_{other}" / "trained.pt").exists():
-            arms[f"{ARM}_{other}"] = OUT / "experiments" / f"{ARM}_{other}"
+        for other in sorted({"anchor", "fix", "fit"} - {args.variant}):
+            if (OUT / "experiments" / f"{ARM}_{other}" / "trained.pt").exists():
+                arms[f"{ARM}_{other}"] = OUT / "experiments" / f"{ARM}_{other}"
         metrics["read_plain"] = GL.read_plain(arms, "all")
     write_result(
         run_dir,

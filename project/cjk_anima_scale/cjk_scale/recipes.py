@@ -115,6 +115,15 @@ class Pools:
         default_factory=list
     )  # weighted glyph pool over ``windows``
     used: Counter = field(default_factory=Counter)  # scene index → items drawn
+    # pool tag → scene indices only a tier naming the tag in ``scene_pools``
+    # draws (`add_scene_pool`, reseed_anchor ``fit``); empty, every recipe
+    # draws as before
+    opt_in: dict = field(default_factory=dict)
+    # scene indices that are greyscale / line art, and the share of a scene
+    # draw they take (None: drawn as any scene — reseed_anchor ``fit`` sets
+    # both)
+    mono: set = field(default_factory=set)
+    mono_share: float | None = None
     decks: dict = field(default_factory=dict)
     balanced: dict = field(default_factory=dict)
     _n_tokens: dict = field(default_factory=dict)
@@ -402,6 +411,25 @@ def _context_line_ok(piece_ok, tokq, context: Path):
 # scene recipes
 
 
+def add_scene_pool(pools: Pools, tag: str) -> dict:
+    """Append the kept scenes of ``scenes_<tag>`` to ``pools.scenes`` as an
+    opt-in pool: only a tier whose ``scene_pools`` names ``tag`` draws them
+    (the other tiers' candidates — and draws — are unchanged). Returns the
+    stats for ``build.json``."""
+    from data.synth import load_scenes
+
+    got = load_scenes(tag, 0.0, 0, "", "")
+    n0 = len(pools.scenes)
+    pools.scenes.extend(got)
+    pools.opt_in[tag] = set(range(n0, len(pools.scenes)))
+    return {"pool": tag, "scenes": len(got)}
+
+
+def _opted(pools: Pools, p: dict) -> set:
+    """The opt-in scenes tier params ``p`` names (``scene_pools``)."""
+    return set().union(*(pools.opt_in[t] for t in p.get("scene_pools", ())))
+
+
 def _cuts(pools: Pools, text: str) -> list:
     """Line cuts at Qwen piece boundaries: a row's vocab is never split."""
     from data.inventory import pieces as qpieces
@@ -463,6 +491,8 @@ def _draw_scene(
     fill_min: float = 0.0,
     tategaki: bool = False,
     vert_forms: bool = False,
+    extra: set = frozenset(),
+    cross_min: float = 0.0,
 ):
     """Text first, then a scene whose capacity holds it (one column when
     enough scenes do), weighted ``1 / (1 + uses)`` — the probe's
@@ -476,7 +506,12 @@ def _draw_scene(
     goes to small bubbles instead of floating in a big one; no such scene
     is a miss (``None``, the recipe re-draws). ``tategaki`` / ``vert_forms``
     are ``render_into_scene``'s (a column's turned marks on its axis; the
-    font's vertical forms). Returns an ``Item`` or ``None``."""
+    font's vertical forms). ``extra``: opt-in scenes (`add_scene_pool`) this
+    draw may take beside the default candidates. ``cross_min`` (with a
+    ``target_px``): only scenes whose region across the text — its width
+    for a column, its height for a line — is at most ``target_px /
+    cross_min`` (``fill_min`` reads the text's length only, so a short
+    column floats in a wide bubble). Returns an ``Item`` or ``None``."""
     from common.render.flat import pick_font
     from common.render.scene import region_capacity, render_into_scene
     from data.synth import scene_caption
@@ -488,6 +523,10 @@ def _draw_scene(
         cands = list(pools.single_idx)
     elif horiz:
         cands = list(pools.horiz_idx)
+    elif pools.opt_in:
+        held = set().union(*pools.opt_in.values())
+        cands = [j for j in range(len(pools.scenes)) if j not in held]
+        cands += sorted(extra)
     else:
         cands = range(len(pools.scenes))
 
@@ -510,12 +549,25 @@ def _draw_scene(
             / max(_fit_px(pools.scenes[j]["region"], n, vert, max_lines), 1e-6)
             >= fill_min
         ]
+    if target_px is not None and cross_min > 0:
+
+        def across(r):
+            return r[2] - r[0] if vert else r[3] - r[1]
+
+        fitting = [
+            j
+            for j in fitting
+            if target_px / max(across(pools.scenes[j]["region"]), 1) >= cross_min
+        ]
     if not fitting:
         return None
     cuts = _cuts(pools, text) if n > 1 else None
     pool, tries = list(fitting), []
     while pool and len(tries) < SCENE_TRIES:
-        j = rng.choices(pool, weights=[1.0 / (1 + pools.used[x]) for x in pool])[0]
+        ws = [1.0 / (1 + pools.used[x]) for x in pool]
+        if pools.mono_share is not None:
+            ws = _share_weights(pool, ws, pools.mono, pools.mono_share)
+        j = rng.choices(pool, weights=ws)[0]
         pool.remove(j)
         tries.append(j)
     for j in tries:
@@ -563,6 +615,16 @@ def _draw_scene(
     return None
 
 
+def _share_weights(pool: list, ws: list, mono: set, share: float) -> list:
+    """``ws`` rescaled so the ``mono`` scenes in ``pool`` carry ``share`` of
+    the draw and the rest ``1 - share`` (as drawn when one side is empty)."""
+    m = sum(w for x, w in zip(pool, ws) if x in mono)
+    c = sum(ws) - m
+    if not m or not c:
+        return ws
+    return [w * (share / m if x in mono else (1 - share) / c) for x, w in zip(pool, ws)]
+
+
 def _balanced_line(pools: Pools, rng: random.Random, kind: str) -> str | None:
     """A training line of ``kind``, least-drawn first (``--text_draw balanced``)."""
     lines = pools.phrase.get(kind) or []
@@ -579,8 +641,9 @@ def bubble1(pools: Pools, rng: random.Random, p: dict):
     """One glyph in a scene bubble, captioned alone. ``fill`` a number: the
     bubble fit (was ``scene_single``). ``fill = [lo, hi]`` with ``glyph_px``:
     the glyph at line px, in a bubble whose one-glyph fit it fills lo–hi of
-    (was ``scene_single_small``, the count tier — Stage B, byte-faithful).
-    One rng order for both: the glyph, then the px."""
+    (was ``scene_single_small``, the count tier — Stage B, byte-faithful);
+    ``scene_pools`` (opt-in) adds those `add_scene_pool` scenes to that
+    tier's candidates. One rng order for both: the glyph, then the px."""
     # `digraphs = true`: the small-kana digraphs ride along (kind multi — the
     # gate keeps them only where a multi row holds the stage band)
     pool = pools.singles + (pools.digraphs if p.get("digraphs") else [])
@@ -591,9 +654,16 @@ def bubble1(pools: Pools, rng: random.Random, p: dict):
         import dataclasses
 
         lo, hi = (float(x) for x in f)
+        max_ar = float(DATA["single_max_ar"])
+
+        def ar_ok(r):
+            w, h = r[2] - r[0], r[3] - r[1]
+            return max_ar <= 0 or max(w, h) <= max_ar * max(1, min(w, h))
+
+        extra = {j for j in _opted(pools, p) if ar_ok(pools.scenes[j]["region"])}
         ok = {
             j
-            for j in pools.single_idx
+            for j in pools.single_idx | extra
             if lo
             <= target / max(_fit_px(pools.scenes[j]["region"], 1, True), 1e-6)
             <= hi
@@ -695,7 +765,9 @@ def bubbleN(pools: Pools, rng: random.Random, p: dict):
     ！ / ？ closes in the corpus, the mark drawn and captioned with it (the
     pack's encode fold sends it to the base's ``!`` / ``?``); a glyph with
     none keeps an unmarked window. ``tategaki`` / ``vert_forms``: the
-    column's lettering (``render_into_scene``)."""
+    column's lettering (``render_into_scene``). ``scene_pools`` /
+    ``cross_min`` (opt-in, reseed_anchor ``fit``): `_draw_scene`'s ``extra``
+    / ``cross_min``."""
     keys = pools.window_keys or list(pools.windows)
     key = rng.choice(keys)
     pool = pools.windows[key]
@@ -717,6 +789,8 @@ def bubbleN(pools: Pools, rng: random.Random, p: dict):
         fill_min=float(p.get("fill_min", 0)),
         tategaki=bool(p.get("tategaki")),
         vert_forms=bool(p.get("vert_forms")),
+        extra=_opted(pools, p),
+        cross_min=float(p.get("cross_min", 0)),
     )
     if item is None:
         return None
