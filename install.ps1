@@ -285,7 +285,7 @@ or launch from the desktop shortcut (which does not inherit Conda's PATH).
 # visible; a launch failure on a headless box just falls back to the shortcut.
 Say 'launching the Anima LoRA GUI'
 try {
-  Start-Process -FilePath 'uv' -ArgumentList 'run', '--no-sync', 'python', 'tasks.py', 'gui' -WorkingDirectory (Resolve-Path '.').Path -WindowStyle Hidden
+  Start-Process -FilePath 'uv' -ArgumentList 'run', '--no-sync', 'python', 'tasks.py', 'gui' -WorkingDirectory (Resolve-Path '.').Path
 } catch {
   Say 'GUI launch skipped; start it later with: python tasks.py gui'
 }

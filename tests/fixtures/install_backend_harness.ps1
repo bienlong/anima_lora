@@ -40,10 +40,13 @@ function Start-Process {
   Invoke-TestUv 'launch' $ArgumentList
 }
 
+# Parse the same string we slice: ParseFile on Windows PowerShell 5.1 reads a
+# BOM-less UTF-8 file as ANSI, so its offsets drift past any non-ASCII char.
+$source = [System.IO.File]::ReadAllText($Installer)
 $tokens = $null
 $parseErrors = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseFile(
-  $Installer, [ref]$tokens, [ref]$parseErrors
+$ast = [System.Management.Automation.Language.Parser]::ParseInput(
+  $source, [ref]$tokens, [ref]$parseErrors
 )
 if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
 $syncAssignment = @($ast.EndBlock.Statements | Where-Object {
@@ -51,6 +54,5 @@ $syncAssignment = @($ast.EndBlock.Statements | Where-Object {
   $_.Left.Extent.Text -eq '$SyncArgs'
 })
 if ($syncAssignment.Count -ne 1) { throw 'expected one backend sync argument assignment' }
-$source = [System.IO.File]::ReadAllText($Installer)
 & ([scriptblock]::Create($source.Substring($syncAssignment[0].Extent.StartOffset)))
 ConvertTo-Json -InputObject @($script:Calls) -Depth 5 -Compress
