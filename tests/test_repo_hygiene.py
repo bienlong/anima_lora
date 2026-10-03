@@ -22,3 +22,24 @@ def test_no_tracked_symlinks():
         if line.startswith("120000")
     ]
     assert not links, f"tracked symlinks would break release extraction: {links}"
+
+
+def test_lock_has_no_out_of_tree_path_sources():
+    """`make update`, install.sh and install.ps1 all run a flagless `uv sync`,
+    which validates every lock entry — including non-default groups. A path
+    source outside the repo (the old `../anime_tools` dev group) makes that
+    sync fail on every machine without the sibling checkout, leaving new code
+    on an old venv. Test unreleased sibling code with PYTHONPATH instead."""
+    import tomllib
+
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    outside = [
+        f"{pkg['name']} -> {src.get('editable') or src.get('directory') or src.get('path')}"
+        for pkg in lock["package"]
+        if (src := pkg.get("source", {}))
+        and any(
+            str(src.get(k, "")).startswith("..")
+            for k in ("editable", "directory", "path")
+        )
+    ]
+    assert not outside, f"uv.lock references paths outside the repo: {outside}"

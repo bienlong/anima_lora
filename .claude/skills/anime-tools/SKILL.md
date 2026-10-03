@@ -65,7 +65,7 @@ add the trainer-side wrapper + a contract-test row here.
 ## The pin
 
 A **git dependency, not PyPI**: `pyproject.toml` pins a **release tag** (`tag = "vX.Y.Z"`)
-under `[tool.uv.sources]` via the default-on `anime-tools-git` group — cut with the
+under `[tool.uv.sources]` (a plain project dependency) — cut with the
 package's `release` skill (version bump → annotated tag → `release.yml`).
 
 **The trainer `.venv` holds the pinned copy, not `../anime_tools`.** An edit in the
@@ -80,8 +80,10 @@ the trainer root.
   own sources, so a torch index pinned upstream collides with the trainer's
   `rocm-windows` group at `uv lock`. Any upstream torch source must be
   extra/group-conditioned so a consumer never sees it.
-- **Live dev loop** against the checkout: `uv sync --no-group anime-tools-git --group
-  anime-tools-dev` (they conflict by design).
+- **Testing an unreleased change**: `PYTHONPATH=../anime_tools` (it shadows
+  site-packages). There is deliberately no path-source dev group — a `../anime_tools`
+  path source lands in `uv.lock`, and then a flagless `uv sync` (the updater,
+  `install.sh` / `install.ps1`) fails on every machine without the sibling checkout.
 - **Smoke an unpushed change on the GPU**: submit with
   `DaemonClient.submit_command(argv=["-m", ...], extra_env={"PYTHONPATH":
   "/home/sorryhyun/anima/anime_tools"})` — `PYTHONPATH` matches none of the daemon's
