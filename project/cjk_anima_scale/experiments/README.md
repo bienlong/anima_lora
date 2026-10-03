@@ -244,6 +244,17 @@ table is `../README.md` § Item pools, and `builder.tier_of` reads both.
   35; singles official 8 vs 14. Both far under `retrain_kana` (plain words
   official 33, singles 47). On the sheets the two arms draw the same scenes
   and banners. `fix` not trained.
+- `stick_scale/` — the trained rows' shared mean ("stick") rescaled per
+  family, the per-row residuals kept, no training: `run_exp.py --rows seed`
+  (0930 seed, kana + kanji sticks, s 0.75 … 0 on `sent` seed 0 against the
+  routed floor) and `--rows anchor` (`reseed_anchor`'s 166 kana rows, s 0.9 /
+  1.0 / 1.1 on the 16 kana keys, paired against s = 1.0), on `shared_dir`'s
+  `Rows`; `geometry.py` (CPU) reads the cold kana rows in row space (cos to
+  the seeds, exposure / σ per row, T5, stick and spikes). Ran 2026-10-03
+  (`results/20261003-1252-st0/`, `…-1312-sta0/`, `…-1315-geo/`) → a shorter
+  stick costs identity and keeps the repeats (0930: ≤ 1 edit 45 → 25 → 11 →
+  2 → 0 of 92, dup 40 → 44–53); ±10 % on the anchor rows is noise. Reads:
+  `../../cjk_anima_reseed/reports/stick_2026_10_03.md`.
 - `grad_identity/` — the band law on the training gradient, no training
   (`conflict`'s plumbing): the grid_44 items, the 81 hiragana rows cold at
   the pack rows, σ swept 0.2–0.95 with one ε per item × σ. Pass 1 swaps the
