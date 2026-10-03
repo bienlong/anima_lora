@@ -74,11 +74,12 @@ class DoKrLoRAModule(LoKrModule):
     # -- weight math --------------------------------------------------------
 
     def _norm_scale(self) -> torch.Tensor:
-        """``s = m / ‖W0 + scale·kron‖_row`` → (out,)。
+        """``s = m / ‖W0 + scale·kron‖_row`` → (out, 1)。
 
-        detach 分支（DoKr 变体默认）：范数块状分解（无大矩阵拼接、无图内
-        保留），m 保持在图内照常训练；严格分支走旧的 materializing 路径
-        （梯度精确但慢一个量级，与 DoRA 严格模式同款权衡）。
+        两个分支都实测过（5060 Ti, rank 8）：materializing 严格路径
+        70-105s/步，快于块状 detach 分支的 140s/步——detach 仅作为语义
+        变体保留，默认关闭。DoKr 整体慢于 LoRA/DoRA 是 Kronecker 方向的
+        固有代价（等效全量级更新），非实现问题。
 
         注意 `_row_norms` 返回一维 (out,)——这里必须保持一维除法：早年
         `unsqueeze(1) / 一维 norms` 会广播成 (out, out) 方阵（每模块
