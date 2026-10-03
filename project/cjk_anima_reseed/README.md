@@ -8,7 +8,7 @@ The JA vocab pack's rows re-seeded cold. Why: `motivation2.md`; the reads:
 | file | what |
 |---|---|
 | `run.py` | front door: `run.py <run> data [--frac f] \| train` |
-| `configs/<run>.toml` | the run: `rows` (data.vocabs specs, single glyphs), `read` (held out of the windows), `seed` (`"0921"` / `"0930"`), `steps_per_row` |
+| `configs/<run>.toml` | the run: `rows` (data.vocabs specs, single glyphs), `read` (held out of the windows), `seed` (`"0921"` / `"0930"`), `steps_per_row`, optional `shares` (% of the items per tier, Σ 100) |
 | `reseed/table.py` | **the table**: one row per tier — recipe, share, σ band, glyph px, `px_keep` — and the scene knobs |
 | `reseed/recipes.py` | `bubble1` / `bubbleN` / `grid` |
 | `reseed/pools.py` | rows, scenes (+ the `s1s` pool, mono weighting), the windowed word pool |

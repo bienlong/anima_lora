@@ -2,7 +2,7 @@
 ``eval.json``, ``vocabs.json``, ``windows.json``, ``build.json``,
 ``sheet_<tier>.png``), in one pass::
 
-    for each tier t of TABLE (n = ITEMS_PER_ROW × rows × t.share × frac):
+    for each tier t of run.table() (n = ITEMS_PER_ROW × rows × t.share × frac):
         item = t.recipe()               # re-drawn on a render miss or a px outside t.px_keep
         item.tier, item.band = t.name, t.band
 
@@ -56,9 +56,10 @@ def build(run: Run, workers: int | None = None, frac: float = 1.0) -> Path:
     rng = random.Random(T.SEED)
     pools = build_pools(list(run.rows), rng)
     win = add_windows(pools, run.read, out)
+    table = run.table()
     plan = [
         (t, int(round(T.ITEMS_PER_ROW * len(pools.singles) * t.share * frac)))
-        for t in T.TABLE
+        for t in table
     ]
     print(
         f"build {run.name} → {out}: {len(pools.singles)} rows; "
@@ -117,7 +118,7 @@ def build(run: Run, workers: int | None = None, frac: float = 1.0) -> Path:
                 "px_keep": list(t.px_keep),
                 **t.params,
             }
-            for t in T.TABLE
+            for t in table
         ],
         "workers": workers,
         "tiers": report,
