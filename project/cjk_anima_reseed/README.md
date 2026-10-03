@@ -7,7 +7,8 @@ The JA vocab pack's rows re-seeded cold. Why: `motivation2.md`; the reads:
 
 | file | what |
 |---|---|
-| `run.py` | front door: `run.py <run> data [--frac f] \| train` |
+| `run.py` | front door: `run.py <run> data [--frac f] \| train \| read` (`read`: the plain read against `READ_AGAINST` → `results/`) |
+| `probe_grad.py` | the scale line's `grad_identity` pass 2 on tiers drawn here (`reports/grid_64_2026_10_03.md`) |
 | `configs/<run>.toml` | the run: `rows` (data.vocabs specs, single glyphs), `read` (held out of the windows), `seed` (`"0921"` / `"0930"`), `steps_per_row`, optional `shares` (% of the items per tier, Σ 100) |
 | `reseed/table.py` | **the table**: one row per tier — recipe, share, σ band, glyph px, `px_keep` — and the scene knobs |
 | `reseed/recipes.py` | `bubble1` / `bubbleN` / `grid` |
@@ -18,6 +19,7 @@ The JA vocab pack's rows re-seeded cold. Why: `motivation2.md`; the reads:
 .venv/bin/python project/cjk_anima_reseed/run.py kana data --frac 0.03   # sizes: sheet_<tier>.png
 .venv/bin/python project/cjk_anima_reseed/run.py kana data
 make daemon-run ARGS="project/cjk_anima_reseed/run.py kana train"
+make daemon-run ARGS="project/cjk_anima_reseed/run.py kana read"
 .venv/bin/python -m pytest project/cjk_anima_reseed/tests
 ```
 
@@ -46,3 +48,8 @@ Left out against the scale builder: the ！ / ？ marks and EN cells (the
 (each tier carries its band; `px_keep` is the size cut the gate made), the
 rebuild passes (`derive` / `reband`), the per-row draw weights (one
 `steps_per_row`), the piece / line tiers.
+
+`grid_64` (10-03): 65 px grids at σ 0.65–0.8, the band read off the
+gradient (`reports/grid_64_2026_10_03.md`), in the table at share 0 and
+last — a run's `shares` turns it on (`kana_big`); a share-0 tier is not
+drawn, so the runs before it build what they built.

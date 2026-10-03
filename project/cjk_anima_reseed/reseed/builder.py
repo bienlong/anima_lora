@@ -62,6 +62,7 @@ def build(run: Run, workers: int | None = None, frac: float = 1.0) -> Path:
         (t, int(round(T.ITEMS_PER_ROW * len(pools.singles) * t.share * frac)))
         for t in table
     ]
+    plan = [(t, n) for t, n in plan if n]  # a share-0 tier is not drawn
     print(
         f"build {run.name} → {out}: {len(pools.singles)} rows; "
         + ", ".join(f"{t.name} σ {t.band[0]:g}–{t.band[1]:g} {n}" for t, n in plan)

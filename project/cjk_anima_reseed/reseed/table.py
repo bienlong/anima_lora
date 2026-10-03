@@ -137,4 +137,8 @@ TABLE = (
             "scene_pools": [SMALL_POOL],
         },
     ),
+    # opt-in (share 0: a run's `shares` turns it on): the band read off the
+    # gradient at 65 px (`reports/grid_64_2026_10_03.md`: f's half point 0.82,
+    # ‖I‖'s low half 0.63); last, so a run without it draws what it drew
+    _grid("grid_64", 0.0, (0.65, 0.8), [66, 92], px_keep=(56, None)),
 )
