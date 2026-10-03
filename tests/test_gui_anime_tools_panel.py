@@ -88,12 +88,28 @@ def test_export_is_stale_tracks_workspace_edits_against_an_applied_export(tmp_pa
     assert P.export_is_stale(tmp_path)
 
 
-def test_launch_argv_opens_the_panel_on_this_home(tmp_path):
+def test_launch_argv_serves_this_home_and_exits_with_its_page(tmp_path):
     argv = P.launch_argv(tmp_path)
     assert argv[1:] == [
         "-m",
         "anime_tools.gui",
         "--home",
         str(tmp_path.resolve()),
-        "--open",
+        "--exit-with-window",
     ]
+
+
+def test_url_in_log_reads_only_past_the_offset(tmp_path):
+    log = tmp_path / "anime_tools_gui.log"
+    old = "anime_tools GUI → http://127.0.0.1:8790   (home: x)\n"
+    log.write_text(old, encoding="utf-8")
+    offset = log.stat().st_size
+    assert P.url_in_log(log, offset) is None
+    with open(log, "a", encoding="utf-8") as f:
+        f.write("port 8790 is in use; using 8791\n")
+        f.write("anime_tools GUI → http://127.0.0.1:8791   (home: x)\n")
+    assert P.url_in_log(log, offset) == "http://127.0.0.1:8791"
+    # A detached child on Windows writes the arrow in the console code page.
+    log.write_bytes("anime_tools GUI → http://127.0.0.1:8792\n".encode("cp949"))
+    assert P.url_in_log(log) == "http://127.0.0.1:8792"
+    assert P.url_in_log(tmp_path / "missing.log") is None

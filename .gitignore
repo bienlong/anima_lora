@@ -65,7 +65,7 @@ project/sigma_lowres/bench/probe1280_cache
 
 # anime_tools stage reports (report_dir defaults anchor on ANIMA_HOME = this checkout)
 workspace/
-# anime_tools panel settings (seeded by the GUI's Open anime_tools button)
+# anime_tools panel settings (seeded by the GUI's anime_tools tab)
 .anime_tools_gui.json
 
 # Path rules for a subdirectory go in a .gitignore inside it, not here: ripgrep

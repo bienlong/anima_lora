@@ -247,8 +247,8 @@ fallback) and always write the revised caption, so a master hand-edit reaches tr
 only through a caption stage run, and a dataset that skips every caption stage caches
 empty prompts.
 
-**The trainer GUI does not curate.** Its Preprocess tab's **Open anime_tools** button
-(`gui/anime_tools_panel.py`) launches the package's web panel on this checkout; the panel
+**The trainer GUI does not curate.** Its **anime_tools** tab (`gui/tabs/anime_tools_tab.py`
+over `gui/anime_tools_panel.py`) embeds the package's web panel on this checkout; the panel
 curates in `workspace/` and its Export — seeded to `sidecars_only` — publishes captions /
 masks / the revised master, never images. Order: Export → `make preprocess`.
 

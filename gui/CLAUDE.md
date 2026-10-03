@@ -3,7 +3,7 @@
 PySide6 (Qt6) desktop GUI. Root `CLAUDE.md` owns the training/config/daemon contracts this
 GUI drives. Most of the surface is `tabs/config_tab.py` and the `tabs/preprocess/` package.
 The GUI does not curate — captions, tagging, masks, grouping and exclusion are the
-`anime_tools` web panel's, launched from the Preprocess tab. For recipe-style changes
+`anime_tools` web panel's, embedded in the anime_tools tab. For recipe-style changes
 (new training field / variant / language, job submission, a new job-submitting tab,
 action-button colors) **load the `gui-changes` skill**.
 
@@ -36,11 +36,11 @@ must not appear.
   overlay toggles / ⚙ Settings → `settings_dialog.py::SettingsDialog`: language, theme,
   MCP registration; a language change offers an in-place rebuild via `_reload_ui`) over
   one tab set in a `QStackedWidget` shared with the Queue and TensorBoard overlays. Tabs:
-  Config (MethodsTab over the LoRA family + Turbo), Preprocess, Merge,
+  Config (MethodsTab over the LoRA family + Turbo), anime_tools, Preprocess, Merge,
   Experimental (MethodsTab over research methods + soup), EasyControl. Theme applied by
   `_dark()` → `theme.apply_theme`.
 - **Lazy construction.** Tabs inherit `LazyTabMixin` (first directory scan deferred to
-  first show). Every tab after Config/Preprocess also sits behind a
+  first show). Every tab but Config/Preprocess also sits behind a
   `widgets.LazyTabHolder`, so the widget tree is built on first open; launch builds only
   Config, `PreprocessingTab` (the Train auto-chain needs it) and the TensorBoard panel.
   Consequences: a lazy tab's `_try_reattach` runs on first open, not at launch; code
@@ -66,12 +66,7 @@ must not appear.
   PE). Curation (autotag, position clauses, SAM masks) is the `anime_tools` panel's:
   every env the tab builds, the Train auto-chain's included, pins `CAPTION_AUTOTAG` /
   `CAPTION_POSITION_CLAUSES` to `0` (`knobs.CURATION_GATES_OFF`), so a
-  `preprocess.toml` that turns one on never starts it from the GUI. The status row's
-  **Open anime_tools** button is `gui/anime_tools_panel.py` (Qt-free): it seeds the
-  panel's `<home>/.anime_tools_gui.json` (Export form → `sidecars_only`; `dataset.src`
-  only when `source_image_dir` isn't `image_dataset`), reuses a panel already serving
-  this home (ports 8790+, `/api/info`), else spawns `python -m anime_tools.gui --home …
-  --open` detached (not a daemon job; it exits with its window). The status line flags a
+  `preprocess.toml` that turns one on never starts it from the GUI. The status line flags a
   workspace caption/mask newer than the last applied Export. **Resize preview**
   (`resize_preview.py`, a non-modal dialog) lists each source image's bucket / tier /
   kept share under the tab's live resize widgets and draws the crop. Method/variant bar,
@@ -103,6 +98,18 @@ must not appear.
     still use them; new code uses `values()` / `stage_values()` / `tab.<section>.widgets[dest]`.
     Tests monkeypatching `_load_preprocess_toml` / `read_gui_settings` must patch
     `gui.tabs.preprocess.tab`.
+- **`tabs/anime_tools_tab.py::AnimeToolsTab`** (lazy) — the `anime_tools` panel in a
+  `QWebEngineView`, over `gui/anime_tools_panel.py` (Qt-free). First open seeds the
+  panel's `<home>/.anime_tools_gui.json` (Export form → `sidecars_only`; `dataset.src`
+  only when the Preprocess tab's `source_image_dir` isn't `image_dataset`), reuses a panel
+  already serving this home (ports 8790+, `/api/info`), else spawns `python -m
+  anime_tools.gui --home … --exit-with-window` detached (not a daemon job) and reads its
+  URL off `output/anime_tools_gui.log`. The server stops a few seconds after its last page
+  is gone, so closing the GUI reaps it. A failed start retries on the next show. `_blank`
+  links go to the system browser. `QtWebEngine*` is imported only when the tab is built;
+  `app.main` sets `AA_ShareOpenGLContexts` before `QApplication`, and `MainWindow` holds a
+  hidden 0×0 `QRhiWidget` so the window is RHI-composited from creation. Without it, the
+  first web view makes Qt recreate the top-level window, which flashes.
 - **`tabs/preprocess/knobs.py`** — the **trainer-native knob table** (`KNOBS:
   tuple[Knob]`: kind / default / `default_from` (const · `preprocess.toml` ·
   `gui_settings.json`) / env name / `persist` elision rule / snapshot flag). Only what is

@@ -4,8 +4,9 @@ The panel (``python -m anime_tools.gui``) curates in its own ``workspace/`` and
 publishes only the decisions — captions, masks, the revised master — with
 Export's ``sidecars_only``; the trainer resizes from ``image_dataset/`` itself.
 This module seeds the panel's settings file for that and starts (or finds) the
-server. It is not a daemon job: there is no GPU work, and ``--open`` implies
-``--exit-with-window``, so closing the panel window stops the server.
+server; the GUI's anime_tools tab renders it. It is not a daemon job: there is no
+GPU work, and the server runs with ``--exit-with-window``, so it stops a few
+seconds after the last page showing it (the tab, or a browser) is gone.
 
 Qt-free so it stays headless-testable; ``anime_tools`` imports are lazy, to keep
 them off the GUI's launch path.
@@ -14,6 +15,7 @@ them off the GUI's launch path.
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -37,6 +39,9 @@ _IMAGE_SHAPING = ("resize_cap", "webp")
 PANEL_PORT = 8790
 _PORT_TRIES = 50  # the panel's own ``pick_port`` range
 LOG_NAME = "anime_tools_gui.log"
+# The launcher's start line: ``anime_tools GUI → http://127.0.0.1:8790   (home: …)``.
+# The arrow is not matched: a detached child writes it in the console code page.
+_URL_LINE = re.compile(r"anime_tools GUI \S* *(http://\S+)")
 
 
 @dataclass
@@ -212,6 +217,8 @@ def find_running(home: Path | None = None, *, timeout: float = 0.5) -> str | Non
 
 
 def launch_argv(home: Path | None = None) -> list[str]:
+    """No window of its own — the GUI's tab shows the page — but the server
+    still exits with its last page."""
     from anima_daemon.client import venv_python
 
     home = (home or anima_home()).resolve()
@@ -221,16 +228,33 @@ def launch_argv(home: Path | None = None) -> list[str]:
         "anime_tools.gui",
         "--home",
         str(home),
-        "--open",
+        "--exit-with-window",
     ]
 
 
+def log_path(home: Path | None = None) -> Path:
+    return (home or anima_home()).resolve() / "output" / LOG_NAME
+
+
 def launch(home: Path | None = None) -> Path:
-    """Start the panel detached; its stdout goes to ``output/anime_tools_gui.log``
-    (returned)."""
+    """Start the panel detached; its stdout is appended to
+    ``output/anime_tools_gui.log`` (returned)."""
     from anima_daemon.proc import spawn_detached
 
     home = (home or anima_home()).resolve()
-    log = home / "output" / LOG_NAME
+    log = log_path(home)
     spawn_detached(launch_argv(home), cwd=home, stdout_path=log)
     return log
+
+
+def url_in_log(log: Path, offset: int = 0) -> str | None:
+    """The URL a launch announced in ``log`` past byte ``offset`` (the log is
+    appended to, so earlier launches' lines sit before it), or ``None`` yet."""
+    try:
+        with open(log, "rb") as f:
+            f.seek(offset)
+            text = f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    m = _URL_LINE.search(text)
+    return m.group(1) if m else None

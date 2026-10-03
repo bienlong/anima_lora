@@ -48,8 +48,10 @@ image_dataset/                         originals, read-only for the panel
 ## As built (phases 2–3)
 
 - **Pin**: `v0.7.6` (`pyproject.toml`, `uv.lock`).
-- **Launcher**: `gui.anime_tools_panel` (Qt-free), called by the Preprocess
-  tab's **Open anime_tools** button.
+- **Launcher**: `gui.anime_tools_panel` (Qt-free), called by the GUI's
+  **anime_tools** tab (`gui/tabs/anime_tools_tab.py`, a `QWebEngineView`). The
+  button first shipped in `ca6af718` was replaced by the tab, and the server now
+  runs with `--exit-with-window` instead of `--open`.
   - `seed_settings` writes `<home>/.anime_tools_gui.json` (gitignored,
     `ff6e5e54`): `values.export.sidecars_only = true`, drops the saved
     `resize_cap` / `webp`, which sidecars-only refuses. It sets `dataset.src`

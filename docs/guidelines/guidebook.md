@@ -114,7 +114,7 @@ absurdres, safe, 1girl, chitanda eru, hyouka, @channel (caststation), full body,
 ```
 
 - Omit quality tags such as `absurdres`, `highres`, and `masterpiece`, or keep them to a minimum. (Once the officially released mod guidance is available, you can skip them entirely.)
-- Don't want to caption by hand? Open the anime_tools panel (Preprocess tab → **Open anime_tools**) and run Autotag — the built-in Anima Tagger fills captions in the correct order ([§6.3](#63-curation-the-anime_tools-panel)). Treat the result as a starting point: review the tags, especially character/series/artist names, before training.
+- Don't want to caption by hand? Open the anime_tools panel (the **anime_tools** tab) and run Autotag — the built-in Anima Tagger fills captions in the correct order ([§6.3](#63-curation-the-anime_tools-panel)). Treat the result as a starting point: review the tags, especially character/series/artist names, before training.
 - Want Japanese text drawn in the image? Keep the tags in English and put the text in double quotes inside an English clause: `1girl, solo, speech bubble. Japanese text reads as "はい".` LoRA captions use the same form, so a LoRA can learn to render that text. Write Japanese as text to draw, not as tags (`猫耳` → `cat ears`). Details: [CJK vocab pack](../methods/cjk_vocab_pack.md#intended-use).
 
 ---
@@ -170,7 +170,7 @@ Training does not run inside the GUI window — pressing `Train` hands the job t
 
 ### 6.3 Curation: the anime_tools panel
 
-Captioning, Autotag, position clauses, masks, Grouping and excluding images happen in the anime_tools panel, a separate window. Open it with the Preprocess tab's **Open anime_tools** button. A second click goes to the panel that is already running, and closing the panel's window stops it.
+Captioning, Autotag, position clauses, masks, Grouping and excluding images happen in the anime_tools panel, shown in the GUI's **anime_tools** tab. The panel starts the first time you open the tab and stops when you close the GUI. If it fails to start, switch to another tab and back to retry.
 
 The panel never edits the images in `image_dataset/`. It works in its own `workspace/` folder and publishes only its decisions:
 

@@ -72,7 +72,6 @@ from gui.tabs.preprocess.captions import CaptionEditingSection
 from gui.tabs.preprocess.image_prep import ImagePrepSection
 from gui.tabs.preprocess.knobs import (
     DEFAULT_PREPROCESS_PATH_PATTERN,
-    DEFAULT_SOURCE_IMAGE_DIR,
     DEFAULT_TE_TAG_DROPOUT,
     PREPROCESS_ONLY_KEYS,
     load_values,
@@ -301,11 +300,6 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         self.open_dataset_btn.setToolTip(t("preprocess_open_dataset_dir_tooltip"))
         self.open_dataset_btn.clicked.connect(self._open_dataset_dir)
         row.addWidget(self.open_dataset_btn)
-        self.open_anime_tools_btn = QToolButton()
-        self.open_anime_tools_btn.setText("🖌 " + t("preprocess_open_anime_tools"))
-        self.open_anime_tools_btn.setToolTip(t("preprocess_open_anime_tools_tooltip"))
-        self.open_anime_tools_btn.clicked.connect(self._open_anime_tools)
-        row.addWidget(self.open_anime_tools_btn)
         self.clear_scope_cache_btn = QToolButton()
         self.clear_scope_cache_btn.setText(t("preprocess_clear_scope_cache"))
         self.clear_scope_cache_btn.setToolTip(t("preprocess_clear_scope_cache_tooltip"))
@@ -602,37 +596,6 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         self._resize_preview.show()
         self._resize_preview.raise_()
         self._resize_preview.activateWindow()
-
-    def _open_anime_tools(self) -> None:
-        """Open the ``anime_tools`` curation panel on this checkout: seed its
-        settings (source tree, Export → sidecars only), then focus a running
-        server or start one."""
-        try:
-            seeded = anime_tools_panel.seed_settings(
-                self.values().get("source_image_dir") or DEFAULT_SOURCE_IMAGE_DIR
-            )
-            url = anime_tools_panel.find_running()
-            if url is not None:
-                QDesktopServices.openUrl(QUrl(url))
-                self.log.appendPlainText(t("preprocess_anime_tools_reused", url=url))
-            else:
-                log = anime_tools_panel.launch()
-                self.log.appendPlainText(t("preprocess_anime_tools_started", log=log))
-        except Exception as exc:  # noqa: BLE001 — surface any launch failure
-            QMessageBox.warning(
-                self, t("error"), t("preprocess_anime_tools_failed", err=exc)
-            )
-            return
-        if seeded.warnings:
-            QMessageBox.warning(
-                self,
-                t("preprocess_open_anime_tools"),
-                t(
-                    "preprocess_anime_tools_root_warning",
-                    roots=", ".join(seeded.warnings),
-                    path=seeded.path,
-                ),
-            )
 
     @staticmethod
     def _snapshot_path(snapshot: dict[str, object], key: str, default: Path) -> Path:

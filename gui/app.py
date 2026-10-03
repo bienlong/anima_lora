@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QRhiWidget,
     QStackedWidget,
     QTabWidget,
     QToolTip,
@@ -32,6 +33,7 @@ from gui.gpu_status import GpuStatusBar
 from gui.widgets import LazyTabHolder, action_button, wrap_tooltip
 from gui.i18n import load_language, t
 from gui.settings_dialog import SettingsDialog
+from gui.tabs.anime_tools_tab import AnimeToolsTab
 from gui.tabs.easycontrol_tab import EasyControlTab
 from gui.tabs.merge_tab import MergeTab
 from gui.tabs.methods_tab import MethodsTab
@@ -156,9 +158,20 @@ class MainWindow(QMainWindow):
             ),
             t("tab_config"),
         )
+        # Curation comes before caching: the panel's Export feeds Preprocess.
+        # Every tab but Config and Preprocess is a LazyTabHolder: built on first
+        # open, keeping the launch path to those two.
+        self.tabs.addTab(
+            LazyTabHolder(
+                lambda: AnimeToolsTab(
+                    source_image_dir=lambda: self._preprocess_tab.values().get(
+                        "source_image_dir"
+                    )
+                )
+            ),
+            t("tab_anime_tools"),
+        )
         self.tabs.addTab(self._preprocess_tab, t("tab_preprocess"))
-        # Every tab after Preprocess is a LazyTabHolder: built on first open,
-        # keeping the launch path to Config + Preprocess only.
         self.tabs.addTab(LazyTabHolder(MergeTab), t("tab_merge"))
         # EasyControl keeps a dedicated tab (own preprocess/dataset lifecycle).
         self.tabs.addTab(
@@ -184,6 +197,12 @@ class MainWindow(QMainWindow):
         # Live GPU utilisation/VRAM footer, always visible below the tab set.
         self._gpu_bar = GpuStatusBar()
         main_lay.addWidget(self._gpu_bar)
+        # A hidden RHI widget makes the window RHI-composited from creation. Without
+        # it, the first QWebEngineView (the lazy anime_tools tab) makes Qt recreate
+        # the top-level window, which flashes it.
+        rhi_anchor = QRhiWidget(central)
+        rhi_anchor.setFixedSize(0, 0)
+        rhi_anchor.hide()
         self.setCentralWidget(central)
 
         self._update_tensorboard_btn_style(False)
@@ -355,6 +374,9 @@ def main():
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
+    # Qt WebEngine (the anime_tools tab, built lazily) needs this set before
+    # QApplication exists.
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app = QApplication(sys.argv)
     if ICON_PATH.exists():
         app.setWindowIcon(QIcon(str(ICON_PATH)))
