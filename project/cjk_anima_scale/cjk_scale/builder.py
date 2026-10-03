@@ -404,10 +404,17 @@ def context_singles(rc: RunConfig) -> set:
     return out
 
 
-def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Path:
+def build(
+    rc: RunConfig,
+    workers: int | None = None,
+    table: tuple = TABLE,
+    prepare=None,
+) -> Path:
     """Build the run's data dir. ``table`` is ``TABLE`` for every run;
     ``experiments/`` pass another one to validate a mix before it becomes
-    the rule — ``scale.py`` never does."""
+    the rule — ``scale.py`` never does. ``prepare(pools, rc)`` (experiments
+    only) edits the pools once the windows are in — a window rule, a pool of
+    its own — and returns what ``build.json`` records under ``prepare``."""
     from common.prompts import TPL_BUBBLE, TPL_EN
     from data.inventory import qwen_pieces
     from data.stage import _ink_stats
@@ -437,6 +444,7 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
     assert len(set(names)) == len(names), f"{rc.path}: two tiers of one name ({names})"
     route = any(t.recipe == "bubbleN" for g, _n in groups for t in g.tiers)
     win = _windows(rc, pools, out, weights) if route else {}
+    prepared = prepare(pools, rc) if prepare else None
     if kinds["multi"]:
         print(
             f"build: {len(kinds['multi'])} multi vocabs ({' '.join(kinds['multi'][:10])}"
@@ -516,6 +524,7 @@ def build(rc: RunConfig, workers: int | None = None, table: tuple = TABLE) -> Pa
         "draw_weights": _budget_summary(weights),
         "glyph_route": route,  # train.py routes the run's captions per glyph
         "windows": win,
+        **({"prepare": prepared} if prepare else {}),
         "min_overlap": MIN_OVERLAP,
         "groups": [
             {
@@ -729,7 +738,7 @@ def _draw_loop(g: Group, t: Tier, n: int, pools: Pools, rng, out: Path, first: i
             continue
         px = item.px()
         px_seen.append(px)
-        kind = kind_of(item.vocabs, pools.n_tokens)
+        kind = kind_of(item.law_vocabs(), pools.n_tokens)
         w = window(kind, px, item.layout)
         if t.params.get("gate") == "group":
             # a lone glyph's px is its own ink box, so a thin or small one

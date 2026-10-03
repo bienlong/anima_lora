@@ -58,9 +58,13 @@ nothing here imports, paths into or configures from `../finished/cjk_renderable_
   `common/render/scene.py`'s opt-in `render_into_scene(tategaki=True)`
   (columns top-aligned; a turned ー 〜 … placed by its ink on the column
   axis — off, it sits up to 0.2 em left of it, as every data dir of record
-  was drawn), `data/grid.py`'s opt-in `render_grid(bubble_fit=(lo, hi), cell_jitter=x)`
+  was drawn) and `render_into_scene(vert_forms=True)` (a column's ー 〜 …,
+  small kana, 、。 and brackets as the font's `vert` alternates through
+  libraqm — off, a small kana in a column is the horizontal glyph;
+  `experiments/reseed_anchor`), `data/grid.py`'s opt-in `render_grid(bubble_fit=(lo, hi), cell_jitter=x)`
   (a cell's ellipse sized to its ink instead of the cell; the ink at the cell's
-  centre ± a share of it instead of anywhere in it — `experiments/grid_small`),
+  centre ± a share of it instead of anywhere in it — `experiments/grid_small`)
+  and `render_grid(line_cells=…)` (cells always a line, unmarked: an EN word),
   `train/stage.py`'s latent cache name hashed past 200 chars (a native-size
   dir has one shape per image), the
   trimmed `cli/` / `stages.py`, `probe/merge_tables.py` = just `row_text_map`

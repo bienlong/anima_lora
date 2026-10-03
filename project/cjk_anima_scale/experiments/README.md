@@ -223,6 +223,27 @@ table is `../README.md` § Item pools, and `builder.tier_of` reads both.
   ≤ 2 edits 48 vs 33 of 72, singles official 22 vs 12 of 64). On the sheets
   both draw a banner; this arm's is longer, with kanji-like glyphs in the
   extra slots, and its lone single comes out small or not at all.
+- `reseed_anchor/` — `reseed_recap` (rows, budget, table, plain captions,
+  `hp` bands) with the columns lettered as Japanese and the base's own text
+  beside the rows. Lettering (both variants): the `bubbleN` tiers drawn
+  `tategaki` + `vert_forms` (the font's vertical ー and small kana), no window
+  opening on a small kana or ー (15 408 of 187 218 dropped). `--variant
+  anchor` adds 30 % of the window draws closed by a corpus ！ / ？ (10 930
+  marked windows, 158 glyphs; the fold sends the mark to the base's `!` /
+  `?`, no ext row) and an EN word (`sigma_split`'s 36-word pool) in one
+  random cell of half the multi-cell grids (3 067 grids, outside the item's
+  kind and px); `fix` is the lettering alone. Items, bands and px as
+  `reseed_recap`'s (16 600). `build(prepare=)` carries the window rules.
+  Data `results/20261003-0734-anchor_data/`, `…-fix_data/`. **`anchor` ran
+  2026-10-03** (job `20261003-074735-8ffb80`, train 153 min,
+  `results/20261003-0747-anchor/`) → no lift over `reseed_recap hp` on the
+  plain read, paired: words official 11 vs 15 of 104 (7 / 11, p 0.48),
+  ≤ 1 edit 40 vs 42, ≤ 2 73 vs 73, dup 75 vs 76; singles official 21 vs 30 of
+  112 (7 / 16, p 0.09; hiragana 4 / 13, p 0.05), contained 87 vs 90,
+  repeats 32 vs 23 (p 0.15). `en` / `swap`: words official 2 vs 4, ≤ 2 41 vs
+  35; singles official 8 vs 14. Both far under `retrain_kana` (plain words
+  official 33, singles 47). On the sheets the two arms draw the same scenes
+  and banners. `fix` not trained.
 - `grad_identity/` — the band law on the training gradient, no training
   (`conflict`'s plumbing): the grid_44 items, the 81 hiragana rows cold at
   the pack rows, σ swept 0.2–0.95 with one ε per item × σ. Pass 1 swaps the

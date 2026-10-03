@@ -64,17 +64,28 @@ class Item:
     src: str  # scene | font | grid
     shape: tuple
     extra: dict = field(default_factory=dict)
+    # cells whose text is the base's (an EN word in a grid, `grid`'s
+    # ``en_frac``): drawn and captioned, outside the item's kind and px
+    base_cells: tuple = ()
 
     @property
     def text(self) -> str:
         return " ".join(self.vocabs)
 
+    def law_vocabs(self) -> list:
+        """The vocabs the band law reads: every one but the ``base_cells``."""
+        return [u for i, u in enumerate(self.vocabs) if i not in self.base_cells]
+
     def px(self) -> float:
         """√(box area / glyphs) — the ink-stat px of ``data/stage.py``."""
         from common.render.ink import box_area
 
-        area = sum(box_area(b) for b in self.boxes)
-        return (area / max(1, sum(glyph_count(u) for u in self.vocabs))) ** 0.5
+        boxes, vocabs = self.boxes, self.vocabs
+        if self.base_cells:  # a grid: one box per cell
+            keep = [i for i in range(len(vocabs)) if i not in self.base_cells]
+            boxes, vocabs = [boxes[i] for i in keep], [vocabs[i] for i in keep]
+        area = sum(box_area(b) for b in boxes)
+        return (area / max(1, sum(glyph_count(u) for u in vocabs))) ** 0.5
 
 
 @dataclass
@@ -97,6 +108,9 @@ class Pools:
     stroke: float
     horizontal_frac: float  # share of multi-glyph items / grid cells drawn as lines
     windows: dict = field(default_factory=dict)  # glyph → its windows (bubbleN)
+    # glyph → its windows that a ！ / ？ closes in the corpus, the mark kept
+    # (bubbleN's ``mark_frac``; an experiment's ``build(prepare=)`` fills it)
+    marked: dict = field(default_factory=dict)
     window_keys: list = field(
         default_factory=list
     )  # weighted glyph pool over ``windows``
@@ -447,6 +461,8 @@ def _draw_scene(
     target_px: float | None = None,
     fill_max: float = 1.0,
     fill_min: float = 0.0,
+    tategaki: bool = False,
+    vert_forms: bool = False,
 ):
     """Text first, then a scene whose capacity holds it (one column when
     enough scenes do), weighted ``1 / (1 + uses)`` — the probe's
@@ -458,8 +474,9 @@ def _draw_scene(
     ``target_px``, ``fill_min`` keeps only the scenes whose bubble the text
     fills to at least that share (``target_px / _fit_px``) — small text
     goes to small bubbles instead of floating in a big one; no such scene
-    is a miss (``None``, the recipe re-draws). Returns an ``Item`` or
-    ``None``."""
+    is a miss (``None``, the recipe re-draws). ``tategaki`` / ``vert_forms``
+    are ``render_into_scene``'s (a column's turned marks on its axis; the
+    font's vertical forms). Returns an ``Item`` or ``None``."""
     from common.render.flat import pick_font
     from common.render.scene import region_capacity, render_into_scene
     from data.synth import scene_caption
@@ -519,6 +536,8 @@ def _draw_scene(
             vertical_only=vert,
             fewest_lines=fewest_lines,
             horizontal=horiz,
+            tategaki=tategaki,
+            vert_forms=vert_forms,
         )
         if drawn is None:
             continue
@@ -671,9 +690,18 @@ def bubbleN(pools: Pools, rng: random.Random, p: dict):
     picks a glyph uniformly, then one of its windows, so exposure is per row
     (Stage B's ``scene_spelled``, C3's ``scene_window``, this recipe's name
     until 2026-10-02) — per budget, when ``pools.window_keys`` repeats a
-    glyph by its draw weight."""
+    glyph by its draw weight. ``mark_frac`` (opt-in, reseed_anchor): that
+    share of the draws take the glyph's window from ``pools.marked`` — one a
+    ！ / ？ closes in the corpus, the mark drawn and captioned with it (the
+    pack's encode fold sends it to the base's ``!`` / ``?``); a glyph with
+    none keeps an unmarked window. ``tategaki`` / ``vert_forms``: the
+    column's lettering (``render_into_scene``)."""
     keys = pools.window_keys or list(pools.windows)
-    word = rng.choice(pools.windows[rng.choice(keys)])
+    key = rng.choice(keys)
+    pool = pools.windows[key]
+    if p.get("mark_frac") and rng.random() < float(p["mark_frac"]):
+        pool = pools.marked.get(key) or pool
+    word = rng.choice(pool)
     f = p.get("fill", [0.7, 1.0])
     lo, hi = f if isinstance(f, list) else (f, f)
     fill = rng.uniform(float(lo), float(hi))
@@ -687,6 +715,8 @@ def bubbleN(pools: Pools, rng: random.Random, p: dict):
         target_px=_target(rng, p),
         fill_max=fill,
         fill_min=float(p.get("fill_min", 0)),
+        tategaki=bool(p.get("tategaki")),
+        vert_forms=bool(p.get("vert_forms")),
     )
     if item is None:
         return None
@@ -738,10 +768,9 @@ def window_pool(glyphs: set, lines, held=(), length: tuple = WINDOW_LEN) -> list
     return sorted(out)
 
 
-def routed_windows(windows: list, glyphs: set) -> tuple[list, dict]:
-    """The windows whose routed encoding is their glyphs' single rows and
-    nothing else (``stage_b.check_spelling``'s rule for the routed form), and
-    each glyph's single row (routing on = off for a lone glyph, asserted)."""
+def ext_encoder():
+    """``ext(route, text)``: the ext rows (idx, in order) the pack's encoder
+    gives ``text`` in a caption clause, routed per glyph or not."""
     from transformers import AutoTokenizer
 
     from common.models import checkpoints
@@ -770,6 +799,14 @@ def routed_windows(windows: list, glyphs: set) -> tuple[list, dict]:
             i - T5_TABLE_SIZE for i, m in zip(ids, mask) if m and i >= T5_TABLE_SIZE
         ]
 
+    return ext
+
+
+def routed_windows(windows: list, glyphs: set) -> tuple[list, dict]:
+    """The windows whose routed encoding is their glyphs' single rows and
+    nothing else (``stage_b.check_spelling``'s rule for the routed form), and
+    each glyph's single row (routing on = off for a lone glyph, asserted)."""
+    ext = ext_encoder()
     ids = {}
     for c in sorted(glyphs):
         a, b = ext(False, c), ext(True, c)
@@ -827,6 +864,7 @@ def _grid_item(
     size=None,
     bubble_fit=None,
     cell_jitter=None,
+    base_cells: tuple = (),
 ):
     from common.prompts import TPL_BUBBLE, TPL_PLAIN, grid_caption
     from data.grid import WORD_PAD, render_grid
@@ -839,6 +877,8 @@ def _grid_item(
         kw["bubble_fit"] = tuple(bubble_fit)
     if cell_jitter is not None:
         kw["cell_jitter"] = float(cell_jitter)
+    if base_cells:
+        kw["line_cells"] = tuple(base_cells)
     im, boxes = render_grid(
         got,
         cols,
@@ -863,6 +903,10 @@ def _grid_item(
             got,
             horizontal=set(lines) if mark_horizontal else set(),
         )
+        for i in base_cells:  # an EN word's clause names its own language
+            ja = f'Japanese text reads as "{got[i]}".'
+            assert caption.count(ja) == 1, (caption, got[i])
+            caption = caption.replace(ja, f'English text reads as "{got[i]}".')
         layout, src = "grid", "grid"
     return Item(
         image=im,
@@ -877,7 +921,9 @@ def _grid_item(
             "bubble": bubble,
             "fill": round(fill, 3),
             "horizontal": sorted(lines),  # cells drawn as lines
+            **({"base_cells": list(base_cells)} if base_cells else {}),
         },
+        base_cells=tuple(base_cells),
     )
 
 
@@ -889,7 +935,10 @@ def _fillable_grids(grids: list, n_distinct: int) -> list:
 
 def grid(pools: Pools, rng: random.Random, p: dict):
     """One glyph per cell (``grid_single`` until 2026-10-02); ``grids =
-    "1x1"`` is the lone glyph."""
+    "1x1"`` is the lone glyph. ``en_frac`` + ``en_words`` (opt-in,
+    reseed_anchor): that share of the multi-cell grids give one cell, drawn
+    at random, to an EN word of the list — a line the base writes from its
+    own rows, at the cells' font px; the deck deals one glyph fewer."""
     if p.get("digraphs"):
         pool = pools.singles + pools.digraphs
         deck = _deck(pools, "singles+digraphs", pool, rng)
@@ -902,7 +951,13 @@ def grid(pools: Pools, rng: random.Random, p: dict):
     assert grids, "grid: no grid the singles can fill"
     name = rng.choices([g for g, _ in grids], weights=[w for _, w in grids])[0]
     cols, rows, size = GRIDS[name]
-    got = deck.deal(cols * rows)
+    k, base_cells = cols * rows, ()
+    if p.get("en_frac") and k > 1 and rng.random() < float(p["en_frac"]):
+        got = deck.deal(k - 1)
+        base_cells = (rng.randrange(k),)
+        got.insert(base_cells[0], rng.choice(p["en_words"]))
+    else:
+        got = deck.deal(k)
     bubble = rng.random() < float(p.get("bubble_frac", 0.5))
     if p.get("glyph_px"):
         # a px target, as grid_string: render_grid starts at fill × cell short
@@ -926,6 +981,7 @@ def grid(pools: Pools, rng: random.Random, p: dict):
         size=size,
         bubble_fit=p.get("bubble_fit"),  # the bubble sized to the glyph (grid_small)
         cell_jitter=p.get("cell_jitter"),  # the glyph at its cell's centre ± this
+        base_cells=base_cells,
     )
 
 

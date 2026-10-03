@@ -138,16 +138,20 @@ def data(
     workers: int | None,
     tbl: tuple | None = None,
     max_px: float | None = 64,
+    prepare=None,
+    base_chars: str = "",
 ) -> dict:
+    """``prepare`` is `builder.build`'s; ``base_chars`` = what the items may
+    draw beside the rows (`reseed_anchor`: ！ ？ and the EN words' letters)."""
     import statistics as st
 
     from cjk_scale.builder import build
 
-    dst = build(rc, workers, tbl or table())
+    dst = build(rc, workers, tbl or table(), prepare)
     recs = [
         json.loads(ln) for ln in (dst / "train.jsonl").read_text("utf-8").splitlines()
     ]
-    drawn = {c for r in recs for c in r["text"].replace(" ", "")}
+    drawn = {c for r in recs for c in r["text"].replace(" ", "")} - set(base_chars)
     assert drawn <= set(hira), drawn - set(hira)
     # `reseed_recap` draws `bubble1_52` (a fifth of it over 64 px): no cap there
     assert max_px is None or max(r["px"] for r in recs) <= max_px, max(

@@ -24,6 +24,11 @@ NO_TAIL = set("「『（(")
 V_ROTATE = set("ー〜～…‥－-—–")
 # nudged to the top-right of their cell in a column
 V_PUNCT = set("、。，．")
+# the small kana: in a column they sit to the top-right of their cell, where
+# the horizontal glyph sits at its bottom (``vert_forms``)
+V_SMALL = set("ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ")
+# what ``vert_forms`` draws with the font's own vertical alternate
+V_FORMS = V_ROTATE | V_PUNCT | V_SMALL | set("「」『』（）")
 # a layout with more lines wins over fewer only when its glyph is this much
 # larger — a bubble is filled, but a phrase that fits one column stays one
 MORE_LINES_GAIN = 1.4
@@ -290,16 +295,49 @@ def anchor_residual(arr, tb, reg, tol: int = 24, open_ok: bool = False) -> float
     return float((ink & ~paint).sum()) / n if n else 0.0
 
 
-def _draw_vertical_glyph(layer, ld, ch, x, y, fs, font, color, kw, centre=False):
+_VERT: dict = {}
+
+
+def _has_vert(font, ch: str) -> bool:
+    """Does ``font`` carry a vertical alternate (OpenType ``vert``) of ``ch``
+    — one that draws differently from the horizontal glyph? False without
+    libraqm (PIL's basic layout takes no font feature)."""
+    key = (font.path, getattr(font, "index", 0), font.size, ch)
+    if key not in _VERT:
+        try:
+            a = (font.getbbox(ch), bytes(font.getmask(ch)))
+            b = (
+                font.getbbox(ch, features=["vert"]),
+                bytes(font.getmask(ch, features=["vert"])),
+            )
+            _VERT[key] = a != b
+        except (KeyError, OSError):
+            _VERT[key] = False
+    return _VERT[key]
+
+
+def _draw_vertical_glyph(
+    layer, ld, ch, x, y, fs, font, color, kw, centre=False, vert=False
+):
     """One glyph of a column at cell centre ``x``, cell top ``y``: the
     long-vowel bar / dashes a quarter turn clockwise, 、。 to the top-right
     of the cell, everything else upright and centred. ``centre``: the turned
     mark is placed by its ink, on the column axis and the cell's middle —
     without it the bar sits where the font's ascent puts the horizontal
-    glyph, left of the axis by up to 0.2 em (Noto Serif CJK)."""
+    glyph, left of the axis by up to 0.2 em (Noto Serif CJK). ``vert``: a
+    ``V_FORMS`` glyph is the font's vertical alternate — the bar as the font
+    draws it in a column (a turn mirrors its hook), the small kana and 、。
+    where the font puts them; a font with none (TanukiMagic) keeps the turn,
+    its small kana nudged to the top-right."""
     from PIL import Image, ImageDraw
 
     w = ld.textlength(ch, font=font)
+    if vert and ch in V_FORMS and _has_vert(font, ch):
+        ld.text((x - w / 2, y), ch, fill=color, font=font, features=["vert"], **kw)
+        return
+    if vert and ch in V_SMALL:
+        ld.text((x - w / 2 + fs * 0.1, y - fs * 0.1), ch, fill=color, font=font, **kw)
+        return
     if ch in V_ROTATE:
         cell = int(fs * 1.5)
         tile = Image.new("RGBA", (cell, cell), (0, 0, 0, 0))
@@ -342,6 +380,7 @@ def render_into_scene(
     ref_text: str | None = None,
     horizontal: bool = False,
     tategaki: bool = False,
+    vert_forms: bool = False,
 ):
     """Erase every anchor bubble's usable region (plus the text box padded by
     a quarter of its size — detector boxes run tight) with the bubble's
@@ -369,6 +408,11 @@ def render_into_scene(
     break keeps the first glyphs level — instead of each column centred on
     its own height, and a turned mark (ー 〜 …) sits on the column axis
     (``_draw_vertical_glyph``'s ``centre``).
+    ``vert_forms`` (opt-in, reseed_anchor 2026-10-03; off = every data dir of
+    record, seed_synth's canvases included): a column's ー 〜 …, small kana,
+    、。 and brackets are the font's vertical alternates
+    (``_draw_vertical_glyph``'s ``vert``) — off, a small kana in a column is
+    the horizontal glyph, at the bottom of its cell.
 
     ``ref_text`` (ΔFM, plan_synth2): a sibling of the same glyph count drawn
     by the *same* fit — same erase, font, size, line lengths, positions,
@@ -476,7 +520,17 @@ def render_into_scene(
                 y = cy - (th if tategaki else len(ln) * fs * V_PITCH) / 2
                 for ch in ln:
                     _draw_vertical_glyph(
-                        layer, ld, ch, x, y, fs, font, color, kw, centre=tategaki
+                        layer,
+                        ld,
+                        ch,
+                        x,
+                        y,
+                        fs,
+                        font,
+                        color,
+                        kw,
+                        centre=tategaki,
+                        vert=vert_forms,
                     )
                     y += fs * V_PITCH
                 x -= fs * V_GAP

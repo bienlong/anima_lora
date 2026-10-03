@@ -69,6 +69,7 @@ def render_grid(
     horizontal_frac: float = 0.5,
     bubble_fit=None,
     cell_jitter=None,
+    line_cells=(),
 ):
     """Draw ``units[i]`` in cell ``i`` (row-major). Returns ``(image, boxes)``,
     ``boxes[i]`` the ink bbox of cell i's unit in canvas pixels. ``box`` = the
@@ -83,7 +84,10 @@ def render_grid(
     around the ink, instead of filling the cell around a glyph of any size.
     ``cell_jitter`` (opt-in, same date): the ink sits at the cell's centre ±
     this share of the cell, instead of anywhere its room allows — a small
-    glyph otherwise lands anywhere in a large cell."""
+    glyph otherwise lands anywhere in a large cell. ``line_cells`` (opt-in,
+    reseed_anchor 2026-10-03): cell indices always drawn as a line, with no
+    orientation draw and no entry in ``lines`` — an EN word has no column
+    form, so nothing to mark."""
     from PIL import Image, ImageDraw, ImageFont
 
     W, H = size
@@ -102,7 +106,10 @@ def render_grid(
         x0, y0 = c * cw, r * ch
         font_path = pick_font(u, fonts, rng)
         vertical = (
-            len(u) > 1 and not (set(u) & _NO_COLUMN) and rng.random() >= horizontal_frac
+            len(u) > 1
+            and i not in line_cells
+            and not (set(u) & _NO_COLUMN)
+            and rng.random() >= horizontal_frac
         )
         # the room the ink may take: the cell, or the inscribed rectangle of
         # the cell's bubble
@@ -124,7 +131,7 @@ def render_grid(
             fs = max(12, int(fs * min(room_w / tw, room_h / th) * 0.98))
         if sizes is not None:
             sizes.append(fs)
-        if lines is not None and len(u) > 1 and not vertical:
+        if lines is not None and len(u) > 1 and not vertical and i not in line_cells:
             lines.append(i)
         # block centre: anywhere the ink stays inside its room
         cx = x0 + cw / 2 + (rng.random() - 0.5) * max(0.0, room_w - tw)
