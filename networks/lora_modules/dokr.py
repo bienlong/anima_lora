@@ -74,16 +74,21 @@ class DoKrLoRAModule(LoKrModule):
     # -- weight math --------------------------------------------------------
 
     def _norm_scale(self) -> torch.Tensor:
-        """``s = m / ‖W0 + scale·kron‖_row`` → (out, 1)。
+        """``s = m / ‖W0 + scale·kron‖_row`` → (out,)。
 
         detach 分支（DoKr 变体默认）：范数块状分解（无大矩阵拼接、无图内
         保留），m 保持在图内照常训练；严格分支走旧的 materializing 路径
         （梯度精确但慢一个量级，与 DoRA 严格模式同款权衡）。
+
+        注意 `_row_norms` 返回一维 (out,)——这里必须保持一维除法：早年
+        `unsqueeze(1) / 一维 norms` 会广播成 (out, out) 方阵（每模块
+        151MB 的错误形状），传进 DiT 下层就是 192GB OOM / dynamo
+        fake-tensor 报错的根因。
         """
         if self.detach_norm:
             with torch.no_grad():
                 norms = self._row_norms()
-            return self.dora_scale.unsqueeze(1) / norms
+            return self.dora_scale / norms
         W0 = self.org_module_ref[0].weight.to(torch.float)
         V = W0 + self.scale * make_kron(
             self.lokr_w1.to(torch.float), self._w2().to(torch.float), 1.0
