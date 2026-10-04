@@ -19,6 +19,8 @@ recipe but the upper edges), so their rows are swapped at render.
   - ``up_mean``    every one of kana_up's 166 rows = their mean, every σ:
     the shared "kana" direction alone, no identity left
   - ``up_nomean``  kana_up less that mean, every σ
+  - ``up_rkstick`` kana_up less its mean plus retrain_kana's mean over the
+    same 166 rows: kana_up's spikes on retrain_kana's stick, every σ
 
   (The mean of up − mix is 1.6 % of the difference's energy: the two cold runs
   share their mean direction at cos 0.985, so the split is of kana_up's own
@@ -65,7 +67,13 @@ CLAUSE = "plain"
 CROSS = {"up_mix": ("up", "mix"), "mix_up": ("mix", "up")}
 # kana_up's rows split into their mean over the 166 rows (the shared "kana"
 # direction, every row the same vector) and the per-row rest
-SHARED = {"up_mean": ("up_mean", "up_mean"), "up_nomean": ("up_nomean", "up_nomean")}
+SHARED = {
+    "up_mean": ("up_mean", "up_mean"),
+    "up_nomean": ("up_nomean", "up_nomean"),
+    # kana_up's spikes on retrain_kana's stick (user, 10-04)
+    "up_rkstick": ("up_rkstick", "up_rkstick"),
+}
+RK = "retrain_kana"  # ``cjk_anima_scale``'s run: the stick swapped in
 # every arm with plain renders cached: flat_white only (no new render)
 CACHED = {
     "kana_big": OUT / "kana_big",
@@ -107,7 +115,7 @@ def items() -> list[dict]:
 
 
 def row_sets() -> tuple[dict, dict]:
-    """``{up, mix, up_mean, up_nomean}`` raw tables (row-norm units; a cold
+    """``{up, mix, up_mean, up_nomean, up_rkstick}`` raw tables (row-norm units; a cold
     row starts at 0 = the pack row) + the energy shares."""
     import torch.nn.functional as F
 
@@ -133,7 +141,22 @@ def row_sets() -> tuple[dict, dict]:
         "row_cos_up_mix": float(F.cosine_similarity(u, m, dim=1).mean()),
         "diff_mean_energy": share(u - m),
     }
-    for name, rows in (("up_mean", mu.expand_as(u)), ("up_nomean", u - mu)):
+    # retrain_kana's stick over the same 166 ext ids, in kana_up's row units
+    from cjk_scale.paths import OUT as SCALE_OUT
+
+    rk = load_trained(SCALE_OUT / RK)["delta"]
+    pos = {int(e): i for i, e in enumerate(rk["ext_ids"])}
+    ids = [int(up["ext_ids"][i]) for i in moved.nonzero().flatten().tolist()]
+    rk_mu = rk["raw"][[pos[e] for e in ids]].float().mean(0) * (
+        float(rk["row_scale"]) / float(up["row_scale"])
+    )
+    info["rk_stick_norm"] = float(rk_mu.norm())
+    info["cos_stick_up_rk"] = float(F.cosine_similarity(mu, rk_mu, dim=0))
+    for name, rows in (
+        ("up_mean", mu.expand_as(u)),
+        ("up_nomean", u - mu),
+        ("up_rkstick", u - mu + rk_mu),
+    ):
         t = sets["up"].clone()
         t[moved] = rows
         sets[name] = t

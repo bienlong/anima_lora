@@ -37,6 +37,13 @@ rows.
   0.128, a white sign on p00); the spikes alone (`up_nomean`) keep almost none
   (0.042) and the best scene (cos out 0.959). The large scene loss needs
   both: a glyph drawn large.
+- **The stick's direction carries the word fit (§ 4).** kana_up's spikes on
+  retrain_kana's stick (cos 0.93 to kana_up's, |m| 147 vs 141): words
+  official 4 → 13 (10 / 1, p 0.012), dup 36 → 23 (4 / 17, p 0.007) —
+  retrain_kana's 20 / 22 — and the scene cost comes with it (singles p01 cos
+  out 0.746, retrain_kana 0.745). `stick_2026_10_03.md`'s "the deficit is in
+  the spikes, not the stick" read the stick's length (± 10 %); its direction
+  was not read.
 
 ## 1. Setup
 
@@ -111,10 +118,48 @@ On `traj_こんにちは`: the banner's width and place are in x̂0 at 0.95 for
 both runs; kana_mix's glyphs come in smaller and the banner takes 6–7 of
 them (`こんにこちちは`, `こんにに ち は`), kana_up's larger, 5–6.
 
+## 4. The stick swapped (`up_rkstick`)
+
+kana_up's rows less their mean plus retrain_kana's mean over the same 166
+ext ids (in kana_up's row units), every σ. The sticks (delta units, 166 kana
+rows):
+
+| | \|stick\| | stick energy | cos vs kana_mix | cos vs retrain_kana |
+|---|---|---|---|---|
+| kana_up | 140.9 | 0.309 | 0.985 | 0.931 |
+| kana_mix | 138.4 | 0.298 | — | 0.906 |
+| kana_big | 142.1 | 0.302 | 0.989 | 0.886 |
+| anchor | 137.5 | 0.291 | 0.977 | 0.889 |
+| recap hp | 141.1 | 0.297 | 0.981 | 0.894 |
+| retrain_kana | 147.4 | 0.337 | 0.906 | — |
+| 0921 seed (162) | 143.6 | 0.282 | 0.802 | 0.725 |
+
+The reseed sticks agree to 0.97–0.99; the +0.1 turned kana_up's toward
+retrain_kana's (up − mix · retrain − mix cos 0.52; kana_big's move −0.15).
+
+| arm | words official / contained / ≤ 1 / ≤ 1c | dup | singles official | cos out singles / p01 | flat white words / singles |
+|---|---|---|---|---|---|
+| kana_mix | 2 / 10 / 15 / 34 | 36 | 20 | 0.920 / 0.811 | 0.103 / 0.154 |
+| kana_up | 4 / 17 / 29 / 46 | 36 | 23 | 0.905 / 0.769 | 0.103 / 0.196 |
+| `up_rkstick` | 13 / 21 / 33 / 42 | 23 | 21 | 0.898 / 0.746 | 0.131 / 0.206 |
+| retrain_kana | 20 / 28 / 39 / 49 | 22 | 24 | 0.900 / 0.745 | 0.114 / 0.236 |
+
+Paired against kana_up, words: official 10 / 1 (p 0.012), dup 4 / 17
+(p 0.007), ≤ 1 edit 9 / 5 (p 0.42); singles flat (official 3 / 5).
+
+On the sheets: `こんにちは` exact on p00–p02 in retrain_kana's rounded pink
+banner, its slot count the word's; the bed scene on p01 kept. `パソコン`
+moves nothing (every arm weak; p01 a large word on a white duvet).
+
+Job `20261004-110151-f1ef6f` (7 min, plumbing |Δpx| 3.6 / 255),
+`results/20261004-1108-rkstick/`.
+
 ## What it leaves open
 
 - Whether the white canvas is the lone tier: a micro arm with kana_up's
   `lone_*` bands back at kana_mix's, every other tier as kana_up.
 - The stick at 0.8 (preview5's lever) on kana_up rows: no ruler read on the
-  reseed rows yet (`up_s08`, no training).
+  reseed rows yet (`up_s08`, no training); likewise retrain_kana's stick
+  × 0.8, the stick half way between the two, and kana_mix's spikes on
+  retrain_kana's stick (is the gain the stick's whatever the spikes).
 - Seed 0 only: 52 word / 56 single renders an arm.
