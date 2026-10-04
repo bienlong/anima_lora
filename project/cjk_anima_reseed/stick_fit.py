@@ -216,7 +216,20 @@ def geo(T: Tables) -> dict:
 
 
 # the ball / stick swap arms (``probe_split``), paired against ``rk_self``
-BALL_ARMS = ("gs_self", "gs_rkstick", "rk_gsstick", "h0_self", "h0_rkstick")
+BALL_ARMS = (
+    "gs_self",
+    "gs_rkstick",
+    "rk_gsstick",
+    "h0_self",
+    "h0_rkstick",
+    "ball_rk",
+    "ball_rk_bubble",
+)
+# the ball arms trained on retrain_kana's stick, paired beyond ``rk_self``
+BALL_VS = {
+    "ball_rk": ("gs_rkstick",),
+    "ball_rk_bubble": ("ball_rk", "gs_rkstick"),
+}
 BALL_GEO = {
     "anchor": "experiments/reseed_anchor_cold_kana_anchor",
     "recap_hp_scene": "experiments/reseed_recap_cold_kana_hp",
@@ -238,6 +251,9 @@ def ball(T: Tables) -> dict:
     dirs = {k: v for k, v in run_dirs().items() if k in KANA_REF or k in BAND_ARMS} | {
         k: SCALE_OUT / v for k, v in BALL_GEO.items()
     }
+    for b in ("ball_rk", "ball_rk_bubble"):
+        if (OUT / b / "trained.pt").exists():
+            dirs[b] = OUT / b
     rows = {k: T.rows(d / "trained.pt") for k, d in dirs.items()}
     ids = T.moved(dirs["kana_up"] / "trained.pt", lambda c: True)
     text = row_texts(T.tok, T.pack, ids)
@@ -289,6 +305,11 @@ def ball(T: Tables) -> dict:
                     if sel(k[0]) and (len(k[0]) > 1) == (g == "words")
                 }
                 pairs[f"{grp} {g}: {a} vs rk_self"] = R.paired(f(a), f("rk_self"))
+                # a ball trained on the stick against the grid ball moved onto
+                # it, and the bubble ball against the grid ball trained on it
+                for b in BALL_VS.get(a, ()):
+                    if b in arms:
+                        pairs[f"{grp} {g}: {a} vs {b}"] = R.paired(f(a), f(b))
     en = {}
     for a in arms[1:] + ["kana_up", "kana_mix"]:
         for g in ("words", "singles"):
@@ -308,6 +329,15 @@ def ball(T: Tables) -> dict:
                     "up_down": [up, sum(x < 0 for x in d)],
                     "p": _r(wilcoxon(d).pvalue if any(d) else 1.0, 4),
                 }
+                for b in BALL_VS.get(a, ()):
+                    if b not in arms:
+                        continue
+                    d = [recs[a][k][f] - recs[b][k][f] for k in ks]
+                    row[f][f"vs_{b}"] = {
+                        "delta": _r(sum(d) / len(d), 4),
+                        "up_down": [sum(x > 0 for x in d), sum(x < 0 for x in d)],
+                        "p": _r(wilcoxon(d).pvalue if any(d) else 1.0, 4),
+                    }
             en[f"{g}: {a}"] = row
     out |= {"reads": reads, "paired": pairs, "en_ref": en}
     return out

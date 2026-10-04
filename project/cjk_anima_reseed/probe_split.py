@@ -29,6 +29,11 @@ recipe but the upper edges), so their rows are swapped at render.
     hiragana stick, every σ
   - ``rk_gsstick`` retrain_kana's 81 hiragana spikes on grid_small r0's stick
   - ``h0_self`` / ``h0_rkstick`` as ``gs_*`` with ``grid_lone recap_h0``'s rows
+  - ``ball_rk``    the ``ball_rk`` run as trained: grid_small r0's data, its 81
+    hiragana rows' ball trained cold on retrain_kana's stick (held)
+  - ``ball_rk_bubble`` the same on the reseed table's four bubble tiers
+
+  An arm whose ``manifest.json`` exists is not rendered again.
 
   (The mean of up − mix is 1.6 % of the difference's energy: the two cold runs
   share their mean direction at cos 0.985, so the split is of kana_up's own
@@ -91,6 +96,9 @@ SHARED = {
     "rk_gsstick": ("rk_gsstick", "rk_gsstick"),
     "h0_self": ("h0_self", "h0_self"),
     "h0_rkstick": ("h0_rkstick", "h0_rkstick"),
+    # grid_small r0's data, the ball trained on retrain_kana's stick (user, 10-04)
+    "ball_rk": ("ball_rk", "ball_rk"),
+    "ball_rk_bubble": ("ball_rk_bubble", "ball_rk_bubble"),
 }
 RK = "retrain_kana"  # ``cjk_anima_scale``'s run: the stick swapped in
 GS = "experiments/grid_small_cold_hira"  # ``cjk_anima_scale``'s grid_small r0
@@ -234,6 +242,21 @@ def row_sets() -> tuple[dict, dict]:
         t = rk_t.clone()
         t[rows_u] = rows
         sets[name] = t
+    # a ball run's rows: retrain_kana's merged table with the ball run's rows on it
+    for name in ("ball_rk", "ball_rk_bubble"):
+        f = OUT / name / "trained.pt"
+        if not f.exists():
+            continue
+        b = load_trained(OUT / name)["delta"]
+        assert [int(e) for e in b["ext_ids"]] == [int(e) for e in up["ext_ids"]]
+        sets[name] = b["raw"].float() * (float(b["row_scale"]) / float(up["row_scale"]))
+        bh = sets[name][rows_u]
+        info[f"{name}_stick_cos_rk"] = float(
+            F.cosine_similarity(bh.mean(0), mu["rk"], dim=0)
+        )
+        info[f"{name}_ball_cos_gs"] = float(
+            F.cosine_similarity(bh - bh.mean(0), g - mu["gs"], dim=1).mean()
+        )
     print(f"row sets: {info}", flush=True)
     return sets, info
 
@@ -311,6 +334,8 @@ def render(switch: float) -> float:
     assert check_rk < 12.0, "the split path does not reproduce retrain_kana's render"
     t0 = time.time()
     for arm, (above, below) in arms(switch).items():
+        if (arm_dir(arm) / "manifest.json").exists():
+            continue
         manifest = []
         for n, it in enumerate(its):
             f = (
@@ -394,7 +419,8 @@ def read(switch: float, check: float | None, label: str) -> None:
             (UP, MIX)
             + (
                 (RK, "rk_self")
-                if a[:3] in ("gs_", "rk_", "h0_") and a != "rk_self"
+                if (a[:3] in ("gs_", "rk_", "h0_") or a.startswith("ball_"))
+                and a != "rk_self"
                 else ()
             )
             + ((RK,) if a == "rk_self" else ())

@@ -45,7 +45,9 @@ def main():
 
     run = load(a.run)
     if a.verb == "data":
-        assert not run.stick_from, f"{run.name}: a stick run trains on {run.data}"
+        assert not (run.stick_from or run.data_from), (
+            f"{run.name}: trains on {run.data}"
+        )
         from reseed.builder import build
 
         build(run, a.workers, a.frac)
@@ -66,6 +68,7 @@ def main():
             stick_only=bool(run.stick_from),
             band=run.band,
             tag_drop=run.tag_drop,
+            ball_on=run.seed_rows() if run.ball_on else None,
         )
 
 

@@ -20,6 +20,11 @@
                                   # the table, so UPPER_MAX does not apply)
     tag_drop = ["japanese text", 0.5]  # optional, stick runs: the tag out of an item's
                                   # caption at this p, drawn per item per step
+    ball_on = "retrain_kana"      # optional: a ball run — the rows cold at this
+                                  # scale-line run's mean over them, the mean held, the
+                                  # rows less it trained; its merged rows the context
+    data_from = "run1002_grid_small/data"  # optional, ball runs: a scale-line data dir
+                                  # (under ``output/cjk_anima_scale``) instead of a build
 
 Its outputs land in ``output/cjk_anima_reseed/<run>/`` (``data/``,
 ``trained.pt``).
@@ -45,6 +50,8 @@ KEYS = (
     "drop_tiers",
     "band",
     "tag_drop",
+    "ball_on",
+    "data_from",
 )
 UPPER_MAX = 0.9  # tests/test_boundary.py: no band past it
 
@@ -64,6 +71,8 @@ class Run:
     drop_tiers: tuple = ()  # left out of the data at train
     band: tuple | None = None  # every kept item's σ band at train (stick runs)
     tag_drop: tuple | None = None  # (tag, p): out of a caption at p (stick runs)
+    ball_on: str = ""  # a ball run: the mean held at this scale-line run's
+    data_from: str = ""  # a ball run: this scale-line data dir
 
     def table(self) -> tuple:
         """``table.TABLE``, its shares the run's when it gives them (Σ kept at
@@ -96,6 +105,10 @@ class Run:
 
     @property
     def data(self) -> Path:
+        if self.data_from:
+            from cjk_scale import paths
+
+            return paths.OUT / self.data_from
         return (OUT / self.stick_from if self.stick_from else self.dir) / "data"
 
     def seed_rows(self) -> Path:
@@ -105,6 +118,8 @@ class Run:
 
         if self.rows_from:
             return paths.OUT / self.rows_from / "trained.pt"
+        if self.ball_on:
+            return paths.OUT / self.ball_on / "trained.pt"
         if self.stick_from:
             return OUT / self.stick_from / "trained.pt"
 
@@ -155,6 +170,11 @@ def load(run: str) -> Run:
         assert (
             len(tag_drop) == 2 and isinstance(tag_drop[0], str) and 0 < tag_drop[1] < 1
         ), f"{path}: tag_drop {tag_drop}"
+    ball_on, data_from = raw.get("ball_on", ""), raw.get("data_from", "")
+    if ball_on:
+        assert not raw.get("stick_from"), f"{path}: ball_on or stick_from, not both"
+    if data_from:
+        assert ball_on, f"{path}: data_from is a ball run's"
     return Run(
         name=path.stem,
         path=path,
@@ -169,4 +189,6 @@ def load(run: str) -> Run:
         drop_tiers=drop,
         band=tuple(band) if band is not None else None,
         tag_drop=tuple(tag_drop) if tag_drop is not None else None,
+        ball_on=ball_on,
+        data_from=data_from,
     )

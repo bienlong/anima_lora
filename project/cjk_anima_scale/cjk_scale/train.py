@@ -246,6 +246,7 @@ def train(
     stick_only: bool = False,
     band: tuple | None = None,
     tag_drop: tuple | None = None,
+    ball_on: Path | None = None,
 ) -> Path:
     """Train the run. ``data`` / ``out`` default to the run's dirs;
     ``max_steps`` stops the loop early with the full-length schedule
@@ -270,7 +271,12 @@ def train(
     ``stick_only`` trains the trained rows' shared mean only: every live row
     takes the sum of the live rows' gradients, so AdamW moves them all by one
     vector and the rows less their mean stay as warm-started
-    (``cjk_anima_reseed`` stick runs). ``scale.py`` passes none of them.
+    (``cjk_anima_reseed`` stick runs); ``ball_on`` (a merged ``trained.pt``)
+    is the reverse on cold rows: every trained row starts at that file's mean
+    over the same rows and the mean is put back after every step, so only the
+    rows less their mean train (a gradient hook does not hold it: AdamW's
+    per-element scaling un-centres a centred gradient). ``scale.py`` passes
+    none of them.
     A data dir built with windows (``build.json`` ``glyph_route``) is
     trained routed: ``ANIMA_VOCAB_GLYPH_ROUTE=1`` is set in-process before
     the TE cache (whose key carries it)."""
@@ -412,6 +418,28 @@ def train(
             f"|{float(stick0.norm()):.1f}|",
             flush=True,
         )
+    stick_raw = None
+    if ball_on:
+        live = ~rows.frozen_mask
+        assert cold and not stick_only, "ball_on: cold rows, the mean held"
+        assert bool(rows.touched_mask[live].all()), (
+            "ball_on: every trained row drawn (the hold moves them all)"
+        )
+        src = torch.load(ball_on, map_location="cpu", weights_only=False)["delta"]
+        pos = {int(e): i for i, e in enumerate(src["ext_ids"])}
+        ids = [int(e) for e, x in zip(rows.delta.ext_ids, live.tolist()) if x]
+        assert all(e in pos for e in ids), f"ball_on: {ball_on} lacks a trained row"
+        k = float(src["row_scale"]) / rows.row_scale
+        stick_raw = (src["raw"][[pos[e] for e in ids]].float().mean(0) * k).to(device)
+        with torch.no_grad():
+            rows.delta.raw[live] = stick_raw
+        stick0 = stick_raw * rows.row_scale
+        p.record["ball_on"] = str(ball_on)
+        print(
+            f"ball on {ball_on}: {int(live.sum())} rows cold at its mean over them, "
+            f"stick |{float(stick0.norm()):.1f}| held",
+            flush=True,
+        )
     steps, warmup, record = p.steps, p.warmup, p.record
     spr = (
         p.steps_per_row
@@ -503,6 +531,10 @@ def train(
         if step_scale is not None:
             with torch.no_grad():
                 rows.delta.raw.copy_(before + step_scale * (rows.delta.raw - before))
+        if stick_raw is not None:
+            with torch.no_grad():
+                raw = rows.delta.raw
+                raw[live] = raw[live] - (raw[live].mean(0) - stick_raw)
         rows.project()
         sched.step()
         if step % 25 == 0 or step == 1:
