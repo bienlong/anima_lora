@@ -13,9 +13,13 @@ Preprocess 页（右上角"高级模式"切换）。全部动作复用既有机�
 from __future__ import annotations
 
 
+import json
+import os
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QComboBox,
+    QProgressBar,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -27,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from gui import daemon as gui_daemon
+from gui._paths import ROOT
 from gui.config_io import default_lora_cache_dir, list_gui_variants, variant_metadata
 from gui.i18n import t
 from gui.theme import tok
@@ -173,6 +178,24 @@ class QuickStartTab(QWidget):
 
         # ── 步骤 4：训练 ─────────────────────────────────────────────
         s4 = _StepCard(4, t("qs_s4_title"), t("qs_s4_hint"))
+        # 训练配方：一键填好三个数字（奶人模式——不要求理解 rank/lr）
+        recipe_row = QHBoxLayout()
+        recipe_row.addWidget(QLabel(t("qs_recipe_label")))
+        for name, key in (
+            (t("qs_recipe_quick"), "quick"),
+            (t("qs_recipe_char"), "char"),
+            (t("qs_recipe_style"), "style"),
+        ):
+            recipe_row.addWidget(
+                action_button(
+                    name,
+                    variant="info",
+                    tooltip=t("qs_recipe_hint"),
+                    on_click=lambda _=False, k=key: self._apply_recipe(k),
+                )
+            )
+        recipe_row.addStretch(1)
+        s4.add_layout(recipe_row)
         form = QFormLayout()
         form.setContentsMargins(0, 0, 0, 0)
         self.variant_combo = QComboBox()
@@ -203,6 +226,33 @@ class QuickStartTab(QWidget):
         )
         train_row.addWidget(self.train_btn)
         s4.add_layout(train_row)
+
+        # 实时进度块（训练中显示）
+        self.progress = QProgressBar()
+        self.progress.setStyleSheet(f"QProgressBar {{ border: 1px solid {tok('border')}; border-radius: 4px; text-align: center; }} QProgressBar::chunk {{ background: {tok('link')}; border-radius: 3px; }}")
+        self.progress.hide()
+        s4.add_widget(self.progress)
+        self.prog_label = QLabel("")
+        self.prog_label.setStyleSheet(f"color: {tok('text_dim')};")
+        self.prog_label.hide()
+        s4.add_widget(self.prog_label)
+
+        # 完成卡（训练完成后显示）
+        self.done_box = QLabel("")
+        self.done_box.setStyleSheet(
+            f"color: {_action_color('success')}; font-weight: 600; padding: 6px;"
+            f"background: {tok('panel')}; border-radius: 6px;"
+        )
+        self.done_box.setWordWrap(True)
+        self.done_box.hide()
+        s4.add_widget(self.done_box)
+        self.open_folder_btn = action_button(
+            t("qs_open_folder"),
+            tooltip=t("qs_open_folder_hint"),
+            on_click=self._open_output_folder,
+        )
+        self.open_folder_btn.hide()
+        s4.add_widget(self.open_folder_btn)
         outer.addWidget(s4)
         self._s4 = s4
 
@@ -262,8 +312,50 @@ class QuickStartTab(QWidget):
         )
         if st["trainable"] and not running_train:
             self.train_btn.setEnabled(True)
-        # 未就绪不禁用按钮（点了会给可操作的提示），只做视觉弱化。
-        self.train_btn.setStyleSheet("")
+
+        # 训练进度 + 完成卡
+        if running_train and self._train_job_id:
+            prog = self._latest_progress()
+            self.progress.show()
+            self.prog_label.show()
+            self.done_box.hide()
+            self.open_folder_btn.hide()
+            if prog:
+                total = prog.get("total_steps") or 0
+                step = prog.get("global_step") or 0
+                loss = prog.get("loss/current")
+                epoch = prog.get("epoch")
+                if total:
+                    self.progress.setRange(0, total)
+                    self.progress.setValue(min(step, total))
+                avg_rate = prog.get("ts", 0) / max(step, 1)
+                remain_min = max(0, (total - step)) * avg_rate / 60
+                self.prog_label.setText(
+                    t("qs_progress_line").format(
+                        epoch=epoch or "?",
+                        step=step,
+                        total=total or "?",
+                        loss=f"{loss:.3f}" if isinstance(loss, (int, float)) else "-",
+                        remain=f"{remain_min:.0f}",
+                    )
+                )
+        else:
+            self.progress.hide()
+            self.prog_label.hide()
+            job_done = False
+            if self._train_job_id:
+                try:
+                    job_done = gui_daemon.read_job_state(self._train_job_id) == "done"
+                except Exception:
+                    job_done = False
+            if job_done:
+                out_name = self.output_edit.text().strip() or "my_lora"
+                self.done_box.setText(t("qs_done_text").format(name=out_name))
+                self.done_box.show()
+                self.open_folder_btn.show()
+            else:
+                self.done_box.hide()
+                self.open_folder_btn.hide()
 
     def _train_job_running(self) -> bool:
         if not self._train_job_id:
@@ -342,6 +434,49 @@ class QuickStartTab(QWidget):
         if self._train_job_id:
             self.log.appendPlainText(t("qs_train_queued").format(job=self._train_job_id))
             QTimer.singleShot(2000, self.refresh_status)
+
+    _RECIPES = {
+        "quick": {"rank": 8, "alpha": 8, "epochs": 2, "lr": 1e-4},
+        "char": {"rank": 16, "alpha": 16, "epochs": 8, "lr": 1e-4},
+        "style": {"rank": 32, "alpha": 32, "epochs": 12, "lr": 1e-4},
+    }
+
+    def _apply_recipe(self, key: str) -> None:
+        r = self._RECIPES[key]
+        self.rank_spin.setValue(r["rank"])
+        self.epochs_spin.setValue(r["epochs"])
+        self.lr_edit.setText(f'{r["lr"]:g}')
+        self.log.appendPlainText(
+            t("qs_recipe_applied").format(
+                rank=r["rank"], epochs=r["epochs"], lr=r["lr"]
+            )
+        )
+
+    def _latest_progress(self) -> dict | None:
+        """当前训练 job 的最近一条 step 记录（progress.jsonl）。"""
+        if not self._train_job_id:
+            return None
+        p = ROOT / "output" / "daemon" / "jobs" / self._train_job_id / "progress.jsonl"
+        if not p.is_file():
+            return None
+        last = None
+        try:
+            with open(p, encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    if '"step"' in line and '"global_step"' in line:
+                        last = line
+        except OSError:
+            return None
+        if not last:
+            return None
+        try:
+            return json.loads(last)
+        except ValueError:
+            return None
+
+    def _open_output_folder(self) -> None:
+        out_dir = ROOT / "output" / "ckpt"
+        os.startfile(str(out_dir))  # noqa: S606 — Windows 资源管理器
 
     def _open_advanced(self) -> None:
         """切到完整配置页（主窗口通过 setTabSwitcher 注入）。"""
