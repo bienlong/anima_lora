@@ -7,6 +7,8 @@
     steps_per_row = 135
     shares = { grid_44 = 10, … }  # optional: % of the items per tier, every tier
                                   # named, Σ 100; else table.TABLE's shares
+    upper_shift = 0.1             # optional: every tier's upper σ edge moved by this
+                                  # (capped at 0.9)
 
 Its outputs land in ``output/cjk_anima_reseed/<run>/`` (``data/``,
 ``trained.pt``).
@@ -20,7 +22,8 @@ from pathlib import Path
 
 from . import CONFIGS, OUT
 
-KEYS = ("rows", "read", "seed", "steps_per_row", "shares")
+KEYS = ("rows", "read", "seed", "steps_per_row", "shares", "upper_shift")
+UPPER_MAX = 0.9  # tests/test_boundary.py: no band past it
 
 
 @dataclass(frozen=True)
@@ -32,16 +35,32 @@ class Run:
     seed: str
     steps_per_row: int
     shares: dict | None = None  # tier → % of the items
+    upper_shift: float = 0.0  # added to every tier's upper σ edge
 
     def table(self) -> tuple:
         """``table.TABLE``, its shares the run's when it gives them (Σ kept at
-        the table's, so the items per row stay)."""
+        the table's, so the items per row stay), every upper edge moved by
+        ``upper_shift``."""
         from .table import TABLE
 
-        if not self.shares:
-            return TABLE
-        total = sum(t.share for t in TABLE)
-        return tuple(replace(t, share=total * self.shares[t.name] / 100) for t in TABLE)
+        tbl = TABLE
+        if self.shares:
+            total = sum(t.share for t in TABLE)
+            tbl = tuple(
+                replace(t, share=total * self.shares[t.name] / 100) for t in tbl
+            )
+        if self.upper_shift:
+            tbl = tuple(
+                replace(
+                    t,
+                    band=(
+                        t.band[0],
+                        round(min(t.band[1] + self.upper_shift, UPPER_MAX), 4),
+                    ),
+                )
+                for t in tbl
+            )
+        return tbl
 
     @property
     def dir(self) -> Path:
@@ -90,4 +109,5 @@ def load(run: str) -> Run:
         seed=raw["seed"],
         steps_per_row=int(raw["steps_per_row"]),
         shares=dict(shares) if shares is not None else None,
+        upper_shift=float(raw.get("upper_shift", 0.0)),
     )
