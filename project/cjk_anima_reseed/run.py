@@ -64,6 +64,7 @@ def main():
             context=run.seed_rows(),
             drop_tiers=run.drop_tiers,
             stick_only=bool(run.stick_from),
+            band=run.band,
         )
 
 

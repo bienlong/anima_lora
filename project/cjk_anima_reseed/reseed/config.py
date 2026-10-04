@@ -12,6 +12,9 @@
     stick_from = "kana_up"        # optional: a stick run — that run's rows and data,
                                   # its rows' shared mean trained only (no data verb)
     drop_tiers = ["lone_44", …]   # optional: tiers left out of the data at train
+    band = [0.75, 0.95]           # optional, stick runs: every kept item's σ band at
+                                  # train (the data's stamped bands replaced; not
+                                  # the table, so UPPER_MAX does not apply)
 
 Its outputs land in ``output/cjk_anima_reseed/<run>/`` (``data/``,
 ``trained.pt``).
@@ -34,6 +37,7 @@ KEYS = (
     "upper_shift",
     "stick_from",
     "drop_tiers",
+    "band",
 )
 UPPER_MAX = 0.9  # tests/test_boundary.py: no band past it
 
@@ -50,6 +54,7 @@ class Run:
     upper_shift: float = 0.0  # added to every tier's upper σ edge
     stick_from: str = ""  # a stick run: warm from this run, its data, the mean trained
     drop_tiers: tuple = ()  # left out of the data at train
+    band: tuple | None = None  # every kept item's σ band at train (stick runs)
 
     def table(self) -> tuple:
         """``table.TABLE``, its shares the run's when it gives them (Σ kept at
@@ -124,6 +129,12 @@ def load(run: str) -> Run:
 
     drop = tuple(raw.get("drop_tiers", ()))
     assert set(drop) <= {t.name for t in TABLE}, f"{path}: drop_tiers {drop}"
+    band = raw.get("band")
+    if band is not None:
+        assert raw.get("stick_from"), (
+            f"{path}: band is a stick run's (its data is built)"
+        )
+        assert len(band) == 2 and 0 <= band[0] < band[1] < 1, f"{path}: band {band}"
     return Run(
         name=path.stem,
         path=path,
@@ -135,4 +146,5 @@ def load(run: str) -> Run:
         upper_shift=float(raw.get("upper_shift", 0.0)),
         stick_from=raw.get("stick_from", ""),
         drop_tiers=drop,
+        band=tuple(band) if band is not None else None,
     )

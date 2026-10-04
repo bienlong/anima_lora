@@ -233,6 +233,7 @@ def train(
     row_step_scale: dict | None = None,
     drop_tiers: tuple = (),
     stick_only: bool = False,
+    band: tuple | None = None,
 ) -> Path:
     """Train the run. ``data`` / ``out`` default to the run's dirs;
     ``max_steps`` stops the loop early with the full-length schedule
@@ -250,6 +251,7 @@ def train(
     (AdamW normalizes a gradient scale away, so the step is scaled, not the
     gradient; ``experiments/garble_replace`` inverse frequency);
     ``drop_tiers`` leaves those tiers' items out of the data dir;
+    ``band`` replaces every kept item's σ band (stamped at build);
     ``stick_only`` trains the trained rows' shared mean only: every live row
     takes the sum of the live rows' gradients, so AdamW moves them all by one
     vector and the rows less their mean stay as warm-started
@@ -279,6 +281,11 @@ def train(
             f"data: {len(recs)} of {len(recs_all)} items, tiers {sorted(drop_tiers)} left out",
             flush=True,
         )
+    if band:
+        lo, hi = map(float, band)
+        assert 0 <= lo < hi < 1, f"band {band}"
+        recs = [{**r, "band": [lo, hi]} for r in recs]
+        print(f"data: every item's σ band → {lo}–{hi}", flush=True)
     bj = data / "build.json"
     route = bj.exists() and json.loads(bj.read_text(encoding="utf-8")).get(
         "glyph_route", False
@@ -356,6 +363,8 @@ def train(
     assert rows.n_rows == len(p.idx), (rows.n_rows, len(p.idx))
     if drop_tiers:
         p.record["drop_tiers"] = sorted(drop_tiers)
+    if band:
+        p.record["band_override"] = [float(b) for b in band]
     stick0 = None
     if stick_only:
         live = ~rows.frozen_mask

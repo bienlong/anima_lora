@@ -17,7 +17,7 @@ gradients, so AdamW moves them by one vector and the rows less their mean
   the cached plain renders at seed 0.
 - ``sheets``: probe_split's per-key sheets at seed 0 (kana_mix | kana_up |
   the stick runs | retrain_kana) and overviews (singles p01, words p00)
-  → ``output/cjk_anima_reseed/stick_fit/sheets/``.
+  → ``output/cjk_anima_reseed/<label>/sheets/``.
 
 Row = the delta ``raw × row_scale``; a run's rows = the ext rows that differ
 from its context.
@@ -37,7 +37,7 @@ import probe_split as PS  # noqa: E402  (bootstraps the scale line)
 
 from reseed import HOME, OUT  # noqa: E402
 
-STICK_RUNS = ("stick_full", "stick_nolone")
+STICK_RUNS = ("stick_full", "stick_nolone", "stick_nolonegrid", "stick_nlg_high")
 KANA_REF = ("kana_up", "kana_mix", "retrain_kana")
 # the cold hiragana band arms (``cjk_anima_scale/experiments/<dir>``)
 BAND_ARMS = {
@@ -172,9 +172,12 @@ def geo(T: Tables) -> dict:
         }
         for k, d in moves.items()
     }
-    out["kana"]["move"]["cos_between_runs"] = _r(
-        F.cosine_similarity(*moves.values(), dim=0)
-    )
+    ks = list(moves)
+    out["kana"]["move"]["cos_between_runs"] = {
+        f"{a}·{b}": _r(F.cosine_similarity(moves[a], moves[b], dim=0))
+        for i, a in enumerate(ks)
+        for b in ks[i + 1 :]
+    }
     out["kana"]["rk_minus_up_norm"] = _r(rk_up.norm(), 1)
     # the hiragana sticks of the cold band arms
     H = {k: stack(k, hira) for k in dirs}
@@ -275,7 +278,7 @@ def scene() -> dict:
     return out, recs
 
 
-def sheets(recs: dict) -> Path:
+def sheets(recs: dict, label: str) -> Path:
     from PIL import Image
 
     from cjk_scale.paths import load_experiment
@@ -283,7 +286,7 @@ def sheets(recs: dict) -> Path:
     from eval.enref import enref_file
 
     SS = load_experiment("sigma_split")
-    out = OUT / "stick_fit" / "sheets"
+    out = OUT / label / "sheets"
     cols = ("kana_mix", "kana_up") + STICK_RUNS + ("retrain_kana",)
     PS.sheets(recs, [*STICK_RUNS, "retrain_kana"], out)
     by = {a: {(m["text"], m["pi"]): m for m in recs[a]} for a in cols}
@@ -335,7 +338,7 @@ def main():
     if legs & {"scene", "sheets"}:
         metrics["scene"], recs = scene()
         if "sheets" in legs:
-            metrics["sheets"] = str(sheets(recs))
+            metrics["sheets"] = str(sheets(recs, a.label))
     print(json.dumps(metrics, ensure_ascii=False, indent=1), flush=True)
     run_dir = make_run_dir("cjk_anima_reseed", label=a.label, root=HOME / "results")
     write_result(run_dir, script=__file__, args=vars(a), label=a.label, metrics=metrics)
