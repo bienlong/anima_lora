@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import random
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -70,6 +71,16 @@ def vocab_idx(vocabs: list, tokq) -> set[int]:
 
     tok, qmap = tokq
     return {int(e) for v in vocabs for _p, e in qpieces(tok, qmap, v) if e is not None}
+
+
+def without_tag(caption: str, tag: str) -> str:
+    """``caption`` with its tag-bag entry ``tag`` taken out — the bag is the
+    text before the first ``". "``; the clauses after it are untouched (a
+    clause's ``Japanese text reads as`` stays)."""
+    bag, sep, rest = caption.partition(". ")
+    tags = bag.split(", ")
+    assert tags.count(tag) == 1, f"{tag!r} not once in the bag: {caption!r}"
+    return ", ".join(t for t in tags if t != tag) + sep + rest
 
 
 def noisy_by_band(latents, noise, bands, device):
@@ -234,6 +245,7 @@ def train(
     drop_tiers: tuple = (),
     stick_only: bool = False,
     band: tuple | None = None,
+    tag_drop: tuple | None = None,
 ) -> Path:
     """Train the run. ``data`` / ``out`` default to the run's dirs;
     ``max_steps`` stops the loop early with the full-length schedule
@@ -252,6 +264,9 @@ def train(
     gradient; ``experiments/garble_replace`` inverse frequency);
     ``drop_tiers`` leaves those tiers' items out of the data dir;
     ``band`` replaces every kept item's σ band (stamped at build);
+    ``tag_drop`` = (tag, p) takes ``tag`` out of an item's caption with
+    probability p, drawn per item per step (its own rng: the batches and the
+    noise stay the run's without it), both captions TE-cached in ``out``;
     ``stick_only`` trains the trained rows' shared mean only: every live row
     takes the sum of the live rows' gradients, so AdamW moves them all by one
     vector and the rows less their mean stay as warm-started
@@ -295,8 +310,20 @@ def train(
     args = gen_args(512, GEN_STEPS, GEN_CFG, out)
     device = get_generation_settings(args).device
 
+    te_recs, alt = recs, None
+    if tag_drop:
+        tag, p_drop = tag_drop[0], float(tag_drop[1])
+        assert 0 < p_drop < 1, f"tag_drop {tag_drop}"
+        alt = [without_tag(r["caption"], tag) for r in recs]
+        te_recs = recs + [{**r, "caption": a} for r, a in zip(recs, alt)]
+        drop_rng = random.Random(SEED)
+        print(f"captions: {tag!r} out of each item's at p {p_drop:g}", flush=True)
     cache, touched, _ev_idx = _encode_text(
-        recs, ev, device, out, te_cache=data / "te_cache"
+        te_recs,
+        ev,
+        device,
+        out,
+        te_cache=(out if tag_drop else data) / "te_cache",
     )
     ctx = Path(context) if context else rc.context_rows()
     p = plan(rc, data, recs, vocabs, touched, ctx)
@@ -365,6 +392,8 @@ def train(
         p.record["drop_tiers"] = sorted(drop_tiers)
     if band:
         p.record["band_override"] = [float(b) for b in band]
+    if tag_drop:
+        p.record["tag_drop"] = [tag, p_drop]
     stick0 = None
     if stick_only:
         live = ~rows.frozen_mask
@@ -448,15 +477,18 @@ def train(
         latents = lat[idx].to(device)
         noise = torch.randn_like(latents)
         brecs = [recs[i] for i in idx]
+        caps = [r["caption"] for r in brecs]
+        if alt is not None:
+            caps = [
+                alt[i] if drop_rng.random() < p_drop else c for i, c in zip(idx, caps)
+            ]
         noisy, ts, target = noisy_by_band(
             latents, noise, [tuple(r["band"]) for r in brecs], device
         )
         is_scene = brecs[0]["src"] == "scene"
         bs = BOX_SHARE if is_scene or (GRID_BOX and brecs[0]["src"] == "grid") else 0.0
         with torch.autocast("cuda", dtype=torch.bfloat16):
-            pred = dit_forward(
-                anima, noisy, ts, cache, [r["caption"] for r in brecs], device
-            )
+            pred = dit_forward(anima, noisy, ts, cache, caps, device)
         loss_fm = box_share_fm_loss(
             pred, target, brecs, bs, BOX_SHARE_CAP, BOX_SHARE_GLYPHS, GRID_BOX
         )

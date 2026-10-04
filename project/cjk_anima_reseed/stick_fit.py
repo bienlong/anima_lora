@@ -44,6 +44,7 @@ STICK_RUNS = (
     "stick_nlg_high",
     "stick_rk_nolonegrid",
     "stick_rk_full_band",
+    "stick_rk_fb_jt50",
 )
 KANA_REF = ("kana_up", "kana_mix", "retrain_kana")
 # the cold hiragana band arms (``cjk_anima_scale/experiments/<dir>``)

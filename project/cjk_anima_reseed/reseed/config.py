@@ -18,6 +18,8 @@
     band = [0.75, 0.95]           # optional, stick runs: every kept item's σ band at
                                   # train (the data's stamped bands replaced; not
                                   # the table, so UPPER_MAX does not apply)
+    tag_drop = ["japanese text", 0.5]  # optional, stick runs: the tag out of an item's
+                                  # caption at this p, drawn per item per step
 
 Its outputs land in ``output/cjk_anima_reseed/<run>/`` (``data/``,
 ``trained.pt``).
@@ -42,6 +44,7 @@ KEYS = (
     "rows_from",
     "drop_tiers",
     "band",
+    "tag_drop",
 )
 UPPER_MAX = 0.9  # tests/test_boundary.py: no band past it
 
@@ -60,6 +63,7 @@ class Run:
     rows_from: str = ""  # a stick run: warm from this scale-line run instead
     drop_tiers: tuple = ()  # left out of the data at train
     band: tuple | None = None  # every kept item's σ band at train (stick runs)
+    tag_drop: tuple | None = None  # (tag, p): out of a caption at p (stick runs)
 
     def table(self) -> tuple:
         """``table.TABLE``, its shares the run's when it gives them (Σ kept at
@@ -145,6 +149,12 @@ def load(run: str) -> Run:
             f"{path}: band is a stick run's (its data is built)"
         )
         assert len(band) == 2 and 0 <= band[0] < band[1] < 1, f"{path}: band {band}"
+    tag_drop = raw.get("tag_drop")
+    if tag_drop is not None:
+        assert raw.get("stick_from"), f"{path}: tag_drop is a stick run's"
+        assert (
+            len(tag_drop) == 2 and isinstance(tag_drop[0], str) and 0 < tag_drop[1] < 1
+        ), f"{path}: tag_drop {tag_drop}"
     return Run(
         name=path.stem,
         path=path,
@@ -158,4 +168,5 @@ def load(run: str) -> Run:
         rows_from=rows_from,
         drop_tiers=drop,
         band=tuple(band) if band is not None else None,
+        tag_drop=tuple(tag_drop) if tag_drop is not None else None,
     )

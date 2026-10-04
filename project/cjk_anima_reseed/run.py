@@ -65,6 +65,7 @@ def main():
             drop_tiers=run.drop_tiers,
             stick_only=bool(run.stick_from),
             band=run.band,
+            tag_drop=run.tag_drop,
         )
 
 
