@@ -52,7 +52,7 @@ that a select-only re-run would resurrect without cond latents):
    ``{base}/select/{solo,pair}``; record slice + character names in
    ``{base}/select.json``. Stale symlinks are pruned.
 2. **Sam** (GPU) — SAM3 concept segmentation via
-   ``scripts/preprocess/generate_masks.py`` (low threshold: 0.7 misses ~45%
+   ``anime_tools.masking.cli.generate_masks`` (low threshold: 0.7 misses ~45%
    of solo images on nude/close-up/stylized art; 0.4 recovers them with no
    measured over-inclusion, probed 2026-08-23): ``{base}/masks`` = girl
    (pairs: girl minus boy), ``{base}/masks_boy`` = boy/man/male and
@@ -172,7 +172,7 @@ def stage_select(
     pairs: bool,
     limit: int | None,
 ) -> dict[str, dict]:
-    from library.captioning.position_clauses import parse_caption
+    from anime_tools.captions.position_clauses import parse_caption
 
     if not index_path.is_file():
         raise SystemExit(f"{index_path} not found — run `make caption-index` first.")
@@ -269,7 +269,8 @@ def _run_sam(
     cfg_path.write_text(json.dumps(cfg), encoding="utf-8")  # JSON is valid YAML
     cmd = [
         sys.executable,
-        "scripts/preprocess/generate_masks.py",
+        "-m",
+        "anime_tools.masking.cli.generate_masks",
         "--config",
         str(cfg_path),
         "--image-dir",
@@ -629,7 +630,7 @@ def _position_word(girl_box, partner_box, size, *, side_frac: float = 0.4) -> st
     qualifies a lone subject only within a multi-row sheet), so solo images
     take the side her bbox centre falls on: ``left`` / ``right`` when it is
     outside the middle ``side_frac``..``1-side_frac`` band, else ``center``."""
-    from library.captioning.position_clauses import assign_positions, horizontal_names
+    from anime_tools.captions.position_clauses import assign_positions, horizontal_names
 
     if partner_box is not None:
         return assign_positions([girl_box, partner_box], size)[0]
@@ -872,12 +873,12 @@ def stage_captions(base: Path, resized_dir: Path, caption_src: Path) -> None:
     stage's record (girl + partner boxes through the caption grammar's own
     ``assign_positions``), so the caption position and the paint agree.
     """
-    from library.captioning.position_clauses import (
+    from anime_tools.captions.position_clauses import (
         PositionClause,
         compose_caption,
         parse_caption,
     )
-    from library.preprocess.caption_variants import (
+    from anime_tools.captions.variants import (
         read_variants_sidecar,
         variants_sidecar_path,
         write_variants_sidecar,
@@ -1050,7 +1051,6 @@ def stage_text(
         cache_dir=text_cache_dir,
         recursive=True,
         batch_size=batch_size,
-        min_pixels=0,  # staged 512-tier images are below the resize filter
         overwrite=overwrite,
         progress=tqdm_progress("Caching caption text"),
     )

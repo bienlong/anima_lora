@@ -1,9 +1,8 @@
 # Windows ROCm Guide
 
-This document covers the AMD Radeon / ROCm path for Anima LoRA on Windows.
-The normal beginner workflow is intentionally the same as the CUDA workflow:
-use the one-line installer, then use the GUI. You do not need to choose PyTorch
-indexes or `uv` extras manually.
+The AMD Radeon / ROCm path for Anima LoRA on Windows. The workflow is the same
+as on NVIDIA: run the one-line installer, then use the GUI. You do not need to
+choose PyTorch indexes or `uv` extras.
 
 ## Beginner install
 
@@ -20,86 +19,60 @@ The installer will:
 3. install the locked Python / PyTorch environment;
 4. save the selected backend for later updates;
 5. verify the ROCm runtime when AMD is selected;
-6. create the **Anima LoRA GUI** desktop shortcut; and
+6. create the Anima LoRA GUI desktop shortcut; and
 7. launch the GUI.
 
-For normal use, there is no separate AMD installation procedure after this.
-Use the GUI for model download, preprocessing, training, and updates.
+After this, use the GUI for model download, preprocessing, training, and
+updates.
 
 ### Updating
 
-Use the **Update** button in the GUI.
+Use the Update button in the GUI.
 
-The installer stores the selected Windows backend in `.anima_backend`, and the
-updater reuses it. An existing ROCm installation therefore stays on the ROCm
-dependency path instead of being silently replaced by CUDA packages.
+The installer stores the selected backend in `.anima_backend` and the updater
+reuses it, so a ROCm install stays on ROCm.
 
 ## Current verified hardware scope
 
-The locked ROCm environment in this project currently packages and verifies
-RDNA 4 only:
+The locked ROCm environment packages and verifies RDNA 4 only:
 
 | Architecture | Tested hardware | Status |
 |---|---|---|
 | `gfx1200` | Radeon RX 9060 XT | Verified |
 | `gfx1201` | Radeon RX 9070 XT | Verified |
 
-Both devices were tested with the exact ROCm 7.14 Windows environment using
-tensor allocation, `torch.compile`, bf16 PyTorch SDPA, backward, finite-value
-checks, and device synchronization.
+Both were tested on the locked ROCm 10.0 Windows environment (tensor
+allocation, `torch.compile`, bf16 SDPA, backward, finite-value checks).
 
-AMD's ROCm 7.14 PyTorch package repository also publishes device packages for
-RDNA 3 (`gfx1100`, `gfx1101`, `gfx1102`, and `gfx1103`). The same packaging
-approach is expected to extend to those architectures, but they are not part of
-the declared support set here until they receive the same hardware smoke test.
-
-> The installer currently detects the GPU vendor, not the exact AMD GPU
-> architecture. The committed ROCm dependency set contains only `gfx1200` and
-> `gfx1201`, so other AMD GPUs should be treated as unverified even if the
-> installer selects ROCm.
+> The installer detects the GPU vendor, not the AMD architecture. It may select
+> ROCm for any Radeon, but GPUs other than `gfx1200` / `gfx1201` (including
+> RDNA 3, which AMD's ROCm 10.0 matrix lists) are unverified.
 
 ## Locked software stack
 
-The supported Windows ROCm environment for this integration is pinned to:
+The supported Windows ROCm environment is pinned to:
 
 - Python 3.13
-- PyTorch `2.12.0+rocm7.14.0`
-- torchvision `0.27.0+rocm7.14.0`
-- ROCm / HIP 7.14 device packages for `gfx1200` and `gfx1201`
+- PyTorch `2.13.0+rocm10.0.0`
+- torchvision `0.28.0+rocm10.0.0`
+- ROCm 10.0 device packages for `gfx1200` and `gfx1201`
 - `triton-windows` for the Windows `torch.compile` runtime
 
-The runtime/backend code is not fundamentally tied to PyTorch 2.12. The exact
-2.12 pin exists because it is the ROCm 7.14 Windows package combination used by
-this release and matches Anima LoRA's current CUDA PyTorch baseline.
-
-For development-only compatibility checking, the same core Anima / ROCm path
-has also been exercised locally with:
-
-- PyTorch 2.14 alpha + ROCm 7.15 alpha
-- PyTorch 2.15 alpha + ROCm 10.1 alpha
-
-Those development stacks are **not** the locked or advertised supported
-configuration. They only indicate that the backend integration itself is not
-intrinsically coupled to PyTorch 2.12.
+ROCm uses PyTorch 2.13 because ROCm 10.0 validates that combination on
+Windows; the CUDA path stays on PyTorch 2.12 + CUDA 13.2. (The ROCm path has
+also run locally on PyTorch 2.14/2.15 alpha builds; those are not supported
+configurations.)
 
 ## Attention behavior on ROCm
 
-The CUDA build keeps the existing Flash Attention path.
-
-On ROCm, an explicit `attn_mode = "flash"` request is normalized to PyTorch
-SDPA instead. The ROCm environment therefore does not install an AMD Flash
-Attention dependency, while `torch_compile = true` remains enabled.
-
-This separation is intentional: ROCm-specific dependency and attention choices
-stay behind the backend selection so CUDA users keep the existing CUDA toolkit,
-Flash Attention, and dependency workflow.
+On ROCm, `attn_mode = "flash"` is switched to PyTorch SDPA (no AMD Flash
+Attention package is installed); `torch_compile = true` stays enabled. CUDA
+builds keep Flash Attention.
 
 ## Manual clone / advanced setup
 
-The one-line installer above is recommended. If you intentionally install from
-a git clone on Windows: CUDA is the **default** backend (the `cuda-windows`
-dependency group is default-on, so a plain `uv sync` installs it — GH #92);
-ROCm swaps that group out explicitly.
+If you install from a git clone on Windows, CUDA is the default backend (the
+`cuda-windows` dependency group is on by default); ROCm swaps it out explicitly.
 
 ROCm:
 
@@ -113,9 +86,12 @@ CUDA:
 uv sync
 ```
 
-The two Windows backend groups are declared mutually exclusive so `uv` cannot
-resolve a mixed CUDA/ROCm Torch environment. Reuse the same ROCm flags for
-every later manual sync — a flagless `uv sync` reverts to CUDA.
+The two groups are mutually exclusive. Reuse the same ROCm flags for every
+later manual sync — a flagless `uv sync` reverts to CUDA.
+
+`uv run` also syncs the environment by default. After installing ROCm, use
+`uv run --no-sync python tasks.py gui` to launch with the installed packages,
+or pass `--no-group cuda-windows --group rocm-windows` to `uv run` as well.
 
 To force ROCm when using the one-line installer:
 
@@ -124,51 +100,52 @@ $env:ANIMA_BACKEND = 'rocm'
 irm https://github.com/sorryhyun/anima_lora/releases/latest/download/install.ps1 | iex
 ```
 
-`ANIMA_BACKEND` accepts `auto`, `cuda`, or `rocm`. Automatic detection prefers
-CUDA on a mixed NVIDIA + AMD system in order to preserve the historical CUDA
-default; use the override above if ROCm is intentional.
+`ANIMA_BACKEND` accepts `auto`, `cuda`, or `rocm`. On a mixed NVIDIA + AMD
+system, `auto` picks CUDA; set `rocm` to override.
 
 ## Runtime smoke test
 
-A manual ROCm installation can run the same post-install check used by the
-installer:
+For a manual ROCm install, run the installer's post-install check:
 
 ```powershell
 uv run --no-group cuda-windows --group rocm-windows python tests/rocm_smoke_test.py
 ```
 
-A successful run verifies the key training path rather than only checking that
-`import torch` works.
+It exercises the training path, not just `import torch`.
 
 ## Troubleshooting
 
+### `Found no NVIDIA driver` on an AMD GPU
+
+The environment contains CUDA PyTorch instead of ROCm PyTorch. Older Windows
+installers could replace the verified ROCm build during shortcut creation or
+GUI launch by running `uv run` without the ROCm group flags.
+
+Close the GUI and stop active jobs, then repair the existing installation from
+PowerShell in the install directory:
+
+```powershell
+uv sync --no-group cuda-windows --group rocm-windows
+uv run --no-sync python tests/rocm_smoke_test.py
+uv run --no-sync python tasks.py gui
+```
+
+ROCm still uses PyTorch's `torch.cuda` API and the `cuda` device name. Those
+names alone do not indicate that the wrong PyTorch build is installed.
+
 ### The installer selected ROCm for an older or unverified AMD GPU
 
-The current locked device set is `gfx1200` / `gfx1201`. Other Radeon
-architectures are not yet declared verified by this project. If you want to add
-an RDNA 3 target, use the appropriate ROCm device package and run
-`tests/rocm_smoke_test.py` on real hardware before treating it as supported.
+Only `gfx1200` / `gfx1201` are verified. To try another architecture (e.g.
+RDNA 3), install the matching ROCm device package and run
+`tests/rocm_smoke_test.py` on that GPU before training.
 
 ### `ROCm detected: using PyTorch SDPA instead of CUDA Flash Attention`
 
-This message is expected when the configuration explicitly requests `flash` on
-a HIP build. The runtime switches that request to PyTorch SDPA. `attn_mode=None`
-or an explicit `torch` request does not count as a ROCm fallback.
+Expected when the config requests `flash` on a ROCm build; the runtime uses
+PyTorch SDPA instead. Nothing to fix.
 
 ### The ROCm smoke test fails
 
-Do not continue with training until the smoke test passes. Confirm that the
-installed environment is the `rocm-windows` extra and that the GPU is within the
-currently packaged architecture set. Re-running the one-line installer in a new
-empty target directory is the simplest clean-install check.
-
-## Maintenance summary
-
-For the normal Windows workflow, backend selection remains centralized in the
-installer and updater:
-
-- NVIDIA users keep CUDA 13.2 + CUDA PyTorch + Flash Attention.
-- AMD users receive the ROCm PyTorch package set + PyTorch SDPA.
-- `.anima_backend` preserves the selected path across updates.
-- Beginner documentation can continue to point to the same one-line installer
-  and GUI Update button for both vendors.
+Don't train until it passes. Confirm the environment was installed with the
+`rocm-windows` group and that the GPU is `gfx1200` / `gfx1201`. For a clean
+reinstall, re-run the one-line installer into a new empty directory.

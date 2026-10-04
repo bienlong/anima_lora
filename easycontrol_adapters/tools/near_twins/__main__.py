@@ -1,45 +1,8 @@
 #!/usr/bin/env python3
-"""near_twins_tag_gap_miner — mine in-artist variant pairs by attribute gap.
+"""near_twins CLI — ``[staging]`` config layering, argparse surface, orchestration.
 
-An **exploration / curation tool** (not a training step) that surfaces
-near-duplicate *variant* pairs within a single artist where the two members
-differ by a **specified attribute** — e.g. one has a speech bubble and the
-other doesn't. It feeds EasyControl builders: eval sets, seed data for unpaired
-editing, and a difference-region mask localizing *where* the two members differ.
-
-Pipeline (see ``docs/proposal/near_twins_tag_gap_miner.md`` for the full design):
-
-1. **Gather members** per artist from ``--image-dirs`` (default the raw crawl
-   pool ``~/gelcrawl/{retrieved,selected}``), scoped ``union`` so a twin can
-   straddle the curated cut. Each member's native pixel ``(W, H)`` is read from
-   the image header here (no decode).
-1b. **Same-size gate (+ tag pivot)**: a true variant pair (a redraw that adds
-   one attribute) shares the **exact** canvas, so only members that share their
-   ``(W, H)`` with ≥1 sibling *in the same artist* survive — the rest can never
-   pair and are dropped before embedding. The pair loop then only ever compares
-   equal-size members, which also makes the dense grid match pixel-aligned by
-   construction (the original cross-crop case the PE machinery was hedging
-   against is gone). In **tag mode** the gate sharpens further: an accepted pair
-   has the target tag in *exactly one* member, so a same-size group is only kept
-   when it holds BOTH a tagged and an untagged member (an all-tagged or
-   all-untagged group can never produce a gap). The whole prune runs *before* the
-   PE-Spatial load, so an empty candidate set skips the GPU entirely.
-2. **Embed** each *surviving* image with **PE-Spatial-B16-512** (``library.vision``)
-   at a fixed 512x512 native bucket → CLS descriptor + 32x32 patch grid (pooled to
-   16x16, L2-normed). Cached per-image under ``~/.cache/near_twin/``.
-3. **Stage A — global prefilter**: within-artist all-pairs cosine on the CLS
-   descriptor; keep ``>= --sim-min``.
-4. **Stage B — dense grid match**: pool each survivor's grid to ``G x G``, run a
-   mutual-NN + ratio test, count inliers ``>= --cell-match-min``; a pair is a
-   near-twin when the inlier fraction ``>= --match-frac-min``. Unmatched cells
-   are the **difference region**. Optional ``--geom-check`` RANSAC-rejects pose
-   twins and estimates the crop offset.
-5. **Discriminator** (``--tag`` / ``--tag-any`` / ``--region`` / ``--signal``):
-   keep pairs where the attribute is present in **exactly one** member.
-6. **Rank by edit-cleanliness**: fewest *other* differences first.
-7. **Output**: a materialized ``_tags`` / ``_no_tags`` pair tree (the
-   training-shaped output), plus a ready-to-use EasyControl dataset config
-   under ``configs/easycontrol/``.
+Matching core lives in ``engine``; pair-tree export and the dataset blueprint in
+``outputs``. Pipeline, output layout and knobs: ``README.md`` beside this file.
 
 Run from the repo root::
 
@@ -47,17 +10,8 @@ Run from the repo root::
         --tag-any "speech bubble,thought bubble,blank speech bubble" \
         --artists ama_mitsuki
 
-    # tagless visual attribute (recommended for bubbles on an untagged tree):
-    python -m easycontrol_adapters.tools.near_twin --region \
-        --artists ama_mitsuki
-
-Features are cached, so the intended loop is: run → inspect the exported pair
-tree → adjust ``--sim-min`` / ``--match-frac-min`` / ``--cell-match-min`` /
-``--max-extra-diff`` → re-run (seconds).
-
-Algorithm core lives in ``near_twin.engine``; rendering/export in
-``near_twin.outputs``. This module holds the ``[staging]`` config layering, the
-argparse surface, and the run orchestration.
+    # tagless visual attribute:
+    python -m easycontrol_adapters.tools.near_twins --region --artists ama_mitsuki
 """
 
 from __future__ import annotations
@@ -80,7 +34,7 @@ except ImportError:  # dotenv is a soft dependency — env vars still work witho
 
 
 # Run from the repo root; `library` is installed editable (`uv sync`).
-from library.vision import load_pe_encoder
+from anime_tools.grouping.embedder import pe_spatial_embedder
 
 from .engine import (
     PairRecord,
@@ -203,9 +157,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="discriminator: Stage-B diff region (tagless)",
     )
-    disc.add_argument(
-        "--signal", choices=["mit_text"], help="discriminator: per-image scalar gap"
-    )
 
     p.add_argument(
         "--image-dirs",
@@ -265,12 +216,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=6,
         help="cap on non-target differing tags (-1=off)",
-    )
-    p.add_argument(
-        "--signal-delta",
-        type=float,
-        default=0.04,
-        help="signal-mode gap / low-side threshold",
     )
     p.add_argument(
         "--region-min-frac",
@@ -362,14 +307,14 @@ def main(argv: list[str] | None = None) -> int:
     if "export_dir" not in _explicit_dests(argv) and args.export_dir:
         name = str(args.name or "near_twins").strip()
         args.export_dir = f"post_image_dataset/easycontrol/{name}/staging"
-    args.mode = "region" if args.region else "signal" if args.signal else "tag"
+    args.mode = "region" if args.region else "tag"
 
     target_tags: set[str] = set()
     if args.mode == "tag":
         raw = args.tag_any or args.tag
         if not raw:
             print(
-                "error: tag mode needs --tag or --tag-any (or use --region / --signal)",
+                "error: tag mode needs --tag or --tag-any (or use --region)",
                 file=sys.stderr,
             )
             return 2
@@ -389,7 +334,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     # Prune to embeddable candidates BEFORE loading the encoder: same-size gate
-    # for region/signal, same-size + tag pivot for tag mode. If nothing survives
+    # for region, same-size + tag pivot for tag mode. If nothing survives
     # (e.g. no size group holds both a tagged and an untagged member), we skip the
     # GPU load entirely.
     gate = (
@@ -410,11 +355,11 @@ def main(argv: list[str] | None = None) -> int:
 
     device = torch.device(args.device)
     print(f"Loading PE-Spatial-B16-512 on {device}…", file=sys.stderr)
-    bundle = load_pe_encoder(device, name="pe_spatial")
+    embedder = pe_spatial_embedder(device, name="pe_spatial")
 
     all_pairs: list[PairRecord] = []
     for artist, members in pairable.items():
-        feats = embed_members(bundle, members, args.batch_size, args.num_workers)
+        feats = embed_members(embedder, members, args.batch_size, args.num_workers)
         pairs = run_artist(artist, members, feats, args, target_tags)
         if pairs:
             print(f"  {artist}: {len(pairs)} pair(s)", file=sys.stderr)

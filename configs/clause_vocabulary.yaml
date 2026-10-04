@@ -1,11 +1,11 @@
 # Which tags may enter a position clause — the tag-GROUP policy behind
 # `make caption-position` (v2 rewrite). Loaded by
-# `library/captioning/clause_vocabulary.py`; the group names must exist in the
+# `anime_tools.captions.clause_vocabulary`; the group names must exist in the
 # tagger checkpoint's own `groups.yaml` (unknown ones are warned about at load,
 # because a typo here would silently disable a gate rather than fail).
 #
 # Everything here is a *rule*, not a preference: per-rule evidence and the knob
-# table live in docs/experimental/position_captions.md, and the load-bearing
+# table live in ../anime_tools/docs/position_captions.md, and the load-bearing
 # rationale is inlined below. Read it before deleting a line.
 
 # Groups that bind to a position; everything else (lighting, background, medium,

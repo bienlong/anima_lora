@@ -1,6 +1,14 @@
 pretrained_model_name_or_path = "D:/本地整合包/ComfyUI/models/diffusion_models/anima_baseV10.safetensors"
 qwen3 = "D:/本地整合包/ComfyUI/models/text_encoders/qwen_3_06b_base.safetensors"
 vae = "D:/本地整合包/ComfyUI/models/vae/qwen_image_vae.safetensors"
+# CJK vocab pack (JA / KO / ZH tag rows on the T5 side of the LLM adapter; see
+# docs/methods/cjk_vocab_pack.md). On by default since v2: `make download-models`
+# installs it, and the loader fetches this default itself if it is missing.
+# Path prefix of the .safetensors/.json pair; "" = off (stock tokenizer,
+# bit-exact). EN-only captions and prompts are unaffected either way. Changing
+# or disabling it changes every TE cache with CJK captions: re-run
+# `make preprocess-te ARGS=--overwrite` afterwards.
+vocab_pack = "models/vocab_packs/anima_cjk_vocab_pack_preview5"
 
 output_dir = "output/ckpt"
 output_name = "anima_lora"
@@ -13,6 +21,11 @@ network_train_unet_only = true
 
 resized_image_dir = "post_image_dataset/resized"
 lora_cache_dir = "post_image_dataset/lora"
+# The third dir of the set, `mask_dir` (where `make mask` writes and training
+# looks masks up), lives in configs/preprocess.toml instead — THIS file is
+# overwritten on `make update` and preprocess.toml is not, so a relocated mask
+# root survives there. Setting `mask_dir` here still works and wins over
+# preprocess.toml (normal chain order), but an update will drop it.
 
 sample_ratio = 1.0
 artists_shard = ""
@@ -24,8 +37,8 @@ lr_warmup_steps = 0.05
 timestep_sampling = "sigmoid"
 sigmoid_bias = 0.0
 discrete_flow_shift = 1.0
-# Max-norm regularizer on the LoRA up/down products (sd-scripts convention):
-# 0 disables it. Inert on LoKr keys (they have no up/down pairs).
+
+# Max-norm regularizer on the LoRA up/down products (0 disables; inert on LoKr keys).
 scale_weight_norms = 5.0
 
 gradient_checkpointing = false
@@ -36,7 +49,9 @@ use_text_cache = true
 skip_cache_check = true
 vae_chunk_size = 64
 vae_disable_cache = true
-masked_loss = true
+# v2: masks are opt-in. `make mask` writes the tree, this key makes training
+# read it — the pair turns masking on; a mask dir left on disk alone does not.
+masked_loss = false
 torch_compile = true
 attn_mode = "flash"
 compile_dynamic_seq = true

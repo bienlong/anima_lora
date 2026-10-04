@@ -1,31 +1,24 @@
 # Inference Guide
 
-Generation is **request-driven**: `inference.py` parses a big flag surface, but
-you rarely touch most of it. This guide is organized around *what you're trying
-to do* — start at §1, drop to the reference tables at the end only when you need
-a specific knob.
-
-> Model paths, `--attn_mode`, `--vae_chunk_size`, and `--compile` share their
-> meaning with training — see [`base-config.md`](base-config.md). Adapter family
-> lives in the **checkpoint metadata**, not the command line: the DiT loader
-> merges or keeps-live the adapter automatically.
+> Model paths, `--attn_mode`, `--vae_chunk_size`, and `--compile` mean the same
+> as in training — see [`base-config.md`](base-config.md). The adapter family is
+> read from the **checkpoint metadata**, so there is no flag for it.
 
 ---
 
 ## 1. Just test what I trained
 
-Every `make test-*` target auto-picks the **latest** bakeable adapter in
-`output/ckpt/` and runs it through a sane preset (`INFERENCE_BASE` in
-`scripts/tasks/_common.py`). This is the fastest path and the most
-representative starting point.
+Every `make test-*` target auto-picks the latest adapter in `output/ckpt/` and
+runs it with the preset values below (`INFERENCE_BASE` in
+`scripts/tasks/_common.py`).
 
 ```bash
-make test                  # latest LoRA / OrthoLoRA / T-LoRA
-make test-hydra            # latest HydraLoRA / FeRA *_moe.safetensors (router-live)
+make test                  # latest LoRA / T-LoRA
+make test-hydra            # latest HydraLoRA *_moe.safetensors (router-live)
 make test-merge            # a baked/merged DiT under MODEL_DIR= (no adapter)
 ```
 
-`SPECTRUM=1`, `MOD=1`, and `NOLORA=1` **compose into every** `test-*` target:
+`SPECTRUM=1`, `MOD=1`, and `NOLORA=1` compose into every `test-*` target:
 
 ```bash
 make test SPECTRUM=1       # + Spectrum acceleration
@@ -34,8 +27,7 @@ make test NOLORA=1         # bare DiT (skips --lora_weight); MOD=1 → mod-only 
 make test SPECTRUM=1 MOD=1 # stack them
 ```
 
-**What `make test` actually runs** (the values that matter, from
-`INFERENCE_BASE`):
+What `make test` runs:
 
 ```
 --image_size 1024 1024  --infer_steps 28  --flow_shift 3.0
@@ -43,10 +35,9 @@ make test SPECTRUM=1 MOD=1 # stack them
 --vae_chunk_size 64     --vae_disable_cache  --seed 42
 ```
 
-> ⚠️ The bare `inference.py` **argparse defaults are different** —
-> `--infer_steps 50`, `--flow_shift 3.0`, `--guidance_scale 3.5`,
-> `--sampler euler`, `--attn_mode torch`. When you hand-roll a command, start
-> from the `make test` values above, not the argparse defaults.
+> ⚠️ Bare `inference.py` defaults differ (`--infer_steps 50`,
+> `--guidance_scale 3.5`, `--attn_mode torch`). When you write a command by
+> hand, start from the `make test` values above.
 
 Correction / conditioning test targets (each composes with `SPECTRUM`/`MOD`):
 
@@ -61,7 +52,7 @@ Correction / conditioning test targets (each composes with `SPECTRUM`/`MOD`):
 
 ## 2. Generate by hand
 
-When you need full control, call `inference.py` directly:
+Call `inference.py` directly for full control:
 
 ```bash
 python inference.py \
@@ -80,14 +71,14 @@ python inference.py \
     --save_path output/tests
 ```
 
-**Stack multiple adapters** by space-separating `--lora_weight` (one
+Stack multiple adapters by space-separating `--lora_weight` (one
 `--lora_multiplier` per weight, or a single scalar for all):
 
 ```bash
 --lora_weight a.safetensors b.safetensors --lora_multiplier 0.8 0.6
 ```
 
-**Programmatic** generation (`import anima_lora`) builds a typed
+Programmatic generation (`import anima_lora`) builds a typed
 `GenerationRequest` instead — see `examples/01_generate.py`.
 
 ---
@@ -113,7 +104,7 @@ another prompt --seed 42 --flow_shift 4.0
 |---|---|
 | `euler` | Default deterministic ODE. |
 | `er_sde` | Stochastic (Extended Reverse-Time SDE); required for `--cns`. |
-| `lcm` | x0 re-noise — **distilled few-step models only** (see Turbo below). |
+| `lcm` | x0 re-noise — distilled few-step models only (see Turbo below). |
 
 ### Few-step (Turbo / distilled) checkpoints
 Turbo output is a normal LoRA but expects the DP-DMD rollout it was trained at
@@ -133,7 +124,7 @@ python inference.py … --lora_weight turbo.safetensors --infer_steps 4 --guidan
 | Goal | Flag | Notes |
 |---|---|---|
 | Sliding-mode CFG | `--smc_cfg` | α-adaptive velocity-space correction (λ=5, α=0.2). [`../inference/smc_cfg.md`](../inference/smc_cfg.md) |
-| SDE noise recoloring | `--cns` | **`--sampler er_sde` only** (no-op on euler/lcm). [`../inference/cns.md`](../inference/cns.md) |
+| SDE noise recoloring | `--cns` | `--sampler er_sde` only (no-op on euler/lcm). [`../inference/cns.md`](../inference/cns.md) |
 | Text-conditioned AdaLN steer | `--pooled_text_proj` + `--mod_w` | Modulation guidance (global tone, not content). [`../inference/mod-guidance.md`](../inference/mod-guidance.md) |
 | Weak-tag / relation adherence | `--xattn_boost 2` | Cross-attn gain in the σ ≥ 0.85 plan-writing window, cond pass only. Amplifies *all* caption tags incl. framing. [`../inference/xattn_boost.md`](../inference/xattn_boost.md) |
 
@@ -177,7 +168,7 @@ python inference.py … --lora_weight turbo.safetensors --infer_steps 4 --guidan
 | `--vae_chunk_size` | — | VAE decode tile size |
 | `--vae_disable_cache` | off | Skip the per-tile VAE cache |
 | `--no_metadata` | off | Don't embed training metadata in the PNG |
-| `--save_path` | — | Output directory (**required**) |
+| `--save_path` | — | Output directory (required) |
 
 > `--fp8` and `--prefix_weight` were removed.
 
@@ -205,27 +196,21 @@ python inference.py … --lora_weight turbo.safetensors --infer_steps 4 --guidan
 |---|---|
 | `--smc_cfg` | Enable SMC-CFG |
 | `--smc_cfg_lambda` / `--smc_cfg_alpha` | λ / α (defaults 5 / 0.2) |
-| `--cns` | Enable CNS (**`er_sde` only**) |
+| `--cns` | Enable CNS (`er_sde` only) |
 | `--cns_strength` | CNS recoloring strength |
 
 ### Cross-attn boost
 | Flag | Description |
 |---|---|
-| `--xattn_boost` | Cross-attn residual gain λ, cond forward only (1.0 = off; 2.0 = Phase-0 winner) |
+| `--xattn_boost` | Cross-attn residual gain λ, cond forward only (1.0 = off; 2.0 = shipped setting) |
 | `--xattn_boost_band` | σ cutoff (boost at σ ≥ band; default 0.85) |
 
 ---
 
 ## 5. LoRA in ComfyUI
 
-Plain Anima LoRA `.safetensors` use kohya-ss `lora_unet_` key naming and load
-directly into ComfyUI's stock `LoraLoader` — no conversion. For HydraLoRA /
-FeRA / postfix checkpoints (extra `router.*`, stacked
-`lora_ups.N.*` keys the stock loader drops), use the **Anima Adapter Loader** in
-`https://github.com/sorryhyun/ComfyUI-Anima_lora-Adapter`.
-
-Spectrum KSampler + mod-guidance + in-node DCW (scalar default `+0.01`, plus an
-`auto` mode running the v4 fusion head) live in
-[ComfyUI-Spectrum-KSampler](https://github.com/sorryhyun/ComfyUI-Spectrum-KSampler).
-For ComfyUI-vs-CLI parity details see
+Plain LoRA / T-LoRA files load in ComfyUI's stock `LoraLoader`;
+HydraLoRA / postfix checkpoints need the Anima Adapter Loader node. Node
+links and the merge-to-checkpoint route: [guidebook §10](guidebook.md#10-deploying-to-comfyui).
+For ComfyUI-vs-CLI behaviour differences see
 [`difference_between_comfy.md`](difference_between_comfy.md).

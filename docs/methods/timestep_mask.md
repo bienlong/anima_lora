@@ -2,17 +2,14 @@
 
 Timestep-dependent rank masking for LoRA training. Effective rank varies with the denoising step — low at high noise, full at low noise.
 
-> **For the structural walkthrough** (rank schedule math, mask application inside the LoRA bottleneck, training-only semantics, shared GPU-resident tensor), see **`docs/structure/timestep-mask.md`**. This doc is the usage / ops reference.
+> For the structural walkthrough (rank schedule math, mask application inside the LoRA bottleneck, training-only semantics, shared GPU-resident tensor), see `docs/structure/timestep-mask.md`. This doc is the usage / ops reference.
 
 ## Quick start
 
-T-LoRA variants live in `configs/gui-methods/` (one file per variant, no toggle blocks):
-
 ```bash
-make lora-gui GUI_PRESETS=tlora              # OrthoLoRA + timestep masking (rank 64)
+make lora                                    # configs/methods/lora.toml already sets use_timestep_mask = true
+make lora-gui GUI_PRESETS=tlora              # configs/gui-methods/tlora.toml (rank 32, weight_svd down-init)
 ```
-
-Or toggle inside `configs/methods/lora.toml` by uncommenting the T-LoRA block and running `make lora`.
 
 ## Parameters
 
@@ -29,23 +26,8 @@ Timestep masking composes with every adapter module type. The mask is applied at
 
 | Module | Where mask is applied |
 |--------|----------------------|
-| **LoRA** | After `lora_down`, before dropout and `lora_up` |
-| **OrthoLoRA (Cayley)** | After `Q_eff` projection, multiplied with `lambda_layer` |
-| **HydraLoRA** | After shared `lora_down`; per-expert `lora_up` heads unaffected |
-
-The default block in `configs/methods/lora.toml` stacks LoRA + OrthoLoRA + T-LoRA together.
-
-## Configs
-
-`configs/methods/lora.toml` (T-LoRA toggle block) — OrthoLoRA (Cayley) + timestep masking, rank 64:
-
-```toml
-use_ortho = true
-use_timestep_mask = true
-min_rank = 1
-alpha_rank_scale = 1.0
-network_dim = 64
-```
+| LoRA | After `lora_down`, before dropout and `lora_up` |
+| HydraLoRA | After shared `lora_down`; per-expert `lora_up` heads unaffected |
 
 ## Findings (bench-backed)
 
@@ -55,13 +37,13 @@ line is CLOSED — analytic objective met, scripts + results archived to
 `_archive/bench/timestep_mask/` (2026-07-12; `learned_rank.py` there is a
 generic ΔW effective-rank tool, reusable on any LoRA-family checkpoint).
 
-**Inert when the floor ≥ the natural learned rank** (2026-06-07,
+Inert when the floor ≥ the natural learned rank (2026-06-07,
 `_archive/bench/timestep_mask/results/20260607-*`): at `network_dim=48, min_rank=16`,
 mask on/off/σ-uniform all land at participation ratio ≈16 of 48. The binding
 constraint is the data, not the mask — the scheduled band above the floor is
 idle capacity. Corollary: dim=48 is ~3× over-provisioned in that regime.
 
-**Active when the floor bites below it** (2026-07-04,
+Active when the floor bites below it (2026-07-04,
 `results/20260704-1741-learned-rank-dim16-minrank1`): at `network_dim=16,
 min_rank=1` (plain LoRA + REPA, single-artist subset), the mask *raises*
 effective rank — PR(median) 10.9 → 12.25, energy-weighted PR 5.2 → 9.8. The
@@ -70,7 +52,7 @@ mask flattens the spectrum (top columns see gradient only on low-σ steps). It
 acts as a spectral regularizer, not a budget cut. σ-sampler shape (sigmoid vs
 uniform) is irrelevant in both benches.
 
-**Memorization: mitigation, not a fix** (2026-07-04,
+Memorization: mitigation, not a fix (2026-07-04,
 `bench/memorization/results/20260704-18*-sincos_half_*`): matched
 `sample_ratio=0.5` arms, `loss_gap.py` member-vs-same-artist-holdout gate.
 Both arms flag member-specific overfit; the mask trims the AUC 0.82 → 0.77,
@@ -94,11 +76,3 @@ spectrum metrics can't arbitrate quality on their own.
 | `networks/lora_anima/network.py` | `clear_timestep_mask()` — removes mask (for inference) |
 | `networks/lora_modules/lora.py` | Per-module mask application in each forward method |
 | `train.py` | Calls `set_timestep_mask()` each step after noise sampling |
-
-## Programmatic example
-
-`examples/07_stack_ortho_init_tlora.py` builds a fresh OrthoInit + T-LoRA stack
-from Python (no config file) and drives the mask via the one per-step hook
-`apply_router_conditioning`, printing the live effective rank each step. It is the
-runnable counterpart to the "T-LoRA is not a class, it's a buffer" note above —
-see `examples/README.md` (row 07).

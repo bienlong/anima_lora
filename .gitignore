@@ -8,6 +8,7 @@ dist/
 build/
 output/
 *.safetensors
+.vscode/
 # Ship the SmoothQuant-style per-channel calibration as a vendored asset —
 # small (~3.5MB), strictly an input-magnitude prior on the base DiT, not a
 # checkpoint. Regenerate via `bench/channel_stats/analyze_lora_input_channels.py`.
@@ -38,31 +39,37 @@ logs
 _logs/
 .claude/*
 !.claude/skills/
+!.claude/agents/
+.claude/agents/session-explorer.md
+.claude/agents/archive-explorer.md
 .env
 .anima_backend
 .anima-update-backups
 node.zip
 _archive/
 gui/gui_settings.json
-configs/gui-methods/custom/
 near_twins_temp.toml
 sincos_decensored/
-# ResShift SR sidecar (finished — lives under project/finished/sr/) — vendored
-# source (resshift/) IS committed; ignore only the (now-removed) external clone,
-# the old venv, weights, and data artifacts.
+# ResShift SR sidecar (finished — lives under project/finished/sr/, whose own
+# .gitignore drops its venv / weights / data); the external clone is gone.
 /ResShift/
-/project/finished/sr/.venv/
-/project/finished/sr/data/
-/project/finished/sr/**/weights/
 /post_image_dataset
 # LaTeX build artifacts (paper dirs; main.pdf stays tracked)
 project/*/paper/*.log
 project/*/paper/*.blg
 # paper_bench = pure run artifacts (~15 GB, no scripts/docs; nothing ever tracked)
 project/sigma_lowres/paper_bench/
-bench/cjk_adapter/assets/
-bench/cjk_distill/assets/
-project/cjk_aware_anima/datasets/assets/
 
 project/sigma_lowres/bench/probe1024_closure
 project/sigma_lowres/bench/probe1280_cache
+
+# anime_tools stage reports (report_dir defaults anchor on ANIMA_HOME = this checkout)
+workspace/
+# anime_tools panel settings (seeded by the GUI's anime_tools tab)
+.anime_tools_gui.json
+
+# Path rules for a subdirectory go in a .gitignore inside it, not here: ripgrep
+# (Grep / Glob / Explore) applies this root file's path-anchored rules only when
+# a search starts at the repo root, so ignored files there leak into any search
+# started below it. Nested: configs/gui-methods, bench/cjk_{adapter,distill},
+# project/finished/{sr,cjk_aware_anima,cjk_aware_anima_dit,…/datasets}.

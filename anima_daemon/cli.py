@@ -1,14 +1,8 @@
 """Client-side verbs for ``python -m anima_daemon`` — submit / wait / status / prune.
 
-The daemon's HTTP surface was fully capable of "run this argv on the GPU queue"
-long before anything on the command line could ask for it: submitting an
-arbitrary command job meant writing a Python snippet against
-``DaemonClient.submit_command``. These verbs are that missing front door,
-kept in the daemon package (rather than ``scripts/tasks/``) so they work from a
-bare checkout, a vendored node tree, or an agent shell — no ``tasks.py`` import,
-no ``library.*``, stdlib only. (``prune`` is the odd one: state-dir maintenance
-rather than a client call, but it belongs on the same front door and obeys the
-same stdlib-only rule.)
+The command-line front door to ``DaemonClient``. Imports neither ``tasks.py``
+nor ``library.*``, so it works from a bare checkout, a vendored node tree, or
+an agent shell. ``prune`` is filesystem maintenance, not a client call.
 
     python -m anima_daemon submit [--label L] [--stall-timeout S] [--wait]
                                   [--hold] -- <argv…>
@@ -36,22 +30,40 @@ VERBS = ("submit", "wait", "status", "prune")
 
 
 def _label_for(argv: list[str]) -> str:
-    """Derive a display label from the child argv: the script/module basename.
+    """Derive a display label from the child argv: the script/module basename,
+    plus the child's own ``--label`` when it has one.
 
     ``["project/x/bench/run_pair_census.py", "--limit", "5"]`` → ``run_pair_census``;
-    ``["-m", "scripts.distill_turbo.distill"]`` → ``distill``. An inline
-    ``python -c <src>`` has no name to take, so it stays ``command`` rather than
-    becoming a slice of source code.
+    ``["-m", "scripts.distill_turbo.distill"]`` → ``distill``; ``-c <src>`` →
+    ``command``. A child ``--label`` is appended: ``run_bench --label ko3_a`` →
+    ``run_bench:ko3_a``. Display only — the child argv is passed through
+    untouched.
     """
+    name = None
     for i, tok in enumerate(argv):
         if tok == "-m" and i + 1 < len(argv):
-            return argv[i + 1].rsplit(".", 1)[-1]
+            name = argv[i + 1].rsplit(".", 1)[-1]
+            break
         if tok == "-c":
             return "command"
         if tok.startswith("-"):
             continue
-        return Path(tok).stem or tok
-    return "command"
+        name = Path(tok).stem or tok
+        break
+    if name is None:
+        return "command"
+    child = _child_label(argv)
+    return f"{name}:{child}" if child else name
+
+
+def _child_label(argv: list[str]) -> Optional[str]:
+    """The value of a ``--label`` (or ``--label=``) in the child's own argv."""
+    for i, tok in enumerate(argv):
+        if tok == "--label" and i + 1 < len(argv):
+            return argv[i + 1] or None
+        if tok.startswith("--label="):
+            return tok.split("=", 1)[1] or None
+    return None
 
 
 def _print_json(obj) -> None:
@@ -59,7 +71,8 @@ def _print_json(obj) -> None:
 
 
 def _result_envelope(record: dict) -> Optional[dict]:
-    """The bench ``result.json`` a finished job lifted, if any (§ result-lift)."""
+    """The bench ``result.json`` a finished job lifted, if any (README "Result
+    envelopes")."""
     path = record.get("result_path")
     if not path:
         return None
@@ -97,10 +110,8 @@ def cmd_submit(args: argparse.Namespace) -> int:
         label=label,
         argv=argv,
         stall_timeout=args.stall_timeout,
-        # `--hold` stages the job behind a paused gate; the default leaves the
-        # gate alone so it runs when it reaches the front of the queue. Note this
-        # is NOT `make …--queue`, which means "don't attach" — submitting here
-        # never attaches, so returning immediately is already the default.
+        # `--hold` → start=False (the manager pauses the gate only when the
+        # queue is idle); the default leaves the gate alone.
         start=False if args.hold else None,
     )
     job_id = resp.get("job_id")
@@ -115,9 +126,37 @@ def cmd_wait(args: argparse.Namespace) -> int:
     return _wait_and_report(cl, args.job_id, timeout=args.timeout)
 
 
+def _timeout_snapshot(cl, job_id: str) -> dict:
+    """Where the job stands when the wait gave up — state + last progress event.
+
+    Printed to stdout as JSON; the timeout message itself goes to stderr.
+    """
+    out: dict = {"job_id": job_id, "timed_out": True}
+    try:
+        record = cl.job_record(job_id) or {}
+    except Exception:  # noqa: BLE001 — the daemon may be the thing that's wedged
+        record = {}
+    for key in ("state", "started_at", "stdout_path", "progress_path"):
+        if record.get(key) is not None:
+            out[key] = record[key]
+    # `latest` is the live field GET /jobs/{id} derives; fall back to reading the
+    # stream directly so a snapshot still works with the daemon down.
+    latest = record.get("latest")
+    if latest is None:
+        from . import tail
+
+        latest = tail.last_event(record.get("progress_path"))
+    if latest is not None:
+        out["latest"] = latest
+    if record.get("stale_for") is not None:
+        out["stale_for"] = record["stale_for"]
+    return out
+
+
 def _wait_and_report(cl, job_id: str, *, timeout: Optional[float]) -> int:
     """Block on the job, print its final record (+ lifted result envelope), and
-    return its exit code — ``124`` on wait timeout (matching ``timeout(1)``)."""
+    return its exit code — ``124`` on wait timeout (matching ``timeout(1)``),
+    after printing a snapshot of where the job stands."""
     try:
         record = cl.wait(job_id, timeout=timeout)
     except LookupError as e:
@@ -125,6 +164,7 @@ def _wait_and_report(cl, job_id: str, *, timeout: Optional[float]) -> int:
         return 2
     except TimeoutError as e:
         print(str(e), file=sys.stderr)
+        _print_json(_timeout_snapshot(cl, job_id))
         return 124
     except KeyboardInterrupt:
         print(f"\ndetached (job {job_id} continues).", file=sys.stderr)
@@ -162,19 +202,23 @@ def cmd_status(args: argparse.Namespace) -> int:
     if health is None:
         _print_json({"up": False, "base_url": None})
         return 1
-    _print_json({"up": True, "base_url": cl.base, **health})
+    # `stale_code`: the daemon is serving source older than the on-disk
+    # `anima_daemon/*` (the next submit restarts it). /health carries only the
+    # boot `fingerprint`; this is the only surface that does the comparison.
+    _print_json(
+        {
+            "up": True,
+            "base_url": cl.base,
+            "stale_code": _client.daemon_is_stale(health),
+            **health,
+        }
+    )
     return 0
 
 
 def cmd_prune(args: argparse.Namespace) -> int:
-    """Sweep old terminal job dirs. Dry-run unless ``--apply``.
-
-    Pure filesystem — it does not talk to the daemon, so it works whether or not
-    one is up. With a *live* daemon the pruned jobs stay in its in-memory table
-    until its next restart (harmless: they're finished history), so the boot
-    sweep in ``manager._reconcile`` remains the primary path and this is the
-    "I want the space back now" escape hatch.
-    """
+    """Sweep old terminal job dirs via ``jobs.prune_jobs``; dry-run unless
+    ``--apply``. Filesystem-only, so it works with the daemon up or down."""
     summary = _jobs.prune_jobs(
         max_age_days=args.days,
         keep_recent=args.keep,
