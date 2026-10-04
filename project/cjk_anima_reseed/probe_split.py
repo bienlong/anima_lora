@@ -21,6 +21,14 @@ recipe but the upper edges), so their rows are swapped at render.
   - ``up_nomean``  kana_up less that mean, every σ
   - ``up_rkstick`` kana_up less its mean plus retrain_kana's mean over the
     same 166 rows: kana_up's spikes on retrain_kana's stick, every σ
+  - ``rk_self``    retrain_kana's rows through this path (the gs arms' control)
+  - ``gs_self``    retrain_kana's rows with its 81 hiragana rows replaced by
+    ``grid_small r0``'s (cold, flat grids only, σ 0.3–0.7), every σ
+  - ``gs_rkstick`` ``gs_self`` with those 81 rows less their mean plus
+    retrain_kana's mean over them: the low-band grid ball on retrain_kana's
+    hiragana stick, every σ
+  - ``rk_gsstick`` retrain_kana's 81 hiragana spikes on grid_small r0's stick
+  - ``h0_self`` / ``h0_rkstick`` as ``gs_*`` with ``grid_lone recap_h0``'s rows
 
   (The mean of up − mix is 1.6 % of the difference's energy: the two cold runs
   share their mean direction at cos 0.985, so the split is of kana_up's own
@@ -72,8 +80,21 @@ SHARED = {
     "up_nomean": ("up_nomean", "up_nomean"),
     # kana_up's spikes on retrain_kana's stick (user, 10-04)
     "up_rkstick": ("up_rkstick", "up_rkstick"),
+    # grid_small r0's hiragana rows on retrain_kana's: as trained, and their
+    # spikes on retrain_kana's hiragana stick (user, 10-04)
+    "rk_self": ("rk", "rk"),  # retrain_kana through this path: the gs arms' control
+    "gs_self": ("gs_self", "gs_self"),
+    "gs_rkstick": ("gs_rkstick", "gs_rkstick"),
+    # retrain_kana's spikes on grid_small r0's stick; grid_lone recap_h0's
+    # rows (σ 0 – half point, the shortest stick) as trained and on rk's stick
+    # (user, 10-04)
+    "rk_gsstick": ("rk_gsstick", "rk_gsstick"),
+    "h0_self": ("h0_self", "h0_self"),
+    "h0_rkstick": ("h0_rkstick", "h0_rkstick"),
 }
 RK = "retrain_kana"  # ``cjk_anima_scale``'s run: the stick swapped in
+GS = "experiments/grid_small_cold_hira"  # ``cjk_anima_scale``'s grid_small r0
+H0 = "experiments/grid_lone_cold_hira_recap_h0"  # its grid_lone recap_h0
 # every arm with plain renders cached: flat_white only (no new render)
 CACHED = {
     "kana_big": OUT / "kana_big",
@@ -119,6 +140,8 @@ def row_sets() -> tuple[dict, dict]:
     row starts at 0 = the pack row) + the energy shares."""
     import torch.nn.functional as F
 
+    import torch
+
     from common.models import load_trained
 
     up, mix = (load_trained(OUT / r)["delta"] for r in (UP, MIX))
@@ -159,6 +182,57 @@ def row_sets() -> tuple[dict, dict]:
     ):
         t = sets["up"].clone()
         t[moved] = rows
+        sets[name] = t
+    # retrain_kana's whole table in kana_up's row units, and grid_small r0's
+    # hiragana rows (those that differ from its context) on it
+    assert [int(e) for e in rk["ext_ids"]] == [int(e) for e in up["ext_ids"]]
+    rk_t = rk["raw"].float() * (float(rk["row_scale"]) / float(up["row_scale"]))
+    sets["rk"] = rk_t
+    upos = {int(e): i for i, e in enumerate(up["ext_ids"])}
+
+    def cold_rows(run: str, ids: list | None = None):
+        """``run``'s rows that differ from its context (``ids``: these only), in
+        kana_up's row units."""
+        sd = load_trained(SCALE_OUT / run)
+        d = sd["delta"]
+        ctx = torch.load(sd["args"]["context"], map_location="cpu", weights_only=False)
+        ctx = ctx["delta"]
+        cpos = {int(e): i for i, e in enumerate(ctx["ext_ids"])}
+        eff = d["raw"].float() * float(d["row_scale"])
+        c_eff = ctx["raw"].float() * float(ctx["row_scale"])
+        pos = {int(e): i for i, e in enumerate(d["ext_ids"])}
+        if ids is None:
+            ids = [
+                e
+                for e, i in pos.items()
+                if e not in cpos
+                or not torch.allclose(eff[i], c_eff[cpos[e]], atol=1e-2)
+            ]
+        assert all(e in pos and e in upos for e in ids)
+        return ids, eff[[pos[e] for e in ids]] / float(up["row_scale"])
+
+    # grid_small r0's 81 hiragana rows: the hiragana every cold band arm trained
+    hira, g = cold_rows(GS)
+    assert len(hira) == 81, f"{len(hira)} gs rows"
+    _, h0 = cold_rows(H0, hira)  # recap_h0 also trained ー: left at retrain_kana's
+    rows_u = [upos[e] for e in hira]
+    rkh = rk_t[rows_u]
+    mu = {"gs": g.mean(0), "rk": rkh.mean(0), "h0": h0.mean(0)}
+    info["hira_rows"] = len(hira)
+    info["hira_stick_norm"] = {k: float(v.norm()) for k, v in mu.items()}
+    info["hira_stick_cos"] = {
+        f"{a}·{b}": float(F.cosine_similarity(mu[a], mu[b], dim=0))
+        for a, b in (("gs", "rk"), ("h0", "rk"), ("gs", "h0"))
+    }
+    for name, rows in (
+        ("gs_self", g),
+        ("gs_rkstick", g - mu["gs"] + mu["rk"]),
+        ("rk_gsstick", rkh - mu["rk"] + mu["gs"]),
+        ("h0_self", h0),
+        ("h0_rkstick", h0 - mu["h0"] + mu["rk"]),
+    ):
+        t = rk_t.clone()
+        t[rows_u] = rows
         sets[name] = t
     print(f"row sets: {info}", flush=True)
     return sets, info
@@ -217,6 +291,24 @@ def render(switch: float) -> float:
     check = float(np.abs(a - b).mean())
     print(f"check {Path(it['floor_file']).name}: mean |Δpx| {check:.3f}", flush=True)
     assert check < 4.0, "the split path does not reproduce kana_up's render"
+    # retrain_kana's table through the split path against its own render
+    rk_reads = json.loads(reads_of(scale_arms()[RK]).read_text("utf-8"))
+    rk_floor = next(
+        m["file"]
+        for m in rk_reads
+        if (m["pi"], m["text"], m["clause"], m["seed"])
+        == (it["pi"], it["text"], it["clause"], it["seed"])
+    )
+    fn = OUT / NAME / "check_rk.png"
+    fn.unlink(missing_ok=True)
+    sp.render(fn, it, "rk", "rk", switch)
+    a = np.asarray(Image.open(fn), np.float32)
+    b = np.asarray(Image.open(rk_floor), np.float32)
+    check_rk = float(np.abs(a - b).mean())
+    print(f"check rk {Path(rk_floor).name}: mean |Δpx| {check_rk:.3f}", flush=True)
+    # 5.4 on p00 こんにちは (10-04): the same picture, outline and tint apart —
+    # the gs arms pair against ``rk_self``, rendered here
+    assert check_rk < 12.0, "the split path does not reproduce retrain_kana's render"
     t0 = time.time()
     for arm, (above, below) in arms(switch).items():
         manifest = []
@@ -298,7 +390,15 @@ def read(switch: float, check: float | None, label: str) -> None:
     metrics["paired"] = {}
     groups = (("words", words), ("singles", singles))
     for a in list(new) + [UP, MIX]:
-        for b in (UP, MIX):
+        for b in (
+            (UP, MIX)
+            + (
+                (RK, "rk_self")
+                if a[:3] in ("gs_", "rk_", "h0_") and a != "rk_self"
+                else ()
+            )
+            + ((RK,) if a == "rk_self" else ())
+        ):
             if a == b:
                 continue
             for g, ks in groups:

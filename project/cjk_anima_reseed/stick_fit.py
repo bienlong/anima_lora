@@ -13,6 +13,10 @@ gradients, so AdamW moves them by one vector and the rows less their mean
 - ``kanji``: the retrain's kanji family (b1–b4, each cold over the run
   before it) as a burr — stick, spikes, energy, nearest T5 — and the
   batches' sticks against each other, the kana stick and the 0921 seed's.
+- ``ball``: the 81 hiragana rows of every cold arm as stick + ball against
+  retrain_kana's; the ball / stick swap arms of ``probe_split`` (``gs_*``,
+  ``rk_gsstick``, ``h0_*``) read and EN-ref cos'd against ``rk_self`` on the
+  hiragana keys (``reports/ball_2026_10_04.md``).
 - ``scene``: probe_split's scene numbers (EN-ref cos out, flat white) on
   the cached plain renders at seed 0.
 - ``sheets``: probe_split's per-key sheets at seed 0 (kana_mix | kana_up |
@@ -209,6 +213,104 @@ def geo(T: Tables) -> dict:
     return out
 
 
+# the ball / stick swap arms (``probe_split``), paired against ``rk_self``
+BALL_ARMS = ("gs_self", "gs_rkstick", "rk_gsstick", "h0_self", "h0_rkstick")
+BALL_GEO = {
+    "anchor": "experiments/reseed_anchor_cold_kana_anchor",
+    "recap_hp_scene": "experiments/reseed_recap_cold_kana_hp",
+}
+
+
+def ball(T: Tables) -> dict:
+    """The hiragana rows (81) of every cold arm as stick + ball against
+    retrain_kana's, and the swap arms' reads and EN-ref cos against ``rk_self``
+    on the hiragana keys (``reports/ball_2026_10_04.md``)."""
+    import torch
+    from scipy.stats import wilcoxon
+
+    from cjk_scale import reads as R
+    from cjk_scale.paths import OUT as SCALE_OUT
+    from probe.merge_tables import row_texts
+
+    F = torch.nn.functional
+    dirs = {k: v for k, v in run_dirs().items() if k in KANA_REF or k in BAND_ARMS} | {
+        k: SCALE_OUT / v for k, v in BALL_GEO.items()
+    }
+    rows = {k: T.rows(d / "trained.pt") for k, d in dirs.items()}
+    ids = T.moved(dirs["kana_up"] / "trained.pt", lambda c: True)
+    text = row_texts(T.tok, T.pack, ids)
+    hira = [e for e in ids if 0x3041 <= ord(text[e]) <= 0x309F]
+    X = {k: torch.stack([rows[k][e] for e in hira]) for k in dirs}
+    M = {k: x.mean(0) for k, x in X.items()}
+    S = {k: X[k] - M[k] for k in X}
+    geo = {
+        k: {
+            "stick": _r(M[k].norm(), 1),
+            "spike": _r(S[k].norm(dim=1).mean(), 1),
+            "mean_energy": _r(M[k].norm() ** 2 / (X[k].norm(dim=1) ** 2).mean()),
+            "stick_cos_rk": _r(F.cosine_similarity(M[k], M["retrain_kana"], dim=0)),
+            "stick_cos_up": _r(F.cosine_similarity(M[k], M["kana_up"], dim=0)),
+            "ball_cos_rk": _r(F.cosine_similarity(S[k], S["retrain_kana"]).mean()),
+            "ball_cos_up": _r(F.cosine_similarity(S[k], S["kana_up"]).mean()),
+        }
+        for k in X
+    }
+    out: dict = {"hira_rows": len(hira), "geo": geo}
+
+    def is_hira(k):
+        return all(0x3041 <= ord(c) <= 0x309F for c in k)
+
+    keys = {it["text"] for it in PS.items()}
+    arms = ["rk_self"] + [
+        a for a in BALL_ARMS if (PS.arm_dir(a) / "native_reads.json").exists()
+    ]
+    recs, hits = {}, {}
+    for a in arms + ["kana_up", "kana_mix"]:
+        p = PS.arm_dir(a) / "native_reads.json" if a in arms else PS.reads_of(OUT / a)
+        recs[a] = {
+            (m["text"], m["pi"]): m
+            for m in json.loads(p.read_text("utf-8"))
+            if m["clause"] == PS.CLAUSE and m["pi"] < PS.PROMPTS and m["seed"] == 0
+        }
+        h = R.hits(p, keys, PS.CLAUSE)
+        hits[a] = {k: v for k, v in h.items() if k[2] < PS.PROMPTS and k[3] < 1}
+    reads, pairs = {}, {}
+    for grp, sel in (("hira", is_hira), ("kata", lambda k: not is_hira(k))):
+        for a in hits:
+            t = R.tally({k: v for k, v in hits[a].items() if sel(k[0])})["total"]
+            reads[f"{grp}: {a}"] = t
+        for a in arms[1:]:
+            for g in ("words", "singles"):
+                f = lambda x: {  # noqa: E731
+                    k: v
+                    for k, v in hits[x].items()
+                    if sel(k[0]) and (len(k[0]) > 1) == (g == "words")
+                }
+                pairs[f"{grp} {g}: {a} vs rk_self"] = R.paired(f(a), f("rk_self"))
+    en = {}
+    for a in arms[1:] + ["kana_up", "kana_mix"]:
+        for g in ("words", "singles"):
+            ks = [
+                k
+                for k in recs["rk_self"]
+                if is_hira(k[0]) and (len(k[0]) > 1) == (g == "words")
+            ]
+            row = {}
+            for f in ("en_cos", "en_cos_out"):
+                d = [recs[a][k][f] - recs["rk_self"][k][f] for k in ks]
+                up = sum(x > 0 for x in d)
+                row[f] = {
+                    "mean": _r(sum(recs[a][k][f] for k in ks) / len(ks), 4),
+                    "rk_self": _r(sum(recs["rk_self"][k][f] for k in ks) / len(ks), 4),
+                    "delta": _r(sum(d) / len(d), 4),
+                    "up_down": [up, sum(x < 0 for x in d)],
+                    "p": _r(wilcoxon(d).pvalue if any(d) else 1.0, 4),
+                }
+            en[f"{g}: {a}"] = row
+    out |= {"reads": reads, "paired": pairs, "en_ref": en}
+    return out
+
+
 def kanji(T: Tables) -> dict:
     import torch
 
@@ -337,8 +439,10 @@ def main():
     from bench._common import make_run_dir, write_result
 
     metrics: dict = {}
-    if legs & {"geo", "kanji"}:
+    if legs & {"geo", "kanji", "ball"}:
         T = Tables()
+        if "ball" in legs:
+            metrics["ball"] = ball(T)
         if "geo" in legs:
             metrics["geo"] = geo(T)
         if "kanji" in legs:
