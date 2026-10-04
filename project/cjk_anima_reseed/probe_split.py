@@ -32,6 +32,9 @@ recipe but the upper edges), so their rows are swapped at render.
   - ``ball_rk``    the ``ball_rk`` run as trained: grid_small r0's data, its 81
     hiragana rows' ball trained cold on retrain_kana's stick (held)
   - ``ball_rk_bubble`` the same on the reseed table's four bubble tiers
+  - ``ball_rkb_long`` ``ball_rk_bubble`` with its 81 hiragana rows less their
+    mean scaled to retrain_kana's ball length (mean |row − mean|), the stick
+    kept: the short ball (183 vs 209) at retrain_kana's length
 
   An arm whose ``manifest.json`` exists is not rendered again.
 
@@ -99,6 +102,8 @@ SHARED = {
     # grid_small r0's data, the ball trained on retrain_kana's stick (user, 10-04)
     "ball_rk": ("ball_rk", "ball_rk"),
     "ball_rk_bubble": ("ball_rk_bubble", "ball_rk_bubble"),
+    # the bubble ball at retrain_kana's ball length, no training (user, 10-04)
+    "ball_rkb_long": ("ball_rkb_long", "ball_rkb_long"),
 }
 RK = "retrain_kana"  # ``cjk_anima_scale``'s run: the stick swapped in
 GS = "experiments/grid_small_cold_hira"  # ``cjk_anima_scale``'s grid_small r0
@@ -257,6 +262,15 @@ def row_sets() -> tuple[dict, dict]:
         info[f"{name}_ball_cos_gs"] = float(
             F.cosine_similarity(bh - bh.mean(0), g - mu["gs"], dim=1).mean()
         )
+    # the bubble ball scaled to retrain_kana's ball length, its stick kept
+    if "ball_rk_bubble" in sets:
+        bh = sets["ball_rk_bubble"][rows_u]
+        bm = bh.mean(0)
+        k = float((rkh - mu["rk"]).norm(dim=1).mean() / (bh - bm).norm(dim=1).mean())
+        t = sets["ball_rk_bubble"].clone()
+        t[rows_u] = bm + (bh - bm) * k
+        sets["ball_rkb_long"] = t
+        info["ball_rkb_long_scale"] = k
     print(f"row sets: {info}", flush=True)
     return sets, info
 

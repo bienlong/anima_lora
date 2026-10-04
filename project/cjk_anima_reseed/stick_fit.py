@@ -224,11 +224,13 @@ BALL_ARMS = (
     "h0_rkstick",
     "ball_rk",
     "ball_rk_bubble",
+    "ball_rkb_long",
 )
 # the ball arms trained on retrain_kana's stick, paired beyond ``rk_self``
 BALL_VS = {
     "ball_rk": ("gs_rkstick",),
     "ball_rk_bubble": ("ball_rk", "gs_rkstick"),
+    "ball_rkb_long": ("ball_rk_bubble",),
 }
 BALL_GEO = {
     "anchor": "experiments/reseed_anchor_cold_kana_anchor",
