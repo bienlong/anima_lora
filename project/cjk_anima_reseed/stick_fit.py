@@ -37,7 +37,14 @@ import probe_split as PS  # noqa: E402  (bootstraps the scale line)
 
 from reseed import HOME, OUT  # noqa: E402
 
-STICK_RUNS = ("stick_full", "stick_nolone", "stick_nolonegrid", "stick_nlg_high")
+STICK_RUNS = (
+    "stick_full",
+    "stick_nolone",
+    "stick_nolonegrid",
+    "stick_nlg_high",
+    "stick_rk_nolonegrid",
+    "stick_rk_full_band",
+)
 KANA_REF = ("kana_up", "kana_mix", "retrain_kana")
 # the cold hiragana band arms (``cjk_anima_scale/experiments/<dir>``)
 BAND_ARMS = {

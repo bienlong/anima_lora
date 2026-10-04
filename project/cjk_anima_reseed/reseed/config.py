@@ -11,6 +11,9 @@
                                   # (capped at 0.9)
     stick_from = "kana_up"        # optional: a stick run — that run's rows and data,
                                   # its rows' shared mean trained only (no data verb)
+    rows_from = "retrain_kana"    # optional, stick runs: warm from this scale-line run's
+                                  # merged rows (``output/cjk_anima_scale/<it>/trained.pt``)
+                                  # instead of ``stick_from``'s; the data stays its
     drop_tiers = ["lone_44", …]   # optional: tiers left out of the data at train
     band = [0.75, 0.95]           # optional, stick runs: every kept item's σ band at
                                   # train (the data's stamped bands replaced; not
@@ -36,6 +39,7 @@ KEYS = (
     "shares",
     "upper_shift",
     "stick_from",
+    "rows_from",
     "drop_tiers",
     "band",
 )
@@ -53,6 +57,7 @@ class Run:
     shares: dict | None = None  # tier → % of the items
     upper_shift: float = 0.0  # added to every tier's upper σ edge
     stick_from: str = ""  # a stick run: warm from this run, its data, the mean trained
+    rows_from: str = ""  # a stick run: warm from this scale-line run instead
     drop_tiers: tuple = ()  # left out of the data at train
     band: tuple | None = None  # every kept item's σ band at train (stick runs)
 
@@ -94,6 +99,8 @@ class Run:
         the seed's."""
         from cjk_scale import paths
 
+        if self.rows_from:
+            return paths.OUT / self.rows_from / "trained.pt"
         if self.stick_from:
             return OUT / self.stick_from / "trained.pt"
 
@@ -129,6 +136,9 @@ def load(run: str) -> Run:
 
     drop = tuple(raw.get("drop_tiers", ()))
     assert set(drop) <= {t.name for t in TABLE}, f"{path}: drop_tiers {drop}"
+    rows_from = raw.get("rows_from", "")
+    if rows_from:
+        assert raw.get("stick_from"), f"{path}: rows_from is a stick run's"
     band = raw.get("band")
     if band is not None:
         assert raw.get("stick_from"), (
@@ -145,6 +155,7 @@ def load(run: str) -> Run:
         shares=dict(shares) if shares is not None else None,
         upper_shift=float(raw.get("upper_shift", 0.0)),
         stick_from=raw.get("stick_from", ""),
+        rows_from=rows_from,
         drop_tiers=drop,
         band=tuple(band) if band is not None else None,
     )
