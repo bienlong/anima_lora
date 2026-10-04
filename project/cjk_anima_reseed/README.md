@@ -1,6 +1,6 @@
 # cjk_anima_reseed
 
-The JA vocab pack's rows re-seeded cold. Why: `motivation2.md`; the reads:
+The JA vocab pack's rows re-seeded cold. Why: `motivation2.md`; what an arm is judged on: `criteria.md`; the reads:
 `reports/`.
 
 ## Code
