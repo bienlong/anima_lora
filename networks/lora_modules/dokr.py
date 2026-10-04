@@ -76,10 +76,11 @@ class DoKrLoRAModule(LoKrModule):
     def _norm_scale(self) -> torch.Tensor:
         """``s = m / ‖W0 + scale·kron‖_row`` → (out, 1)。
 
-        两个分支都实测过（5060 Ti, rank 8）：materializing 严格路径
-        70-105s/步，快于块状 detach 分支的 140s/步——detach 仅作为语义
-        变体保留，默认关闭。DoKr 整体慢于 LoRA/DoRA 是 Kronecker 方向的
-        固有代价（等效全量级更新），非实现问题。
+        最终实测（5060 Ti, rank 8, 121 图）：detach 范数 + kron 链
+        checkpoint（不保留 u/y4 全宽中间量）= **1.66s/步**，与普通 LoRA
+        （1.48s）持平；无 checkpoint 的块状链 140s/步、materializing
+        70-105s/步——全宽中间量的显存保留才是开销根源（非 FLOPs）。
+        detach 丢弃范数对因子的二阶梯度（社区常见近似）。
 
         注意 `_row_norms` 返回一维 (out,)——这里必须保持一维除法：早年
         `unsqueeze(1) / 一维 norms` 会广播成 (out, out) 方阵（每模块
@@ -156,11 +157,21 @@ class DoKrLoRAModule(LoKrModule):
 
         work = org_forwarded.dtype
         if self.detach_norm:
-            # 激活侧恒等式 + 块状 kron：无 (out×in) 拼接、无全量 delta GEMM
-            # ——速度与 DoRA detach/普通 LoRA 同级（实测见 docstring）。
+            # 激活侧恒等式 + 块状 kron：无 (out×in) 拼接、无全量 delta GEMM。
+            # kron 链包 checkpoint：u/y4 全宽中间量反传时重算，不跨步保留
+            # （否则 280 模块 ×2 全宽张量 ≈ +14GB → 28GB OOM，实测）。
             s = self._norm_scale().squeeze(-1).to(work)
             x_lora = self._rebalance(x.to(work))
-            y = self.scale * self._kron_project(x_lora, work)
+
+            def _kron_out(xl):
+                return self.scale * self._kron_project(xl, work)
+
+            if torch.is_grad_enabled():
+                y = torch.utils.checkpoint.checkpoint(
+                    _kron_out, x_lora, use_reentrant=False
+                )
+            else:
+                y = _kron_out(x_lora)
             return org_forwarded + self.multiplier * (
                 (s - 1.0) * org_forwarded.to(work) + s * y
             ).to(org_forwarded.dtype)
