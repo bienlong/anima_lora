@@ -43,6 +43,7 @@ class DoKrLoRAModule(LoKrModule):
         lokr_shapes=None,
         dora_scale=None,
         dora_detach_norm=False,
+        channel_scale=None,  # 接受但忽略——Kronecker 无 lora_down 可吸收
     ):
         if org_module.__class__.__name__ != "Linear":
             raise ValueError(
