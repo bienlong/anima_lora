@@ -91,6 +91,6 @@
   "scale_weight_norms": "LoRA up/down 쌍별 최대 노름 정규화: 곱의 노름이 이 값을 초과하면 비율에 맞춰 축소합니다 (sd-scripts 방식). 5가 권장 시작점, 0은 비활성화. LoKr에는 효과 없음 (up/down 쌍이 없음).",
   "use_dora": "DoRA: 적용 가중치를 채널별 크기 + 저랭크 방향으로 분해하여 학습. 일반 LoRA보다 수렴이 안정적이며 VRAM이 약간 증가. use_lokr와 함께 사용하면 DoKr (크로네커 방향 + 크기). 일반 DoRA 저장 파일은 ComfyUI에서 바로 로드 가능.",
   "use_lokr": "LoKr: 저랭크 델타를 크로네커 곱(w1×w2)으로 대체 — 파라미터당 표현력이 더 높음. 저장소 내부 로딩 전용 (ComfyUI 표준 LoRA 경로 미지원). ortho/라우팅과 조합 불가.",
-  "lokr_factor": "LoKr w2 인수분해 분할. -1: 가장 균형 잡힌 인수 (LyCORIS 기본). 양의 약수를 지정하면 w1축 고정 (예: 4 → w1축=4). use_lokr이 꺼져 있으면 무시됩니다.",
+  "lokr_factor": "LoKr w2 인수분해 분할. -1: 가장 균형 잡힌 인수 (권장). 경고: 0(또는 큰 값)은 w1을 1x1 스칼라로, w2를 전체 행렬로 퇴화시킵니다 — DoKr 비용이 풀 파인튜닝 수준 (LoRA 대비 ~30-100배/스텝). 작은 양수일수록 파라미터가 많아집니다.",
   "rs_lora": "rs-LoRA: 실효 스케일 = alpha / sqrt(r) (일반은 alpha / r) — 고랭크(>32)에서 업데이트가 안정적. 일반 LoRA / DoRA / LoKr / DoKr에서 사용 가능. sqrt(r)는 저장 alpha에 반영되므로 kohya 형식 로더는 학습 시 스케일을 그대로 적용합니다."
 }
