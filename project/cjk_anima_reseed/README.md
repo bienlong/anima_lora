@@ -9,8 +9,9 @@ The JA vocab pack's rows re-seeded cold. Why: `motivation2.md`; the reads:
 |---|---|
 | `run.py` | front door: `run.py <run> data [--frac f] \| train \| read` (`read`: the plain read against `READ_AGAINST` → `results/`) |
 | `probe_split.py` | rows swapped at render, no training: two runs' rows split at a σ switch, one run's rows as stick / spikes, x̂0 per σ (`reports/probe_split_2026_10_04.md`) |
+| `stick_fit.py` | CPU: the stick runs' sticks, the kana / kanji burr, the band arms' sticks, scene numbers and sheets on cached renders (`reports/stick_fit_2026_10_04.md`) |
 | `probe_grad.py` | the scale line's `grad_identity` pass 2 on tiers drawn here (`reports/grid_64_2026_10_03.md`) |
-| `configs/<run>.toml` | the run: `rows` (data.vocabs specs, single glyphs), `read` (held out of the windows), `seed` (`"0921"` / `"0930"`), `steps_per_row`, optional `shares` (% of the items per tier, Σ 100), optional `upper_shift` (added to every tier's upper σ edge, capped at 0.9; `kana_up`) |
+| `configs/<run>.toml` | the run: `rows` (data.vocabs specs, single glyphs), `read` (held out of the windows), `seed` (`"0921"` / `"0930"`), `steps_per_row`, optional `shares` (% of the items per tier, Σ 100), optional `upper_shift` (added to every tier's upper σ edge, capped at 0.9; `kana_up`), optional `stick_from` (a stick run: that run's rows and data, the rows' mean trained only; `stick_*`) and `drop_tiers` (tiers left out at train) |
 | `reseed/table.py` | **the table**: one row per tier — recipe, share, σ band, glyph px, `px_keep` — and the scene knobs |
 | `reseed/recipes.py` | `bubble1` / `bubbleN` / `grid` |
 | `reseed/pools.py` | rows, scenes (+ the `s1s` pool, mono weighting), the windowed word pool |

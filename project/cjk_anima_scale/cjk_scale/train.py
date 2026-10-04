@@ -231,6 +231,8 @@ def train(
     steps_per_row: int | None = None,
     context: Path | None = None,
     row_step_scale: dict | None = None,
+    drop_tiers: tuple = (),
+    stick_only: bool = False,
 ) -> Path:
     """Train the run. ``data`` / ``out`` default to the run's dirs;
     ``max_steps`` stops the loop early with the full-length schedule
@@ -246,8 +248,12 @@ def train(
     default, ``paths.SEED_ROWS`` without one); ``row_step_scale`` = {vocab:
     factor} multiplies that vocab's rows' update each step — a per-row lr
     (AdamW normalizes a gradient scale away, so the step is scaled, not the
-    gradient; ``experiments/garble_replace`` inverse frequency). ``scale.py``
-    passes none of them.
+    gradient; ``experiments/garble_replace`` inverse frequency);
+    ``drop_tiers`` leaves those tiers' items out of the data dir;
+    ``stick_only`` trains the trained rows' shared mean only: every live row
+    takes the sum of the live rows' gradients, so AdamW moves them all by one
+    vector and the rows less their mean stay as warm-started
+    (``cjk_anima_reseed`` stick runs). ``scale.py`` passes none of them.
     A data dir built with windows (``build.json`` ``glyph_route``) is
     trained routed: ``ANIMA_VOCAB_GLYPH_ROUTE=1`` is set in-process before
     the TE cache (whose key carries it)."""
@@ -265,7 +271,14 @@ def train(
     data = data or data_dir(rc.name)
     out = out or run_dir(rc.name)
     out.mkdir(parents=True, exist_ok=True)
-    recs, ev, vocabs = load_items(data)
+    recs_all, ev, vocabs = load_items(data)
+    keep = [i for i, r in enumerate(recs_all) if r.get("tier") not in drop_tiers]
+    recs = [recs_all[i] for i in keep]
+    if drop_tiers:
+        print(
+            f"data: {len(recs)} of {len(recs_all)} items, tiers {sorted(drop_tiers)} left out",
+            flush=True,
+        )
     bj = data / "build.json"
     route = bj.exists() and json.loads(bj.read_text(encoding="utf-8")).get(
         "glyph_route", False
@@ -300,7 +313,7 @@ def train(
         flush=True,
     )
     ns = SimpleNamespace(seed=SEED, batch=BATCH, train_size=512)
-    lat = LatentStore(ns, data, recs, list(range(len(recs))), device)
+    lat = LatentStore(ns, data, recs_all, keep, device)
 
     anima = load_dit_model(args, device, torch.bfloat16)
     anima.requires_grad_(False)
@@ -341,6 +354,26 @@ def train(
         row_cap=row_cap,
     )
     assert rows.n_rows == len(p.idx), (rows.n_rows, len(p.idx))
+    if drop_tiers:
+        p.record["drop_tiers"] = sorted(drop_tiers)
+    stick0 = None
+    if stick_only:
+        live = ~rows.frozen_mask
+        assert bool(rows.warm_mask[live].all()), "stick_only: every live row warm"
+
+        def shared(g):
+            out = torch.zeros_like(g)
+            out[live] = g[live].sum(0)
+            return out
+
+        rows.delta.raw.register_hook(shared)
+        stick0 = rows.delta.raw.detach()[live].mean(0) * rows.row_scale
+        p.record["stick_only"] = True
+        print(
+            f"stick only: {int(live.sum())} rows move as one, stick "
+            f"|{float(stick0.norm()):.1f}|",
+            flush=True,
+        )
     steps, warmup, record = p.steps, p.warmup, p.record
     spr = (
         p.steps_per_row
@@ -434,6 +467,12 @@ def train(
         if step % 25 == 0 or step == 1:
             rec = rows.log_record(step, loss_fm, loss, t0, split.pop())
             rec["lr"] = opt.param_groups[0]["lr"]
+            if stick0 is not None:
+                st = rows.delta.raw.detach()[live].mean(0) * rows.row_scale
+                rec["stick"] = float(st.norm())
+                rec["stick_cos0"] = float(
+                    torch.nn.functional.cosine_similarity(st, stick0, dim=0)
+                )
             log.append(rec)
             print(json.dumps(rec), flush=True)
         if SAVE_EVERY and step % SAVE_EVERY == 0 and step < steps:

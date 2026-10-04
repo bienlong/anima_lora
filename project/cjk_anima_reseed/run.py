@@ -45,6 +45,7 @@ def main():
 
     run = load(a.run)
     if a.verb == "data":
+        assert not run.stick_from, f"{run.name}: a stick run trains on {run.data}"
         from reseed.builder import build
 
         build(run, a.workers, a.frac)
@@ -58,9 +59,11 @@ def main():
             run.scale_config(),
             data=run.data,
             out=run.dir,
-            cold=True,
+            cold=not run.stick_from,
             steps_per_row=run.steps_per_row,
             context=run.seed_rows(),
+            drop_tiers=run.drop_tiers,
+            stick_only=bool(run.stick_from),
         )
 
 

@@ -9,6 +9,9 @@
                                   # named, Σ 100; else table.TABLE's shares
     upper_shift = 0.1             # optional: every tier's upper σ edge moved by this
                                   # (capped at 0.9)
+    stick_from = "kana_up"        # optional: a stick run — that run's rows and data,
+                                  # its rows' shared mean trained only (no data verb)
+    drop_tiers = ["lone_44", …]   # optional: tiers left out of the data at train
 
 Its outputs land in ``output/cjk_anima_reseed/<run>/`` (``data/``,
 ``trained.pt``).
@@ -22,7 +25,16 @@ from pathlib import Path
 
 from . import CONFIGS, OUT
 
-KEYS = ("rows", "read", "seed", "steps_per_row", "shares", "upper_shift")
+KEYS = (
+    "rows",
+    "read",
+    "seed",
+    "steps_per_row",
+    "shares",
+    "upper_shift",
+    "stick_from",
+    "drop_tiers",
+)
 UPPER_MAX = 0.9  # tests/test_boundary.py: no band past it
 
 
@@ -36,6 +48,8 @@ class Run:
     steps_per_row: int
     shares: dict | None = None  # tier → % of the items
     upper_shift: float = 0.0  # added to every tier's upper σ edge
+    stick_from: str = ""  # a stick run: warm from this run, its data, the mean trained
+    drop_tiers: tuple = ()  # left out of the data at train
 
     def table(self) -> tuple:
         """``table.TABLE``, its shares the run's when it gives them (Σ kept at
@@ -68,10 +82,15 @@ class Run:
 
     @property
     def data(self) -> Path:
-        return self.dir / "data"
+        return (OUT / self.stick_from if self.stick_from else self.dir) / "data"
 
     def seed_rows(self) -> Path:
+        """The rows the run sits on: a stick run's source rows (merged), else
+        the seed's."""
         from cjk_scale import paths
+
+        if self.stick_from:
+            return OUT / self.stick_from / "trained.pt"
 
         return {"0921": paths.SEED_ROWS_0921, "0930": paths.SEED_ROWS}[self.seed]
 
@@ -101,6 +120,10 @@ def load(run: str) -> Run:
             f"unknown {sorted(set(shares) - names)}"
         )
         assert abs(sum(shares.values()) - 100) < 1e-9, f"{path}: shares sum to 100"
+    from .table import TABLE
+
+    drop = tuple(raw.get("drop_tiers", ()))
+    assert set(drop) <= {t.name for t in TABLE}, f"{path}: drop_tiers {drop}"
     return Run(
         name=path.stem,
         path=path,
@@ -110,4 +133,6 @@ def load(run: str) -> Run:
         steps_per_row=int(raw["steps_per_row"]),
         shares=dict(shares) if shares is not None else None,
         upper_shift=float(raw.get("upper_shift", 0.0)),
+        stick_from=raw.get("stick_from", ""),
+        drop_tiers=drop,
     )
