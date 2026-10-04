@@ -17,6 +17,8 @@ gradients, so AdamW moves them by one vector and the rows less their mean
   retrain_kana's; the ball / stick swap arms of ``probe_split`` (``gs_*``,
   ``rk_gsstick``, ``h0_*``) read and EN-ref cos'd against ``rk_self`` on the
   hiragana keys (``reports/ball_2026_10_04.md``).
+- ``ball_sheets``: per prompt, the hiragana words / singles as EN ref |
+  ``rk_self`` | ``gs_rkstick`` | ``gs_self`` → ``output/cjk_anima_reseed/<label>/sheets/``.
 - ``scene``: probe_split's scene numbers (EN-ref cos out, flat white) on
   the cached plain renders at seed 0.
 - ``sheets``: probe_split's per-key sheets at seed 0 (kana_mix | kana_up |
@@ -430,6 +432,60 @@ def sheets(recs: dict, label: str) -> Path:
     return out
 
 
+def ball_sheets(label: str, arms: tuple = ("rk_self", "gs_rkstick", "gs_self")) -> Path:
+    """Per prompt, the hiragana words and singles: EN ref | ``arms`` (the
+    ``probe_split`` swap arms) — read, EN-ref cos, flat white."""
+    from PIL import Image
+
+    from cjk_scale.paths import load_experiment
+    from common.readers import contact_sheet
+    from eval.enref import enref_file
+
+    SS = load_experiment("sigma_split")
+    out = OUT / label / "sheets"
+    out.mkdir(parents=True, exist_ok=True)
+    by = {
+        a: {
+            (m["text"], m["pi"]): m
+            for m in json.loads(
+                (PS.arm_dir(a) / "native_reads.json").read_text("utf-8")
+            )
+            if m["clause"] == PS.CLAUSE and m["seed"] == 0
+        }
+        for a in arms
+    }
+    keys = sorted(
+        {t for t, _ in by[arms[0]] if all(0x3041 <= ord(c) <= 0x309F for c in t)}
+    )
+    for pi in range(PS.PROMPTS):
+        ref = Image.open(enref_file(SS.ENREF, pi, 0)).convert("RGB")
+        for g, ks in (
+            ("words", [k for k in keys if len(k) > 1]),
+            ("singles", [k for k in keys if len(k) == 1]),
+        ):
+            rows = []
+            for t in ks:
+                rows.append((ref, [f"{t} EN ref p{pi:02d}"]))
+                for a in arms:
+                    m = by[a][(t, pi)]
+                    r0 = next((r for r in m.get("reads", []) if not r.get("whole")), {})
+                    fw = SS.placement(m)["flat_white"]
+                    rows.append(
+                        (
+                            Image.open(m["file"]).convert("RGB"),
+                            [
+                                f"{a}{' ✓' if m.get('exact') else ''}",
+                                f"sfx {(r0.get('sfx') or '')[:14]}",
+                                f"cos {m['en_cos']:.3f} out {m['en_cos_out']:.3f} fw {fw:.2f}",
+                            ],
+                        )
+                    )
+            contact_sheet(
+                rows, out / f"{g}_p{pi:02d}.png", thumb=240, cols=1 + len(arms)
+            )
+    return out
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--legs", default="geo,kanji,scene,sheets")
@@ -447,6 +503,8 @@ def main():
             metrics["geo"] = geo(T)
         if "kanji" in legs:
             metrics["kanji"] = kanji(T)
+    if "ball_sheets" in legs:
+        metrics["ball_sheets"] = str(ball_sheets(a.label))
     if legs & {"scene", "sheets"}:
         metrics["scene"], recs = scene()
         if "sheets" in legs:
