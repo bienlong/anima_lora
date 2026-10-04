@@ -142,13 +142,8 @@ def draw_flat_sigmas(
         # Qinglong triple hybrid (sdbds, musubi-tuner PR #407): per sample,
         # independently pick one of three samplers —
         #   79%  flux_shift  (resolution-dependent shift, as the branch above),
-        #   11%  logsnr      (Style-Friendly SNR sampler, arXiv:2411.14793 —
-        #                     log-SNR ~ N(logit_mean, logit_std), t = σ(-logsnr/2);
-        #                     biases toward the high-noise/style regime),
+        #   11%  logsnr      (Style-Friendly SNR sampler, arXiv:2411.14793),
         #   10%  logsnr2     (fixed N(5.36, 1.0) — the low-noise / detail regime).
-        # sigmoid_scale/sigmoid_bias apply to the mid (flux_shift) branch only,
-        # matching this file's other logit-normal branches; the logsnr draws
-        # stay pure per the musubi implementation.
         decision_t = torch.rand((bsz,), device=device, generator=generator)
         mid_mask = decision_t < 0.79
         logsnr_mask = (decision_t >= 0.79) & (decision_t < 0.9)
@@ -265,14 +260,12 @@ def fm_training_batch(
     dtype: torch.dtype = torch.float32,
     noise_scheduler: Optional[object] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """The default rectified-flow training step, as plain kwargs (issues.md DX2).
+    """The default rectified-flow training step, as plain kwargs.
 
-    Bench/adjacent code that wants a faithful FM step should call this instead
-    of reassembling ``get_noisy_model_input_and_timesteps`` (needs a full ``args``
-    Namespace + a scheduler) and then re-deriving the target by hand. This is the
-    exact recipe ``train.py`` runs — it delegates to the same function under the
-    hood (the ``tests/test_fm_training_batch.py`` invariant pins the bit-match),
-    with the trainer's argument **defaults** baked in as kwarg defaults.
+    The exact recipe ``train.py`` runs, without a full ``args`` Namespace or a
+    scheduler — it delegates to ``get_noisy_model_input_and_timesteps``
+    (``tests/test_fm_training_batch.py`` pins the bit-match), with the trainer's
+    argument **defaults** baked in as kwarg defaults.
 
     Args:
         latents: clean latents ``(B, C, H, W)`` (or 5D — ndim is honored).
@@ -359,6 +352,12 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin):
         num_train_timesteps: int = 1000,
         shift: float = 1.0,
     ):
+        # 防御：GUI/TOML 可能送来字符串或单元素列表，强转 float——否则
+        # 下面的张量运算在 diffusers 内部报难懂的 index TypeError。
+        try:
+            shift = float(shift)
+        except (TypeError, ValueError):
+            shift = 1.0
         timesteps = np.linspace(
             1, num_train_timesteps, num_train_timesteps, dtype=np.float32
         )[::-1].copy()

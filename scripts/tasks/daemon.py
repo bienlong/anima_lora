@@ -1,6 +1,6 @@
 """CLI surface for the local training daemon (``make daemon*``).
 
-Lifecycle verbs, mapped to the guarantees in ``plan.md`` Phase 1:
+Lifecycle verbs:
 
     daemon            start (idempotent — no-op if already up), wait /health
     daemon-attach     non-owning viewer; ctrl-C detaches only, training lives on
@@ -12,7 +12,8 @@ plus the submit/observe front door:
 
     daemon-run        submit an arbitrary command job (attach-by-default)
     daemon-wait       block until JOB=<id> is terminal; print record + result
-    daemon-status     one-shot JSON (health + jobs, or JOB=<id>/--job <id>)
+    daemon-jobs       the job history as greppable lines, oldest first
+    daemon-log        a job's captured stdout, read off disk
 
 ``daemon`` starts the daemon **console-detached** (see ``proc.spawn_detached``),
 so the terminal's SIGINT reaches only the foreground group, never the daemon.
@@ -35,30 +36,16 @@ from anima_daemon import config as _cfg
 from anima_daemon import proc as _proc
 
 
+def _truthy(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _job_arg(extra) -> str | None:
     """Resolve a job id from ``JOB=<id>`` env or the first positional arg."""
     job = os.environ.get("JOB")
     if not job and extra and not extra[0].startswith("-"):
         job = extra[0]
     return job or None
-
-
-def _read_result_envelope(record: dict) -> dict | None:
-    """The bench ``result.json`` this job lifted, inlined (or ``None``).
-
-    A GPU job that called ``bench/_common.write_result`` under the daemon dropped
-    a ``result_path.json`` pointer in its job dir, which the daemon followed onto
-    ``record["result_path"]`` (see ``manager._lift_result``). Reading it here is
-    what makes "where did my run land, and what did it say" one command.
-    """
-    path = record.get("result_path")
-    if not path:
-        return None
-    try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
 
 
 def cmd_daemon(extra):
@@ -85,70 +72,39 @@ def cmd_daemon(extra):
     )
 
 
-# Compact per-job view daemon-status prints by default. Full records run ~1KB each
-# and the history grows unboundedly — a polling agent needs "what's queued/running/
-# failed", not the whole record (GET /jobs/{id} has that).
-_STATUS_JOB_FIELDS = (
-    "id",
-    "method",
-    "kind",
-    "preset",
-    "state",
-    "submitted_at",
-    "started_at",
-    "ended_at",
-    "error",
-    "ckpt_path",
-    # Where a finished bench/gen job landed its envelope — "where did my run
-    # land" without a job-dir spelunk. Only the *pointer* here: a bench
-    # `metrics` blob can run to hundreds of lines (per-pair records, per-step
-    # curves), which would swamp a 15-job overview. `--job <id>` inlines the
-    # whole envelope for the one job you actually want.
-    "result_path",
-    "chained_job_id",
-)
-
-# Default job cap for the compact view — the full history grows unboundedly, so
-# a bare `daemon-status` shows only the most-recent slice (newest first). `--all`
-# lifts the cap; `--limit N` sets it. `jobs_total`/`jobs_shown` in the output
-# report the truncation so a capped view never reads as "that's everything".
+# Default job cap for a bare `daemon-jobs` (most recent slice). `--all` lifts it,
+# `--limit N` sets it; a trailing `N of M jobs` line reports truncation.
 _STATUS_DEFAULT_LIMIT = 15
 
 # Shorthand state groups for `--running` / `--failed` / `--done`.
 _STATUS_ACTIVE_STATES = frozenset({"running", "paused"})
 _STATUS_FAILED_STATES = frozenset({"error", "stopped"})
-# Every legal job state — `--state` is validated against this. A typo (or a job
-# id passed where a state belongs) used to filter everything out and print
-# `jobs_shown: 0`, which reads exactly like "the job vanished".
+# Every legal job state; an unknown `--state` value exits 2.
 _STATUS_ALL_STATES = frozenset(
     {"queued", "running", "paused", "done", "error", "stopped"}
 )
 
 
 def _parse_status_flags(extra):
-    """Parse the ``daemon-status`` filter flags out of ``extra``.
+    """Parse the ``daemon-jobs`` filter flags out of ``extra``.
 
-    ``--full`` (raw records) · ``--all`` (no cap) · ``--limit N`` ·
-    ``--state s[,s]`` · ``--running``/``--active`` · ``--failed`` · ``--done`` ·
-    ``--job <id>`` (one record, no list). Unknown tokens are ignored
-    (forward-compatible with the make ARGS shim); a bad ``--state`` value is not
-    — it lands in ``opts["bad_states"]`` for the caller to error out on.
+    ``--all`` (no cap) · ``--limit N`` · ``--state s[,s]`` ·
+    ``--running``/``--active`` · ``--failed`` · ``--done``. Unknown tokens are
+    ignored (forward-compatible with the make ARGS shim); a bad ``--state``
+    value is not — it lands in ``opts["bad_states"]`` for the caller to error
+    out on.
     """
     extra = list(extra or [])
     opts = {
-        "full": False,
         "all": False,
         "states": None,
         "bad_states": None,
-        "job": None,
         "limit": _STATUS_DEFAULT_LIMIT,
     }
     i = 0
     while i < len(extra):
         a = extra[i]
-        if a == "--full":
-            opts["full"] = True
-        elif a == "--all":
+        if a == "--all":
             opts["all"] = True
         elif a in ("--running", "--active"):
             opts["states"] = set(_STATUS_ACTIVE_STATES)
@@ -163,9 +119,6 @@ def _parse_status_flags(extra):
             if bad:
                 opts["bad_states"] = sorted(bad)
             opts["states"] = asked & _STATUS_ALL_STATES
-        elif a == "--job" and i + 1 < len(extra):
-            i += 1
-            opts["job"] = extra[i]
         elif a == "--limit" and i + 1 < len(extra):
             i += 1
             try:
@@ -177,17 +130,23 @@ def _parse_status_flags(extra):
 
 
 def _job_target(job: dict) -> str | None:
-    """Best-effort label for *what* a job operates on — the missing piece when
-    skimming the queue. Command jobs (soup/preprocess/distill) carry it in
-    ``argv`` (``--name`` / ``--path_pattern``, else the ``-m`` module); train jobs
-    carry it as the ``output_name`` override, else fall back to ``method``."""
+    """Best-effort label for *what* a job operates on. Command jobs
+    (soup/preprocess/distill) carry it in ``argv`` (``--name`` /
+    ``--path_pattern`` / the bench script's own ``--label``, else the ``-m``
+    module); train jobs carry it as the ``output_name`` override, else fall back
+    to ``method``.
+
+    ``--label`` is scanned last and is what separates a grid of N bench runs of
+    the same script. Derived at read time, so it also applies to jobs already on
+    disk."""
     argv = job.get("argv") or []
     if job.get("kind") == "command":
-        for flag in ("--name", "--path_pattern", "--output_name"):
-            if flag in argv:
-                i = argv.index(flag)
-                if i + 1 < len(argv):
+        for flag in ("--name", "--path_pattern", "--output_name", "--label"):
+            for i, tok in enumerate(argv):
+                if tok == flag and i + 1 < len(argv):
                     return argv[i + 1]
+                if tok.startswith(f"{flag}="):
+                    return tok.split("=", 1)[1]
         if "-m" in argv:
             i = argv.index("-m")
             if i + 1 < len(argv):
@@ -197,103 +156,128 @@ def _job_target(job: dict) -> str | None:
     return overrides.get("output_name") or job.get("method")
 
 
-def cmd_daemon_status(extra):
-    """Daemon status as one JSON object on stdout — the agent/script surface.
+def _jobs_from_disk() -> list[dict]:
+    """Every persisted ``jobs/<id>/job.json``, for a daemon that is down.
 
-    ``{"up", "base_url", "pid", "port", "root", "stale_code", "paused",
-    "active_job", "jobs_total", "jobs_shown", "jobs"}``. Passive: never starts a
-    daemon (safe to poll); ``up: false`` + exit 1 when nothing answers
-    ``/health``. ``base_url`` is resolved from the pidfile each call, so it
-    follows a fallback-to-ephemeral port — read it from here rather than assuming
-    8765. ``stale_code: true`` means the resident daemon is serving source older
-    than the current on-disk ``anima_daemon/*`` — the next submit will eagerly
-    restart it (Phase 0a).
+    The daemon writes the record on each state change, so the history outlives
+    it and a post-mortem after ``daemon-terminate`` still has something to read.
+    """
+    out = []
+    try:
+        dirs = sorted(_cfg.JOBS_DIR.iterdir())
+    except OSError:
+        return out
+    for d in dirs:
+        try:
+            rec = json.loads((d / "job.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(rec, dict) and rec.get("id"):
+            out.append(rec)
+    return out
 
-    Jobs are compact summaries (id/state/error/ckpt_path/result_path/… plus a
-    derived ``target`` = what the job operates on), **newest first** and capped to
-    the most-recent ``_STATUS_DEFAULT_LIMIT``; ``jobs_total`` vs ``jobs_shown``
-    report any truncation. Filter flags: ``--full`` (raw records) · ``--all`` (no
-    cap) · ``--limit N`` · ``--state s[,s]`` · ``--running`` · ``--failed`` ·
-    ``--done`` · ``--job <id>`` / ``JOB=<id>`` (that one record, full, with the
-    bench ``result.json`` it lifted inlined under ``result`` — no
-    list-then-eyeball step, and it reads the on-disk record when the daemon is
-    down). An unknown ``--state`` value errors out (exit 2) instead of silently
-    filtering everything away, which read like "the job vanished".
+
+def _job_line(job: dict) -> str:
+    """One job as one line: when · id · state · rc · target · error."""
+    ts = job.get("started_at") or job.get("submitted_at") or 0
+    when = time.strftime("%m-%d %H:%M", time.localtime(ts)) if ts else "  -  "
+    rc = job.get("returncode")
+    end = job.get("ended_at") or (
+        time.time() if job.get("state") == "running" else None
+    )
+    started = job.get("started_at")
+    dur = f"{(end - started) / 60:5.1f}m" if started and end else "     -"
+    err = (job.get("error") or "").splitlines()
+    tail = f"  {err[0][:60]}" if err else ""
+    return (
+        f"{when}  {job.get('id', '?'):<22} {str(job.get('state')):<8} "
+        f"rc={'-' if rc is None else rc:<4} {dur}  {_job_target(job) or '-'}{tail}"
+    )
+
+
+def cmd_daemon_jobs(extra):
+    """The job history as **lines, oldest first** — the newest row is the last
+    one printed.
+
+    Log-ordered, so ``| tail -5`` means the five most recent and each job is one
+    greppable line. Jobs do not always start in submit order (a chained job
+    waits on its parent), so ask for pending work by ``--state`` rather than
+    trusting the newest-N slice to contain it.
+
+    Filters: ``--limit N`` · ``--all`` · ``--running``/``--active`` ·
+    ``--failed`` · ``--done`` · ``--state s[,s]``. Falls back to the on-disk
+    records when the daemon is down, so history survives ``daemon-terminate``.
     """
     opts = _parse_status_flags(extra)
     if opts["bad_states"]:
         print(
             f"unknown job state(s): {', '.join(opts['bad_states'])}\n"
-            f"  valid: {', '.join(sorted(_STATUS_ALL_STATES))}\n"
-            "  (looking up one job? use --job <id> or JOB=<id>)",
+            f"  valid: {', '.join(sorted(_STATUS_ALL_STATES))}",
             file=sys.stderr,
         )
         sys.exit(2)
     cl = _client.DaemonClient()
-    job_id = opts["job"] or os.environ.get("JOB")
-    if job_id:
-        # Single-record mode: reads the on-disk job.json when the daemon is down,
-        # so a post-mortem lookup works without resurrecting a daemon.
-        record = cl.job_record(job_id)
-        if record is None:
-            print(
-                json.dumps(
-                    {
-                        "up": cl.health() is not None,
-                        "error": "no such job",
-                        "job_id": job_id,
-                    },
-                    indent=2,
-                )
-            )
-            sys.exit(2)
-        envelope = _read_result_envelope(record)
-        if envelope is not None:
-            record = {**record, "result": envelope}
-        print(json.dumps(record, indent=2))
-        return
-    health = cl.health()
-    if health is None:
-        print(json.dumps({"up": False, "base_url": None, "jobs": []}))
-        sys.exit(1)
-    jobs = cl.list_jobs()
-    jobs.sort(key=lambda j: j.get("submitted_at") or 0, reverse=True)  # newest first
-    jobs_total = len(jobs)
+    up = cl.health() is not None
+    jobs = cl.list_jobs() if up else _jobs_from_disk()
+    jobs.sort(key=lambda j: j.get("submitted_at") or 0)  # oldest first: tail = newest
+    total = len(jobs)
     if opts["states"] is not None:
         jobs = [j for j in jobs if j.get("state") in opts["states"]]
-    if not opts["all"] and opts["limit"] is not None and opts["limit"] >= 0:
-        jobs = jobs[: opts["limit"]]
-    if opts["full"]:
-        out_jobs = [{**j, "target": _job_target(j)} for j in jobs]
-    else:
-        out_jobs = [
-            {**{k: j.get(k) for k in _STATUS_JOB_FIELDS}, "target": _job_target(j)}
-            for j in jobs
-        ]
+    if not opts["all"] and opts["limit"]:
+        jobs = jobs[-opts["limit"] :]  # the newest N, still oldest-first
+    for job in jobs:
+        print(_job_line(job))
+    shown = len(jobs)
+    note = "" if up else "  (daemon down — read from disk)"
     print(
-        json.dumps(
-            {
-                "up": True,
-                "base_url": cl.base,
-                "pid": health.get("pid"),
-                "port": health.get("port"),
-                "root": health.get("root"),
-                "stale_code": _client.daemon_is_stale(health),
-                "paused": health.get("paused"),
-                "active_job": health.get("active_job"),
-                "jobs_total": jobs_total,
-                "jobs_shown": len(out_jobs),
-                "jobs": out_jobs,
-            },
-            indent=2,
-        )
+        f"\n{shown} of {total} jobs{note}"
+        + ("" if opts["all"] or shown == total else "  — --all for the rest"),
+        flush=True,
     )
+    if not up:
+        sys.exit(1)
 
 
-# How often an idle attach prints "still here, still quiet". A GPU bench between
-# prints and a wedged daemon look identical on a silent pipe, and the silence can
-# legitimately run minutes — so say so periodically rather than leaving the reader
-# (or an agent parsing the pipe) to guess.
+def cmd_daemon_log(extra):
+    """Dump a job's captured stdout — ``JOB=<id>``, else the most recent job.
+
+    ``daemon-attach`` *follows* a live stream over SSE; this reads the log file
+    off disk, so it works on a finished job and with the daemon down.
+    ``ARGS="-n 200"`` bounds the tail (default 100; ``-n 0`` = the whole file).
+    """
+    extra = list(extra or [])
+    n = 100
+    if "-n" in extra:
+        i = extra.index("-n")
+        if i + 1 < len(extra):
+            try:
+                n = int(extra[i + 1])
+            except ValueError:
+                pass
+            del extra[i : i + 2]
+    job_id = _job_arg(extra)
+    cl = _client.DaemonClient()
+    if not job_id:
+        jobs = cl.list_jobs() if cl.health() is not None else _jobs_from_disk()
+        jobs.sort(key=lambda j: j.get("submitted_at") or 0)
+        if not jobs:
+            print("no jobs on record.", file=sys.stderr)
+            sys.exit(1)
+        job_id = jobs[-1].get("id")
+    record = cl.job_record(job_id) or {}
+    path = Path(record.get("stdout_path") or (_cfg.job_dir(job_id) / "stdout.log"))
+    if not path.is_file():
+        print(f"no stdout log for job {job_id} ({path})", file=sys.stderr)
+        sys.exit(1)
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    head = _job_line(record) if record else job_id
+    shown = lines if n <= 0 else lines[-n:]
+    print(f"# {head}\n# {path}  ({len(lines)} lines, showing {len(shown)})\n")
+    for ln in shown:
+        print(ln)
+
+
+# How often an attach with no output prints a `[attached Ns — no output yet]` tick.
 _ATTACH_TICK_SECONDS = 30.0
 
 
@@ -318,10 +302,8 @@ def cmd_daemon_attach(extra):
     daemon event stream. Ctrl-C detaches this terminal only — never the daemon
     or the training subprocess (we are the parent of nothing).
 
-    Every write is flushed: stdout to a pipe is block-buffered, so an unflushed
-    banner made a piped attach look like zero bytes / a hang. On a job that is
-    already terminal this now returns as soon as the log is drained (the SSE
-    endpoint closes the connection at ``eof``)."""
+    Every write is flushed. On a job that is already terminal it returns as
+    soon as the log is drained (the SSE endpoint closes at ``eof``)."""
     if not _client.is_running():
         print("no daemon; `make daemon` to start.", file=sys.stderr)
         sys.exit(1)
@@ -336,9 +318,8 @@ def cmd_daemon_attach(extra):
     try:
         for line in stream:
             last_line[0] = time.time()
-            # The log stream's terminator is a {"ev":"eof","state":…} event. Now
-            # that the connection actually closes (rather than parking), every
-            # attach reaches it — so render it instead of leaking raw JSON.
+            # The log stream's terminator is a {"ev":"eof","state":…} event;
+            # render it instead of printing raw JSON.
             if line.startswith("{") and '"eof"' in line:
                 try:
                     ev = json.loads(line)
@@ -362,9 +343,11 @@ def cmd_daemon_wait(extra):
     (``done`` → 0), so ``make daemon-wait JOB=… && next-step`` composes.
 
     The non-streaming half of "submit → wait → read the result": no log volume,
-    and it reads the persisted ``job.json`` if the daemon restarts mid-wait. Ctrl-C
-    detaches (exit 130) — the job keeps running. ``ARGS="--timeout 600"`` bounds the
-    wait (exit 124, like ``timeout(1)``).
+    and it reads the persisted ``job.json`` if the daemon restarts mid-wait.
+    Ctrl-C detaches (exit 130) — the job keeps running. ``ARGS="--timeout 600"``
+    bounds the wait (exit 124, like ``timeout(1)``) and prints a JSON snapshot —
+    state plus the last progress event and its staleness — so a caller that
+    gives up still learns whether the job is healthy-but-slow or wedged.
     """
     extra = list(extra or [])
     timeout = None
@@ -385,7 +368,7 @@ def cmd_daemon_wait(extra):
     if not job:
         print(
             "nothing to wait for: pass JOB=<id> (no job is active).\n"
-            "  make daemon-status         # what has run / is queued",
+            "  make daemon-jobs           # what has run / is queued",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -403,9 +386,9 @@ def split_daemon_run_args(
     (``--label`` / ``--stall-timeout``, space or ``=`` form) are recognized
     only BEFORE the first positional token (the script/module): bench scripts
     take ``--label`` themselves, so the same flag *after* the script path
-    belongs to the child (the old anywhere-scan silently ate it). A literal
-    ``--`` is a hard separator — everything after it is child argv verbatim,
-    exempt from both this scan and run-mode flag resolution.
+    belongs to the child. A literal ``--`` is a hard separator — everything
+    after it is child argv verbatim, exempt from both this scan and run-mode
+    flag resolution.
 
     ``stall_timeout_raw`` is returned unparsed so the caller owns the
     error/exit policy.
@@ -458,12 +441,9 @@ def cmd_daemon_run(extra):
     code, ctrl-C detaches), ``--queue`` to detach, ``--inline`` to bypass the
     daemon.
 
-    daemon-run's own flags — ``--label NAME`` (display label, default: script
-    basename) and ``--stall-timeout S`` (stall-watchdog budget, 0 = off) — must
-    come BEFORE the script path; after it, every token (including ``--label``,
-    which most bench scripts define themselves) is handed to the child. A
-    ``--`` separator makes everything after it child argv verbatim, run-mode
-    flags included.
+    Own flags: ``--label NAME`` (display label, default: script basename) and
+    ``--stall-timeout S`` (stall-watchdog budget, 0 = off), both before the
+    script path — see ``split_daemon_run_args``.
     """
     from scripts.tasks import _common
 
@@ -509,15 +489,30 @@ def cmd_daemon_kill(extra):
 def cmd_daemon_pause(extra):
     """Freeze the running job's process tree (SIGSTOP) in place — VRAM stays put,
     resume is instant. ``JOB=<id>`` targets a specific job; otherwise the active
-    one. The queue does not advance past a paused job (it still owns the card)."""
+    one. The queue does not advance past a paused job (it still owns the card).
+
+    ``RELEASE=1`` (or ``--release``): cooperative release instead — the trainer
+    saves a resumable state at its next optimizer step and exits, the GPU is
+    freed and the queue advances; ``make daemon-resume`` relaunches it from that
+    state (train.py jobs only; resume reloads + recompiles)."""
     if not _client.is_running():
         print("no daemon running.", file=sys.stderr)
         sys.exit(1)
+    extra = list(extra or [])
+    release = _truthy(os.environ.get("RELEASE")) or "--release" in extra
+    extra = [a for a in extra if a != "--release"]
     cl = _client.DaemonClient()
-    result = cl.pause_job(_job_arg(extra))
+    result = cl.pause_job(_job_arg(extra), release_model=release)
     if result.get("error"):
         print(result["error"], file=sys.stderr)
         sys.exit(1)
+    if release:
+        print(
+            f"job {result.get('job_id')}: release-pause requested — the trainer "
+            f"saves a resumable state at its next step and exits (state → paused, "
+            f"GPU free). `make daemon-resume JOB={result.get('job_id')}` relaunches it."
+        )
+        return
     print(
         f"job {result.get('job_id')} → {result.get('state')} (frozen; VRAM held). "
         f"`make daemon-resume` to thaw."
@@ -535,6 +530,12 @@ def cmd_daemon_resume(extra):
     if result.get("error"):
         print(result["error"], file=sys.stderr)
         sys.exit(1)
+    if result.get("relaunch"):
+        print(
+            f"job {result.get('job_id')} → {result.get('state')} (relaunch "
+            f"#{result['relaunch']} from the saved state, front of the queue)."
+        )
+        return
     print(f"job {result.get('job_id')} → {result.get('state')} (thawed).")
 
 

@@ -53,11 +53,7 @@ def test_spec_dispatch_selects_dora_lokr_and_dokr():
 
 def test_spec_rejects_routed_combos():
     for routed in (
-        {"use_ortho": True},
-        {"use_ortho_init": True},
-        {"use_chimera_hydra": True},
         {"use_moe_style": "shared_A"},
-        {"use_moe_style": "independent_A"},
         {"step_expert_K": 2},
     ):
         with pytest.raises(ValueError, match="plain"):
@@ -74,9 +70,9 @@ def test_registry_entries():
     assert NETWORK_REGISTRY["dokr"].save_variant == "lokr"
 
 
-def test_cfg_rs_lora_accepts_kron_family_and_refuses_others():
+def test_cfg_rs_lora_accepts_kron_family_and_refuses_routed():
     from networks.lora_anima.config import LoRANetworkCfg
-    from networks.lora_modules import OrthoLoRAModule
+    from networks.lora_modules import HydraLoRAModule  # routed 家族（v2 保留）
 
     cfg = LoRANetworkCfg.from_kwargs(
         {"rs_lora": "true", "use_lokr": "true", "use_dora": "true"},
@@ -88,11 +84,11 @@ def test_cfg_rs_lora_accepts_kron_family_and_refuses_others():
     assert cfg.rs_lora is True
     with pytest.raises(ValueError, match="rs_lora"):
         LoRANetworkCfg.from_kwargs(
-            {"rs_lora": "true"},
+            {"rs_lora": "true", "use_moe_style": "shared_A"},
             network_dim=8,
             network_alpha=8,
             neuron_dropout=None,
-            module_class=OrthoLoRAModule,
+            module_class=HydraLoRAModule,
         )
 
 

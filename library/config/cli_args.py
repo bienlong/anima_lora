@@ -4,8 +4,6 @@ Each ``add_*_arguments`` call plugs a related group of flags into the training
 parser. The groups split the flag surface into coherent chunks so individual
 entry points (training, preprocessing, distillation, ...) can opt into only
 what they need.
-
-No real logic lives here — these are pure argparse declarations.
 """
 
 from __future__ import annotations
@@ -292,7 +290,9 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         "partitioner recompute view ops in backward instead of saving them "
         "(views are free to recompute but saving one pins its base tensor "
         "alive). Lowers the saved-for-backward set without engaging the "
-        "activation_memory_budget knapsack. Ignored (with a log line) under "
+        "activation_memory_budget knapsack. Measured **exactly inert** on "
+        "Anima (_archive/bench/freefit_vram) — prefer "
+        "--partitioner_aggressive_recomputation. Ignored (with a log line) under "
         "gradient_checkpointing — same repartitioning hazard as the budget.",
     )
     parser.add_argument(
@@ -301,7 +301,8 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         help="torch._functorch.config.aggressive_recomputation: drop the "
         "min-cut partitioner's ban-recompute heuristics so more op classes "
         "may be recomputed in backward when the cut is cheap. Can trade "
-        "backward time for VRAM — see bench/freefit_vram before adopting. "
+        "backward time for VRAM: −2.25 GB for +12.6% s/it at budget=0.99 "
+        "(_archive/bench/freefit_vram). "
         "Ignored (with a log line) under gradient_checkpointing.",
     )
     parser.add_argument(
@@ -327,7 +328,7 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         "reasoning; mix_order_reduction stays enabled when no band straddles "
         "4096. Costs ~x(bands) step-0 compile wall. No-op on single-tier "
         "pools (one band == the union range). Phase 0 flag — see "
-        "_archive/proposals/perband_dynamic_seq.md and bench/perband_seq.",
+        "_archive/proposals/perband_dynamic_seq.md and _archive/bench/perband_seq.",
     )
     parser.add_argument(
         "--vae", type=str, default=None, help="path to checkpoint of vae to replace"
@@ -690,7 +691,7 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         "--method",
         type=str,
         default=None,
-        help="method name under configs/methods/ (e.g. 'tlora', 'hydralora', 'chimera'). Merged after preset so method settings win on overlap.",
+        help="method name under configs/methods/ (e.g. 'lora', 'soft_tokens'). Merged after preset so method settings win on overlap.",
     )
     parser.add_argument(
         "--preset",
@@ -720,7 +721,21 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
 
 def add_masked_loss_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
-        "--masked_loss", action="store_true", help="apply mask for calculating loss."
+        "--masked_loss",
+        action="store_true",
+        help="apply mask for calculating loss. Off by default since v2: a mask "
+        "tree on disk is ignored (one log line) until this is set.",
+    )
+    parser.add_argument(
+        "--mask_dir",
+        type=str,
+        default=None,
+        help="Root of the `{stem}_mask.png` tree written by `make mask`, "
+        "mirroring the resized/ subdir layout. Defaults to `mask_dir` in "
+        "configs/preprocess.toml; a subset's own `mask_dir` in the dataset "
+        "blueprint still wins. Ignored when the directory does not exist, so "
+        "the legacy masks/{merged,sam} auto-resolution still applies to a "
+        "checkout that never re-ran masking.",
     )
 
 
@@ -749,11 +764,16 @@ def add_dit_training_arguments(parser: argparse.ArgumentParser):
             "logit_normal",
             "mode",
             "cosmap",
+            "min_snr",
             "none",
             "uniform",
         ],
-        help="weighting scheme for timestep distribution. Default is uniform",
+        help="weighting scheme for timestep distribution. Default is uniform. "
+        "min_snr = v-pred Min-SNR-gamma, mean-1 normalized over the run's sigma "
+        "density (down-weights the high-sigma steps the gradient noise-scale "
+        "probe found 4-10x noisier for equal signal; see --min_snr_gamma)",
     )
+
     parser.add_argument(
         "--logit_mean",
         type=float,
@@ -1092,12 +1112,11 @@ def enable_high_vram(args: argparse.Namespace):
 def verify_training_args(args: argparse.Namespace):
     enable_high_vram(args)
 
-    # Expand the two semantic cache knobs into the legacy internal flags that
-    # the dataset / strategy / metadata code still reads. `use_vae_cache` and
-    # `use_text_cache` are the only config-facing surface; disk caching is the
-    # only supported mode (RAM-only was never used), so the `_to_disk` siblings
-    # always track their base flag. The old keys survive as schema aliases
-    # (see library/config/schema.py) so pre-existing configs still resolve.
+    # Expand the two semantic cache knobs (`use_vae_cache` / `use_text_cache`)
+    # into the internal flags the dataset / strategy / metadata code reads. Disk
+    # caching is the only supported mode, so the `_to_disk` siblings always track
+    # their base flag. The old keys resolve as schema aliases
+    # (library/config/schema.py).
     args.cache_latents = args.cache_latents_to_disk = bool(args.use_vae_cache)
     args.cache_text_encoder_outputs = args.cache_text_encoder_outputs_to_disk = bool(
         args.use_text_cache

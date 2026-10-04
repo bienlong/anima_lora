@@ -183,9 +183,13 @@ def _widget(v: Any, key: str = "") -> QWidget:
         return w
     if isinstance(v, int):
         w = QSpinBox()
-        # 10k default cap guards against typos; overridden for fields that legitimately exceed it.
+        # 10k default cap guards against typos; overridden for fields that
+        # legitimately exceed it or need negative values (lokr_factor = -1
+        # 是"均衡分解"的约定值，必须可填).
         if key == "min_pixels":
             w.setRange(0, 100_000_000)
+        elif key == "lokr_factor":
+            w.setRange(-1, 10000)
         else:
             w.setRange(0, 10000)
         w.setValue(v)

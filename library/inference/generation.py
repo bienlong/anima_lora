@@ -17,7 +17,6 @@ from library.inference.adapters import (
     clear_hydra_fei,
     clear_hydra_sigma,
     compute_and_set_hydra_fei,
-    set_hydra_content,
     set_hydra_crossattn,
     set_hydra_sigma,
     set_step_expert_index,
@@ -408,7 +407,6 @@ def generate_body_tiled(
                     if anima.blocks_to_swap:
                         anima.prepare_block_swap_before_forward()
                     # caption-dependent routers; fire separately for cond vs uncond
-                    set_hydra_content(anima, embed)
                     set_hydra_crossattn(anima, embed)
                     if soft_tokens_net is not None:
                         soft_tokens_net.append_postfix(
@@ -439,7 +437,6 @@ def generate_body_tiled(
                     if do_cfg:
                         if anima.blocks_to_swap:
                             anima.prepare_block_swap_before_forward()
-                        set_hydra_content(anima, negative_embed)
                         set_hydra_crossattn(anima, negative_embed)
                         if soft_tokens_net is not None:
                             soft_tokens_net.append_postfix(
@@ -659,7 +656,7 @@ def generate_body(
     )
 
     # FSG pre-step latent calibration. CFG-only (needs the cond/uncond gap).
-    # Composes with --spectrum; ignored under --spd (FSG×SPD is a v2 item).
+    # Composes with --spectrum; ignored under --spd.
     fsg = None
     if getattr(args, "fsg", False):
         if not do_cfg:
@@ -682,7 +679,7 @@ def generate_body(
     # a pure change to the cond/uncond combine and works unchanged under Euler
     # and er_sde/lcm, and (via the side-channel) under --spectrum. Mutually
     # exclusive with --smc_cfg (alternative combine) and unsupported under
-    # --spd (mid-loop σ re-spacing; a v2 item).
+    # --spd (mid-loop σ re-spacing).
     cfgpp_lambda = None
     if getattr(args, "cfgpp", False):
         if not do_cfg:
@@ -895,7 +892,6 @@ def generate_body(
                         )
                     else:
                         cond_embed = embed
-                    set_hydra_content(anima, cond_embed)
                     set_hydra_crossattn(anima, cond_embed)
                     if soft_tokens_net is not None:
                         soft_tokens_net.append_postfix(
@@ -929,7 +925,6 @@ def generate_body(
                         set_xattn_boost_state(anima, 1.0)
 
                     if do_cfg:
-                        set_hydra_content(anima, negative_embed)
                         set_hydra_crossattn(anima, negative_embed)
                         if soft_tokens_net is not None:
                             soft_tokens_net.append_postfix(
@@ -1064,7 +1059,7 @@ def generate(
         logger.info("No precomputed data. Preparing image and text inputs.")
         context, context_null = prepare_text_inputs(args, device, anima, shared_models)
 
-    # Phase 2 modulation guidance: compute guidance delta once
+    # Modulation guidance: compute guidance delta once
     if (
         getattr(args, "pooled_text_proj", None) is not None
         and getattr(args, "mod_w", 0.0) != 0.0

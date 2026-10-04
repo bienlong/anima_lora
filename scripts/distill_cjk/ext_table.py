@@ -43,11 +43,13 @@ class ExtTable(nn.Module):
         mode: str = "global",
         rank: int = 64,
         tunable_rows: torch.Tensor | None = None,
+        freeze_diag: bool = False,
     ) -> None:
         super().__init__()
         if mode not in ("global", "row", "global_row"):
             raise ValueError(f"unknown param mode {mode!r}")
         self.mode = mode
+        self.freeze_diag = bool(freeze_diag)
         self.register_buffer("init", init.float(), persistent=False)
         n_rows, dim = init.shape
 
@@ -55,7 +57,14 @@ class ExtTable(nn.Module):
             # LoRA-style init: down random, up zero ⇒ exactly `init` at step 0.
             self.down = nn.Parameter(torch.randn(dim, rank) * (dim**-0.5))
             self.up = nn.Parameter(torch.zeros(rank, dim))
-            self.log_diag = nn.Parameter(torch.zeros(dim))
+            # ``freeze_diag``: keep the per-dim diagonal at identity (a
+            # buffer, never trained) so the shared map is low-rank + gain
+            # only. The learned diagonal is what discards key directions the
+            # teacher does not reward (spread_probe: init PR 234 -> 54).
+            if freeze_diag:
+                self.register_buffer("log_diag", torch.zeros(dim))
+            else:
+                self.log_diag = nn.Parameter(torch.zeros(dim))
             self.log_gain = nn.Parameter(torch.zeros(()))
 
         if mode in ("row", "global_row"):
@@ -108,19 +117,24 @@ class ExtTable(nn.Module):
         return out
 
     @torch.no_grad()
-    def provenance(self, visits: torch.Tensor | None) -> list[str]:
-        """Per-row ``tuned`` / ``mapped`` / ``zero-shot`` — shipped in the JSON.
+    def provenance(self, visits: torch.Tensor | None, span_floor: int = 0) -> list[str]:
+        """Per-row ``tuned`` / ``mapped`` / ``mapped-unseen`` / ``zero-shot``.
 
         ``mapped`` is the tier the plan did not have: a row the corpus never
         visited still moves, because the global correction applies to it.
+        ``mapped-unseen`` (plan_zh2 U1) splits that tier by evidence: with a
+        span visit floor, a row below the floor never supervised the map — it
+        was carried along, not trained on — and a reader of the pack can tell
+        the two apart. Without a floor every mapped row is plain ``mapped``.
         """
         n = self.init.shape[0]
-        seen = (
-            (visits > 0)
-            if visits is not None
-            else torch.zeros(n, dtype=torch.bool, device=self.init.device)
-        )
-        tuned = torch.zeros(n, dtype=torch.bool, device=self.init.device)
+        dev = self.init.device
+        if visits is None:
+            visits = torch.zeros(n, dtype=torch.long, device=dev)
+        visits = visits.to(dev)
+        seen = visits > 0
+        below = visits < span_floor if span_floor > 0 else torch.zeros_like(seen)
+        tuned = torch.zeros(n, dtype=torch.bool, device=dev)
         if self.has_rows:
             tuned[self.tunable_rows] = True
         tags = []
@@ -128,7 +142,7 @@ class ExtTable(nn.Module):
             if bool(tuned[i]):
                 tags.append("tuned")
             elif self.has_global:
-                tags.append("mapped")
+                tags.append("mapped-unseen" if bool(below[i]) else "mapped")
             elif bool(seen[i]):
                 tags.append("mapped")
             else:

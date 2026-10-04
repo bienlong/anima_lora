@@ -1,4 +1,4 @@
-# Anima LoRA training script (merged standalone)
+# Anima LoRA training script
 
 import importlib
 import argparse
@@ -115,6 +115,8 @@ from library.config.cli_args import (
     verify_command_line_training_args,
     verify_training_args,
 )
+from library.training.checkpoints import resume_skip_plan
+from library.training.pause import TrainingPaused
 from library.training.loop import build_loop_state, run_training_loop
 from library.training.sampling_config import normalize_sample_args
 from library.training.log_dispatch import (
@@ -237,7 +239,7 @@ class AnimaTrainer:
 
     # endregion
 
-    # region Anima-specific methods (from AnimaNetworkTrainer overrides)
+    # region Anima-specific methods
 
     def assert_extra_args(
         self,
@@ -254,19 +256,23 @@ class AnimaTrainer:
                 "when caching Text Encoder output, token_warmup_step or caption_tag_dropout_rate cannot be used"
             )
             if getattr(args, "cache_llm_adapter_outputs", False):
-                # Adapter output caching is only valid when the adapter is frozen (no LoRA on adapter).
+                # Adapter output caching is only valid when the adapter is frozen
+                # (no LoRA on adapter). The flag is store_true, so a method TOML
+                # that sets it (easycontrol.toml) can't be switched off from a
+                # descriptor — auto-disable instead; the TE cache-completeness
+                # probe then requires the prompt_embeds layout.
                 if args.network_args is not None and any(
                     "train_llm_adapter" in a and "true" in a.lower()
                     for a in args.network_args
                 ):
-                    raise ValueError(
-                        "--cache_llm_adapter_outputs is incompatible with --network_args train_llm_adapter=True"
+                    logger.warning(
+                        "network_args train_llm_adapter=true needs the llm_adapter "
+                        "live; disabling cache_llm_adapter_outputs."
                     )
+                    args.cache_llm_adapter_outputs = False
         elif getattr(args, "cache_llm_adapter_outputs", False):
             # Adapter-output caching writes into the TE cache; with text
-            # caching off there's nothing to write into, so it's a harmless
-            # no-op — auto-disable instead of crashing (easy to hit from the
-            # GUI, where these are independent toggles).
+            # caching off it is a no-op, so auto-disable instead of crashing.
             logger.warning(
                 "cache_llm_adapter_outputs=true has no effect without text-encoder "
                 "caching (use_text_cache=false / live text encoding); disabling it."
@@ -322,7 +328,7 @@ class AnimaTrainer:
                     dataset.restrict_to_byg_tuples()
                 val_dataset_group.refresh_concat_state()
 
-        # REPA v2: load cached PE-Spatial patch tokens into batches when
+        # REPA: load cached PE-Spatial patch tokens into batches when
         # use_repa is set (rides the resolved network kwargs).
         net_kwargs = resolve_network_kwargs(args)
         if net_kwargs.get("use_repa", "").lower() in ("true", "1", "yes"):
@@ -500,6 +506,9 @@ class AnimaTrainer:
             lora_weights_list=lora_weights_list,
             lora_multipliers=lora_multipliers,
             attn_softmax_scale=attn_softmax_scale,
+            # Sample prompts tokenized through the pack need its rows behind
+            # the ext ids (same table the TE caches were built with).
+            vocab_pack=getattr(args, "vocab_pack", None),
         )
 
         # Mod-aware training: install the distilled pooled_text_proj so an
@@ -509,11 +518,8 @@ class AnimaTrainer:
             anima_utils.load_pooled_text_proj(model, args.pooled_text_proj, "cpu")
             model.pooled_text_proj.to(device=loading_device, dtype=loading_dtype)
 
-        # NOTE: torch.compile (compile_blocks) is intentionally NOT done here —
-        # it must run AFTER the adapter's apply_to monkey-patches the targeted
-        # Linears, or dynamo traces the un-adapted forward. Done in
-        # _create_and_apply_network instead (after apply_to + load_weights +
-        # grad-ckpt) — see library/runtime/harness.py for the ordering.
+        # compile_blocks is NOT run here: it must follow apply_to + load_weights
+        # (see _create_and_apply_network and library/runtime/harness.py).
 
         # So dit.enable_gradient_checkpointing() can override to use unsloth.
         self._use_unsloth_offload_checkpointing = args.unsloth_offload_checkpointing
@@ -580,8 +586,7 @@ class AnimaTrainer:
 
     # Per-step forward phases: ``get_noise_pred_and_target`` is a flat
     # sequence of named phases; conditional logic lives INSIDE each phase,
-    # never as lexical nesting around it, so "always per step" is
-    # structurally evident at the call site.
+    # never as nesting around the call.
 
     def _step_ctx(self, ctx: TrainCtx) -> StepCtx:
         return StepCtx(
@@ -900,7 +905,7 @@ class AnimaTrainer:
     def _maybe_sigma_demote(
         self, ctx: TrainCtx, batch, latents, is_train, generator=None
     ):
-        """sigma_lowres Phase 1b (σ > threshold → demote-tier latent).
+        """sigma_lowres σ-demote (σ > threshold → demote-tier latent).
 
         Returns ``(latents, sigmas_flat)``: possibly-swapped latents plus the
         pre-drawn flat σ (None → sampler draws internally). Active only when
@@ -1089,18 +1094,9 @@ class AnimaTrainer:
             uncond_crossattn_emb=self._state.uncond_crossattn_1,
         )
 
-        # ChimeraHydra global content router: fire ONCE per step on the pooled
-        # crossattn_emb. apply_router_conditioning ran before text conds were
-        # materialized, so this lives outside that helper. No-op otherwise.
-        if (
-            getattr(network, "use_content_router", False)
-            and tc.crossattn_emb is not None
-            and hasattr(network, "set_content")
-        ):
-            network.set_content(tc.crossattn_emb)
-
-        # Network-level GlobalRouter routed on pooled text. Same timing
-        # rationale as the content router above. No-op otherwise.
+        # Network-level GlobalRouter routed on pooled text: fire ONCE per step.
+        # apply_router_conditioning ran before text conds were materialized, so
+        # this lives outside that helper. No-op otherwise.
         if (
             getattr(network, "use_crossattn_router", False)
             and tc.crossattn_emb is not None
@@ -1127,11 +1123,10 @@ class AnimaTrainer:
         self, ctx: TrainCtx, *, anima, noisy_model_input, timesteps, tc, padding_mask
     ):
         """ALWAYS per step. Single, branch-free forward call site: both
-        text-conditioning modes normalize to ONE uniform
-        ``ForwardConditioning`` bundle first, in ``build_forward_conditioning``,
-        not as control flow here. Must run inside the primary forward's
-        autocast/grad scope (the postfix splice runs learned modules), hence
-        not in ``_prepare_conditioning``. Returns ``(model_pred, cond)``.
+        text-conditioning modes normalize to one ``ForwardConditioning`` in
+        ``build_forward_conditioning``. Must run inside the primary forward's
+        autocast/grad scope (the postfix splice runs learned modules).
+        Returns ``(model_pred, cond)``.
         """
         cond = build_forward_conditioning(
             network=ctx.network, tc=tc, timesteps=timesteps
@@ -1418,7 +1413,7 @@ class AnimaTrainer:
 
         # Loss weighting
         weighting = anima_train_utils.compute_loss_weighting_for_anima(
-            weighting_scheme=ctx.args.weighting_scheme, sigmas=sigmas
+            weighting_scheme=ctx.args.weighting_scheme, sigmas=sigmas, args=ctx.args
         )
 
         return model_pred, target, timesteps, weighting
@@ -1706,7 +1701,7 @@ class AnimaTrainer:
 
     # endregion
 
-    # region Methods only in NetworkTrainer (not overridden by Anima)
+    # region Generic network-trainer methods
 
     def post_process_network(self, args, accelerator, network, text_encoders, unet):
         self._network = (
@@ -1743,7 +1738,7 @@ class AnimaTrainer:
 
                 return _hook
 
-            blocks_list = unet.blocks  # nn.ModuleList of 28 Anima DiT blocks
+            blocks_list = unet.blocks  # nn.ModuleList of DiT blocks
             num_blocks = len(blocks_list)
             for bi in self._func_blocks:
                 if not (0 <= bi < num_blocks):
@@ -1765,6 +1760,8 @@ class AnimaTrainer:
 
     def update_metadata(self, metadata, args):
         metadata["ss_weighting_scheme"] = args.weighting_scheme
+        if args.weighting_scheme == "min_snr":
+            metadata["ss_min_snr_gamma"] = getattr(args, "min_snr_gamma", 5.0)
         metadata["ss_logit_mean"] = args.logit_mean
         metadata["ss_logit_std"] = args.logit_std
         metadata["ss_mode_scale"] = args.mode_scale
@@ -1772,6 +1769,14 @@ class AnimaTrainer:
         metadata["ss_sigmoid_scale"] = args.sigmoid_scale
         metadata["ss_sigmoid_bias"] = getattr(args, "sigmoid_bias", 0.0)
         metadata["ss_discrete_flow_shift"] = args.discrete_flow_shift
+        # A LoRA trained through a CJK vocab pack is coupled to that pack's
+        # rows + routing (ids ≥ 32128 in every cached caption). Stamp the
+        # digest so a mismatch at load time is detectable, never silent.
+        from library.anima.vocab_pack import load_vocab_pack
+
+        pack = load_vocab_pack(getattr(args, "vocab_pack", None))
+        if pack is not None:
+            metadata.update(pack.checkpoint_metadata())
 
     def is_text_encoder_not_needed_for_training(self, args):
         return args.cache_text_encoder_outputs and not self.is_train_text_encoder(args)
@@ -1910,8 +1915,18 @@ class AnimaTrainer:
 
     def _prepare_dataset(self, args) -> DatasetBundle:
         """Build train/val dataset groups and the collator shared by both loaders."""
+        from library.datasets.subsets import resolve_configured_mask_dir
+
         use_dreambooth_method = args.in_json is None
         use_user_config = args.dataset_config is not None
+
+        # `mask_dir` rides the config chain (configs/preprocess.toml → preset →
+        # method → --mask_dir) and reaches every subset that doesn't name one
+        # of its own via the BlueprintGenerator's argparse fallback. Gate it on
+        # the directory existing first — the config value names where `make
+        # mask` *would* write, and a maskless checkout must keep falling back
+        # to the legacy auto-resolution instead of flipping alpha_mask on.
+        args.mask_dir = resolve_configured_mask_dir(getattr(args, "mask_dir", None))
 
         if args.dataset_class is None:
             blueprint_generator = BlueprintGenerator(
@@ -2011,6 +2026,23 @@ class AnimaTrainer:
                     )
 
             blueprint = blueprint_generator.generate(user_config, args)
+            # `masked_loss` is the one masking switch: a mask tree left on disk
+            # (config `mask_dir`, or the legacy `masks/{merged,sam}`
+            # auto-resolution) must not re-enable masking. The gate sits before
+            # the datasets are built because construction bakes mask paths and
+            # preloads the PNGs (see `disable_masks_in_blueprint`).
+            if not getattr(args, "masked_loss", False):
+                ignored_mask_dirs = config_util.disable_masks_in_blueprint(
+                    blueprint.dataset_group
+                )
+                if ignored_mask_dirs:
+                    logger.info(
+                        "masked_loss = false: masks under %s are ignored "
+                        "(set masked_loss = true to train with them)",
+                        ", ".join(ignored_mask_dirs),
+                    )
+                else:
+                    logger.info("masked_loss = false: training unmasked")
             train_dataset_group, val_dataset_group = (
                 config_util.generate_dataset_group_by_blueprint(
                     blueprint.dataset_group,
@@ -2171,6 +2203,135 @@ class AnimaTrainer:
             return set()
         return token_counts_for_sample_prompts(prompts)
 
+    def _maybe_sketch_grad_basis(
+        self, args, accelerator, unet, train_dataset_group, weight_dtype
+    ) -> None:
+        """``down_init="grad_svd"``: sketch this run's own gradient row space.
+
+        A LoRA-GA / LoRA-One style seed needs the task gradient *before* the
+        adapter exists, so this runs one frozen-DiT forward/backward per
+        (image, σ) over the run's cached latents+TE, takes the top-r right
+        singular vectors per target Linear, writes them beside the checkpoint,
+        and hands the path to the factory as ``grad_basis_file`` — the same
+        artifact ``down_init="basis_file"`` reads, so the two modes share one
+        load path. Output is an ordinary LoRA either way (B=0, ΔW=0 at step 0).
+
+        Refused under block swap: the swapper's residency plan assumes the
+        training loop's forward cadence and desyncs on extra forwards. Build the basis with
+        ``bench/grad_init/build_universal_basis.py`` and pass ``basis_file``
+        instead on a swap preset.
+        """
+        net_kwargs = resolve_network_kwargs(args)
+        if net_kwargs.get("down_init") != "grad_svd":
+            return
+        if net_kwargs.get("grad_basis_file"):
+            logger.info(
+                "down_init=grad_svd: grad_basis_file already set "
+                f"({net_kwargs['grad_basis_file']}); skipping the sketch pass."
+            )
+            return
+        if self.is_swapping_blocks:
+            raise ValueError(
+                "down_init='grad_svd' needs a resident DiT for its sketch pass, "
+                "but blocks_to_swap>0. Use down_init='basis_file' with a basis "
+                "built by bench/grad_init/build_universal_basis.py, or set "
+                "blocks_to_swap=0."
+            )
+
+        from library.env import resolve_under_home
+        from networks.grad_basis import (
+            BASIS_SUFFIX,
+            basis_from_sketches,
+            dit_num_blocks,
+            save_basis,
+            sketch_dataset,
+        )
+
+        pairs: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for info in train_dataset_group.image_data.values():
+            if info.is_reg:
+                continue
+            npz, te = info.latents_npz, info.text_encoder_outputs_npz
+            if not npz or not te or npz in seen:
+                continue
+            seen.add(npz)
+            pairs.append((npz, te))
+        pairs.sort()  # dict order follows the glob; keep the sketch reproducible
+        if not pairs:
+            raise RuntimeError(
+                "down_init='grad_svd' needs cached latents + text-encoder "
+                "outputs; none of the training images have both. Run "
+                "`make preprocess` first."
+            )
+
+        rank = int(args.network_dim or 4)
+        samples = int(net_kwargs.get("grad_basis_samples", 64) or 0)
+        passes = int(net_kwargs.get("grad_basis_passes", 1) or 1)
+        oversample = int(net_kwargs.get("grad_basis_oversample", 32) or 32)
+        seed = int(net_kwargs.get("grad_basis_seed", args.seed or 42) or 42)
+
+        out_path = resolve_under_home(
+            os.path.join(args.output_dir, f"{args.output_name}{BASIS_SUFFIX}")
+        )
+        logger.info(
+            f"down_init=grad_svd: sketching r={rank} (q={rank + oversample}) over "
+            f"{min(samples, len(pairs)) if samples else len(pairs)} of "
+            f"{len(pairs)} cached images x {passes} pass(es)"
+        )
+
+        was_training = unet.training
+        unet.requires_grad_(False)
+        unet.to(accelerator.device, dtype=weight_dtype)
+        # Gradient checkpointing is gated on module.training (models.py), and a
+        # 4k-token backward without it does not fit the 16 GB envelope — turn it
+        # on for the sketch regardless of args.gradient_checkpointing, then put
+        # the model back exactly as the trainer expects it.
+        had_ckpt = bool(getattr(unet, "gradient_checkpointing", False))
+        unet.train()
+        if not had_ckpt:
+            unet.enable_gradient_checkpointing()
+        try:
+            sketches, meta = sketch_dataset(
+                unet,
+                pairs,
+                rank=rank,
+                device=accelerator.device,
+                oversample=oversample,
+                passes=passes,
+                seed=seed,
+                max_samples=samples,
+            )
+        finally:
+            if not had_ckpt:
+                unet.disable_gradient_checkpointing()
+            if not was_training:
+                unet.eval()
+            unet.to("cpu")
+            unet.zero_grad(set_to_none=True)
+            clean_memory_on_device(accelerator.device)
+
+        basis = basis_from_sketches(sketches, rank)
+        save_basis(
+            out_path,
+            basis,
+            num_blocks=dit_num_blocks(unet),
+            extra_metadata={
+                "source": "grad_svd (per-run sketch)",
+                "n_used": meta["n_used"],
+                "passes": meta["passes"],
+                "seed": meta["seed"],
+                "mean_loss": round(meta["mean_loss"], 6),
+            },
+        )
+        logger.info(
+            f"down_init=grad_svd: basis written to {out_path} "
+            f"({len(basis)} layers, {meta['n_used']} samples, {meta['seconds']}s)"
+        )
+        # Mutating the cached dict is how the factory sees it — net_kwargs IS
+        # args._network_kwargs, which _create_and_apply_network re-reads.
+        net_kwargs["grad_basis_file"] = str(out_path)
+
     def _create_and_apply_network(
         self,
         args,
@@ -2294,8 +2455,7 @@ class AnimaTrainer:
         if args.torch_compile:
             from library.runtime.harness import compile_blocks_for_training
 
-            # Token-family budget from buckets the dataset actually populated
-            # (_derive_token_budget) — not args.target_res (preprocess-only).
+            # Token-family budget from _derive_token_budget.
             n_token_families, seq_range, seq_bands = getattr(
                 self, "_compile_token_budget", (None, None, None)
             )
@@ -2578,10 +2738,8 @@ class AnimaTrainer:
         train_util.prepare_dataset_args(args, True)
         setup_logging(args, reset=True)
 
-        # Free-fit requires compile_dynamic_seq: a free-fit pool populates many
-        # distinct (W, H) within one tier's token band, which would explode
-        # the static N-graph compile cascade. Auto-enable whenever compile is
-        # on (no-op if torch_compile is off).
+        # Free-fit requires compile_dynamic_seq (else a static N-graph compile
+        # cascade); auto-enable whenever torch_compile is on.
         if getattr(args, "torch_compile", False):
             if not getattr(args, "compile_dynamic_seq", False):
                 logger.info(
@@ -2642,9 +2800,7 @@ class AnimaTrainer:
         use_user_config = ds.use_user_config
         use_dreambooth_method = ds.use_dreambooth_method
 
-        # Derive the compile token-family budget from buckets the selected
-        # images actually populate — NOT args.target_res. Sample prompt
-        # resolutions are folded in so out-of-bucket generation compiles.
+        # Compile token-family budget: see _derive_token_budget.
         self._compile_token_budget = self._derive_token_budget(
             args, train_dataset_group, val_dataset_group
         )
@@ -2682,7 +2838,7 @@ class AnimaTrainer:
         strategy_anima.setup_text_encoder_outputs_caching_strategy(args)
 
         # When caching is enabled the caches MUST already be complete on disk
-        # (train.py no longer encodes on the fly); skip loading the encoders
+        # (train.py does not encode on the fly); skip loading the encoders
         # entirely when nothing else needs them. `cache_latents = false` is a
         # separate, explicit live-encoding mode, not a fallback.
         sampling_enabled = bool(
@@ -2815,6 +2971,12 @@ class AnimaTrainer:
                 existing=self._state.uncond_crossattn_1,
             )
 
+        # Before the network exists: a grad_svd seed needs the task gradient of
+        # the *base* DiT (see _maybe_sketch_grad_basis). No-op otherwise.
+        self._maybe_sketch_grad_basis(
+            args, accelerator, unet, train_dataset_group, weight_dtype
+        )
+
         net = self._create_and_apply_network(
             args, accelerator, vae, text_encoder, unet, text_encoders, weight_dtype
         )
@@ -2913,8 +3075,7 @@ class AnimaTrainer:
                     pid=os.getpid(),
                     log_dir=resolve_run_log_dir(args),
                 )
-                # Mirror WARNING+ records into the stream so a reader debugging
-                # the run gets them structured instead of buried in tqdm stdout.
+                # Mirror WARNING+ log records into the stream.
                 self.progress_sink.attach_log_mirror()
 
         if (args.save_n_epoch_ratio is not None) and (args.save_n_epoch_ratio > 0):
@@ -3017,23 +3178,29 @@ class AnimaTrainer:
                 "max_train_steps should be greater than initial step"
             )
 
+        # Units: ``resume_step`` / ``initial_step`` are optimizer steps here.
+        # accelerate syncs on the last batch of the dataloader, so an epoch is
+        # ceil(batches / ga) steps; full epochs are skipped by ``epoch_to_start``
+        # and only the residual inside the resumed epoch is turned into a batch
+        # count for ``skip_first_batches``. (Dividing a ga-multiplied count by
+        # steps-per-epoch here used to over-skip by ga², see GH #103.)
+        resume_step = initial_step
         epoch_to_start = 0
         if initial_step > 0:
+            epoch_to_start, skip_batches = resume_skip_plan(
+                initial_step, len(train_dataloader), args.gradient_accumulation_steps
+            )
             if args.skip_until_initial_step:
                 if not args.resume:
                     logger.info(
                         "initial_step is specified but not resuming. lr scheduler will be started from the beginning"
                     )
-                logger.info(f"skipping {initial_step} steps")
-                initial_step *= args.gradient_accumulation_steps
-
-                epoch_to_start = initial_step // math.ceil(
-                    len(train_dataloader) / args.gradient_accumulation_steps
+                logger.info(
+                    f"skipping {initial_step} steps: {epoch_to_start} full epochs"
+                    f" + {skip_batches} batches of epoch {epoch_to_start + 1}"
                 )
+                initial_step = skip_batches
             else:
-                epoch_to_start = initial_step // math.ceil(
-                    len(train_dataloader) / args.gradient_accumulation_steps
-                )
                 initial_step = 0  # do not skip
 
         # Drop the train dataset-group local before loop entry — the
@@ -3045,7 +3212,7 @@ class AnimaTrainer:
         # sigma_lowres step-span gate: seed the train-forward counter with the
         # resume offset (already in forward units) so it covers every resume
         # path, not just re-deriving from args inside the loop.
-        self._sigma_span_step = initial_step
+        self._sigma_span_step = resume_step * args.gradient_accumulation_steps
 
         loop_state = build_loop_state(
             self,
@@ -3079,6 +3246,7 @@ class AnimaTrainer:
             num_train_epochs=num_train_epochs,
             epoch_to_start=epoch_to_start,
             initial_step=initial_step,
+            resume_step=resume_step,
             metadata=metadata,
         )
 
@@ -3100,7 +3268,17 @@ class AnimaTrainer:
                 ),
             },
         ):
-            run_training_loop(self, loop_state)
+            try:
+                run_training_loop(self, loop_state)
+            except TrainingPaused as paused:
+                # Release-pause: state is on disk, skip the final save/cleanup
+                # (the resumed run does them) but still flush the trackers.
+                accelerator.end_training()
+                logger.info(
+                    f"training paused at step {paused.global_step}; resume with "
+                    f"--resume {paused.state_dir}"
+                )
+                raise
 
             accelerator.end_training()
             optimizer_eval_fn()
@@ -3122,9 +3300,6 @@ class AnimaTrainer:
             saver.cleanup_resumable()
             saver.save_final(network, loop_state.global_step, num_train_epochs)
 
-        # Remove the TensorBoard log dir for runs shorter than 2 steps — they
-        # add noise to the runs list (e.g. aborted starts, dry-runs) and carry
-        # no useful loss curves.
         if is_main_process and loop_state.global_step < 2:
             _cleanup_short_log_dir(args)
 
@@ -3225,15 +3400,11 @@ def build_network_extras() -> dict[str, _config_schema.ConfigKey]:
 def _install_crash_reporter(argv: list[str]) -> None:
     """Record a fatal startup/training exception into ``--progress_jsonl``.
 
-    The daemon launches us windowless under ``pythonw.exe``, which drops the
-    child's stdout/stderr, so an uncaught traceback here is otherwise lost and
-    the daemon falls back to a generic "process exited (code=1)".
-    ``progress.jsonl`` is written by path, so it survives.
-
-    ``run_scope`` already emits ``run_end(error=…)`` for in-loop failures, but
-    only *after* ``ProgressSink.run_start`` fires — late in ``train()``.
-    Errors before that (cache incomplete, config/dataset build, model load)
-    escape it entirely; this excepthook is the catch-all.
+    Under the daemon's windowless ``pythonw.exe`` launch stdout/stderr are
+    dropped, so an uncaught traceback is otherwise lost. ``run_scope`` only
+    covers failures after ``ProgressSink.run_start`` (late in ``train()``);
+    this excepthook catches earlier ones (cache incomplete, config/dataset
+    build, model load).
     """
     path = None
     for i, tok in enumerate(argv):
@@ -3311,4 +3482,7 @@ if __name__ == "__main__":
         )
 
     trainer = AnimaTrainer()
-    trainer.train(args)
+    try:
+        trainer.train(args)
+    except TrainingPaused:
+        sys.exit(0)  # run_end(paused) already carries the state dir

@@ -57,8 +57,7 @@ def _path_overrides() -> dict:
 
     Reads ``METHOD``/``METHODS_SUBDIR`` env vars so the GUI can point
     preprocess at the same variant file training will use. Missing env vars →
-    just base + preset. Defers the ``library.config.io`` import so commands
-    that don't touch preprocess keep the module-load surface small.
+    just base + preset.
     """
     global _PATH_OVERRIDES_CACHE
     if _PATH_OVERRIDES_CACHE is not None:
@@ -97,8 +96,7 @@ def bespoke_preset_flags(preset: str) -> list[str]:
 
     Honored keys: ``blocks_to_swap`` → ``--blocks_to_swap N``;
     ``gradient_checkpointing`` (bool) → ``--grad_ckpt``/``--no_grad_ckpt``
-    (defaults to ``--no_grad_ckpt`` when omitted — these trainable footprints
-    are tiny, so ckpt is a pure perf loss when VRAM isn't tight);
+    (defaults to ``--no_grad_ckpt`` when omitted);
     ``sample_ratio`` → ``--sample_ratio R``. Other preset keys are dropped.
     """
     try:
@@ -236,6 +234,9 @@ def run(cmd: list[str], **kwargs):
     env = kwargs.pop("env", None)
     if env is None:
         env = os.environ.copy()
+    # Curation stages (anime_tools) anchor bare relative defaults on
+    # ANIMA_HOME; pin it to this checkout.
+    env.setdefault("ANIMA_HOME", str(ROOT))
     # Bound `hf` CLI socket timeouts so a stalled download can't hang the serial
     # daemon queue (a hung-not-failed fetch wedges every job queued behind it,
     # training included). setdefault means an explicit ANIMA_HF_TIMEOUT/HF_HUB_*
@@ -425,18 +426,14 @@ def _nsys_run_stats(rep_path: Path) -> None:
 def build_launch_cmd(*args: str, python_exe: str | None = None) -> list[str]:
     """Build the ``train.py`` launch command list (no side effects).
 
-    Pure command construction, extracted from ``accelerate_launch`` so other
-    spawners (the training daemon under ``anima_daemon/``) can ``Popen`` the
-    same command themselves — detached, own stdio/process-tree monitoring —
-    instead of going through ``run()``'s blocking path. The nsys wrapper stays
-    in ``accelerate_launch`` (CLI-only; the daemon never applies it).
+    Shared by ``accelerate_launch`` and the training daemon (``anima_daemon/``),
+    which ``Popen``s it detached. The nsys wrapper stays in
+    ``accelerate_launch`` (CLI-only).
 
-    Single-GPU fast path (default): invoke ``train.py`` directly, skipping the
-    ``accelerate launch`` bootstrap (a second full Python process importing
-    accelerate/torch just to spawn one local worker). ``train.py`` builds its
-    own single-process ``Accelerator()`` and reads ``mixed_precision`` from the
-    config chain itself. Set ``ANIMA_ACCELERATE_LAUNCH=1`` to force the
-    accelerate launcher, which multi-GPU/distributed runs genuinely need.
+    Default: invoke ``train.py`` directly (it builds its own single-process
+    ``Accelerator()`` and reads ``mixed_precision`` from the config chain).
+    ``ANIMA_ACCELERATE_LAUNCH=1`` wraps it in ``accelerate launch`` for
+    multi-GPU/distributed runs.
 
     ``python_exe`` overrides the launching interpreter (default ``PY`` =
     python.exe). GOTCHA: the detached daemon passes ``pythonw.exe`` here — a
@@ -505,8 +502,7 @@ def build_method_args(
     """Assemble the ``["--method", m, "--preset", p, ...]`` train.py arg list.
 
     Pure — no env reads, no subprocess. Shared by the CLI ``train()`` path and
-    the training daemon so the daemon doesn't duplicate the ARTIST/
-    PROFILE_STEPS handling. ``artist``/``profile_steps`` add their flags only
+    the training daemon. ``artist``/``profile_steps`` add their flags only
     when the caller didn't already pass them in ``extra``.
     """
     extra = list(extra or [])
@@ -544,7 +540,7 @@ def _resolve_run_mode(extra: list[str]) -> tuple[str, list[str]]:
     Precedence: explicit ``--inline/--queue/--detach/--attach`` flag > the
     ``ANIMA_RUN_MODE`` env var > attach default. When implicit,
     ``PROFILE_STEPS``/``ANIMA_ACCELERATE_LAUNCH`` force inline so the default
-    attach path never silently drops them. An explicit flag always wins.
+    attach path never silently drops them.
     """
     extra = list(extra)
     flagged: str | None = None
@@ -575,13 +571,24 @@ def _attach_hints(job_id: str) -> str:
     return (
         f"  make daemon-attach JOB={job_id}   # re-attach to this job\n"
         f"  make daemon-kill JOB={job_id}     # stop it\n"
-        f"  make daemon-status                # queue overview"
+        f"  make daemon-jobs                  # queue overview"
     )
 
 
+# Whether this process has already printed the queued-job hints; later submits
+# print only their own `queued job` line.
+_QUEUED_HINTS_SHOWN = False
+
+
 def _print_queued(cl, job_id: str, desc: str) -> None:
+    global _QUEUED_HINTS_SHOWN
+    line = f"queued job {job_id} ({desc}). daemon: {cl.base}"
+    if _QUEUED_HINTS_SHOWN:
+        print(line)
+        return
+    _QUEUED_HINTS_SHOWN = True
     print(
-        f"queued job {job_id} ({desc}). daemon: {cl.base}\n"
+        f"{line}\n"
         f"  make daemon-attach JOB={job_id}   # follow this job's output\n"
         f"  make daemon-attach                # follow queue/lifecycle events\n"
         f"  make daemon-kill JOB={job_id}     # cancel it\n"
@@ -617,8 +624,7 @@ def _attach_and_wait(cl, job_id: str) -> int:
     """
     from anima_daemon.client import DaemonClient
 
-    # flush: stdout to a pipe is block-buffered, so an unflushed banner makes a
-    # piped attach look like zero bytes (i.e. indistinguishable from a hang).
+    # flush: stdout to a pipe is block-buffered; an unflushed banner looks like a hang.
     print(
         f"\nattached to job {job_id} ({cl.base}) — ctrl-C detaches "
         "(the job keeps running)\n",
@@ -748,12 +754,7 @@ def train(
     `--artist_filter <name>` (filters dataset to `@<name>`-tagged captions and
     redirects output to `output/ckpt-artist/`).
 
-    Run mode (``_resolve_run_mode``): by default the job is submitted to the
-    local daemon and this terminal *attaches* to its stdout, exiting with the
-    job's exit code (ctrl-C detaches, the run survives). ``--queue`` detaches
-    (submit + return); ``--inline`` runs the child directly with no daemon.
-    ``ANIMA_RUN_MODE`` sets the default; ``PROFILE_STEPS``/
-    ``ANIMA_ACCELERATE_LAUNCH`` force inline.
+    Run mode: see ``_resolve_run_mode`` and the attach-by-default block above.
     """
     preset = preset or _preset()
     extra = list(extra or [])
@@ -851,3 +852,130 @@ def override_arg(argv: list[str], flag: str, value: str) -> list[str]:
         return argv + [flag, value]
     i = argv.index(flag)
     return argv[:i] + [flag, value] + argv[i + 2 :]
+
+
+# ---------------------------------------------------------------------------
+# anime_tools stages: build a request, run it in-process or as a child
+# ---------------------------------------------------------------------------
+
+DAEMON_JOB_DIR_ENV = "ANIMA_DAEMON_JOB_DIR"
+
+
+def in_daemon_job() -> bool:
+    """Is this process a daemon job's child (the GUI path, ``--queue``,
+    ``make daemon-run ARGS="tasks.py …"``)?"""
+    return bool(os.environ.get(DAEMON_JOB_DIR_ENV))
+
+
+def stage_by_id(stage_id: str):
+    """The ``anime_tools`` registry entry for a stage id (``"autotag"``,
+    ``"masks_sam"``, …) — request class and runner resolved lazily by it."""
+    from anime_tools.stages.registry import BY_ID
+
+    return BY_ID[stage_id]
+
+
+def execute_stage(stage, req) -> None:
+    """Run one curation stage as its request object.
+
+    Under a daemon job the stage's runner is called **in this interpreter**
+    (``Stage.runner()``): one process for a whole chain, and the package's
+    per-process model caches (``load_anima_tagger`` / ``load_sam3``) carry
+    across consecutive stages. The package anchors bare relative defaults on
+    ``ANIMA_HOME``, which ``run()`` exports for a child; pin it the same way
+    here so an in-process run resolves identically. From a plain shell each
+    stage is a ``python -m <stage.module>`` child with ``req.to_argv()``, so
+    the model is released between stages and on exit.
+    """
+    if not in_daemon_job():
+        run([PY, "-m", stage.module, *req.to_argv()])
+        return
+    os.environ.setdefault("ANIMA_HOME", str(ROOT))
+    print(f"  > [in-process] {stage.module} {' '.join(req.to_argv())}")
+    try:
+        stage.runner()(req)
+    except FileNotFoundError as exc:
+        # What the CLI shell turns into SystemExit — keep the same message.
+        sys.exit(str(exc))
+
+
+STAGE_VALUES_ENV = "PREPROCESS_STAGES_JSON"
+"""The GUI's stage forms (``resize``, ``correct``), one ``{dest: value}`` dict
+per stage id, as JSON. Written by
+``gui/tabs/preprocess/tab.py::preprocess_env`` (``stage_form.STAGE_VALUES_ENV``
+is the same name); ``request_from_form`` turns one into a request."""
+
+
+def gui_stage_values() -> dict:
+    """The stage forms a GUI-submitted job carries (``{}`` from a plain shell)."""
+    raw = os.environ.get(STAGE_VALUES_ENV)
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"Invalid {STAGE_VALUES_ENV}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise SystemExit(f"Invalid {STAGE_VALUES_ENV}: expected an object")
+    return data
+
+
+def request_from_form(
+    stage_id: str,
+    values: dict,
+    *,
+    roots: dict | None = None,
+    settings: dict | None = None,
+    report_root: str | None = None,
+    mask_root: str | None = None,
+    apply: bool = False,
+    **overrides,
+):
+    """A stage form (``{dest: value}``) as the stage's request.
+
+    Goes through the package's ``anime_tools.gui.stages.build_argv`` — the
+    same path its own web GUI takes: each value coerced by the field's kind,
+    the bound roots / settings / report and mask tails filled from the
+    keyword arguments (never from the form, so a stale saved path cannot win
+    over the trainer's directories), the request's own ``__post_init__``
+    validation run, and the argv spelled back and re-parsed by the stage's
+    generated parser. ``overrides`` are the dests the trainer's chain owns
+    (``recursive``, the variant sidecar knobs, …), applied with
+    ``dataclasses.replace`` so validation runs again. A bad value is a
+    ``SystemExit`` naming the stage, before any model loads.
+    """
+    import dataclasses
+
+    from anime_tools.gui.stages import BY_ID, build_argv, load_parser, schema
+
+    stage = BY_ID[stage_id]
+    try:
+        argv = build_argv(
+            schema(stage),
+            values,
+            apply=apply,
+            roots=roots,
+            settings=settings,
+            report_root=report_root,
+            mask_root=mask_root,
+        )
+        req = stage.request_class().from_namespace(load_parser(stage).parse_args(argv))
+        if overrides:
+            req = dataclasses.replace(req, **overrides)
+    except ValueError as exc:
+        raise SystemExit(f"{stage_id} form: {exc}") from exc
+    return req
+
+
+def request_with_args(req, extra, *, prog: str | None = None):
+    """``req`` with the user's ``ARGS`` applied through the request's own
+    generated parser — so ``make caption-autotag ARGS="--mode merge"`` still
+    reaches every flag the stage has, and an unknown one fails the way the
+    child would have (usage + exit 2). The trainer's own fields are the
+    parser defaults here (``req.to_argv()``), so ``extra`` overrides them.
+    """
+    extra = list(extra or ())
+    if not extra:
+        return req
+    cls = type(req)
+    return cls.from_argv(cls.parser(prog=prog), [*req.to_argv(), *extra])

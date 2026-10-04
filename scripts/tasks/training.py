@@ -1,9 +1,9 @@
 """Training entry-points for shipped methods (lora family + lora-gui + EasyControl).
 
 Each ``cmd_*`` is a thin shim that translates env vars + extra argv into the
-right ``train.py`` (via ``accelerate launch``) call. Experimental methods
-(postfix, ip-adapter) live in ``scripts/experimental_tasks/training.py`` and are
-wired up under ``make exp-*`` in ``tasks.py``.
+right ``train.py`` call (see ``_common.build_launch_cmd``). Experimental
+methods live in ``scripts/experimental_tasks/training.py`` and are wired up
+under ``make exp-*`` in ``tasks.py``.
 """
 
 from __future__ import annotations
@@ -53,25 +53,6 @@ def cmd_lora(extra):
     train("lora", extra)
 
 
-def cmd_register(extra):
-    """Register-token adapter on a FROZEN Anima DiT (docs/proposal/headroom_register_tokens.md).
-
-    DSR-style register tokens inserted at ``insert_block`` (default 8) plus a
-    trained self-attn QKV surface (``networks/methods/register.py`` /
-    ``configs/methods/register.toml``). Compile is supported (train.py widens
-    the dynamic-seq bound by K); block swap stays forced off. Override knobs
-    via ``--network_args`` or the config::
-
-        make register                                     # K36 @ block 8, unfrozen QKV, arm B
-        make register ARGS="--network_args num_registers=16 qkv_mode=lora"
-        make register ARGS="--network_args num_registers=0"   # LoRA-only drift control (arm L)
-        make register ARGS="--network_args insert_block=0"    # entry insertion (RQ3 geometry)
-
-    Inference is the ComfyUI node ``custom_nodes/comfyui-anima-register`` (kept
-    live — register tokens can't merge into DiT weights)."""
-    train("register", extra)
-
-
 def cmd_turbo(extra):
     """Turbo Anima — DP-DMD distillation (docs: docs/methods/turbo.md).
 
@@ -81,8 +62,8 @@ def cmd_turbo(extra):
 
         make turbo                                  # defaults: rank=64, 4-step
         make turbo ARGS="--student_rank 64 --iterations 5000"
-        make turbo ARGS="--single_prompt_idx 0"     # Phase 0 single-prompt overfit
-        make turbo --queue                          # enqueue on the daemon
+        make turbo ARGS="--single_prompt_idx 0"     # single-prompt overfit
+        make turbo ARGS=--queue                     # enqueue on the daemon
 
     The output is a normal LoRA — a distilled student ships at
     https://huggingface.co/sorryhyun/anima-turbo-4step (infer with
@@ -108,7 +89,7 @@ def cmd_turbo(extra):
 
 
 def cmd_soup(extra):
-    """Uncond-init soup training (docs: bench/memorization/report.md).
+    """Uncond-init soup training (docs: docs/experimental/soup.md).
 
     One pipeline (``scripts/soup/pipeline.py``): a short uncond inter-train on a
     diluted pool (reused if the checkpoint already exists) → 3 seeded captioned
@@ -119,7 +100,7 @@ def cmd_soup(extra):
         make soup                                     # uses soup.toml path_pattern
         make soup PATH_PATTERN="sincos/*"             # attach-by-default
         make soup TARGET=sincos                       # shorthand for "sincos/*"
-        make soup PATH_PATTERN="a/*|b/*" NAME=ab --queue
+        make soup PATH_PATTERN="a/*|b/*" NAME=ab ARGS=--queue
         make soup ARTISTS_SHARD=1_6                   # round-robin artist shard
         make soup CUSTOM=soup                         # gui-methods/custom/soup.toml
         make soup TARGET=sincos ARGS="--network_dim 32 --max_train_epochs 8"
@@ -201,6 +182,9 @@ def cmd_soup(extra):
     ):
         if os.environ.get(env):
             argv += [flag, os.environ[env]]
+
+    if os.environ.get("NO_UNCOND", "").lower() in ("1", "true", "yes", "on"):
+        argv += ["--no_uncond"]
 
     mode, extra = _resolve_run_mode(list(extra or []))
     run_command("soup", [*argv, *extra], mode=mode)
@@ -398,6 +382,34 @@ def cmd_easycontrol(extra):
     train("easycontrol", extra)
 
 
+def _resize_tree(
+    src: str,
+    dst: str,
+    *,
+    target_res: tuple[int, ...],
+    recursive: bool = True,
+    freefit_max_ratio=None,
+) -> None:
+    """Resize a staged tree into buckets — the ``anime_tools`` resize stage as
+    a ``ResizeRequest`` (the same one ``make preprocess-resize`` runs), for the
+    EasyControl pair trees whose knobs come from a descriptor TOML rather than
+    the config chain. Captions are never copied: TE reads the source tree."""
+    from anime_tools.stages.requests import ResizeRequest
+
+    from ._common import execute_stage, stage_by_id
+
+    fields: dict = {
+        "src": src,
+        "dst": dst,
+        "recursive": bool(recursive),
+    }
+    if target_res and tuple(target_res) != (1024,):
+        fields["target_res"] = tuple(target_res)
+    if freefit_max_ratio is not None:
+        fields["freefit_max_ratio"] = float(freefit_max_ratio)
+    execute_stage(stage_by_id("resize"), ResizeRequest(**fields))
+
+
 def _near_twins_preprocess(adapter: str, cfg: dict, base: str, extra) -> None:
     """Resize + VAE/TE caching for the mined near-twin pair tree.
 
@@ -416,7 +428,9 @@ def _near_twins_preprocess(adapter: str, cfg: dict, base: str, extra) -> None:
     cache = pp.get("cache_dir", f"{base}/cache")
     recursive = ["--recursive"] if pp.get("recursive", True) else []
     # Bucket tiers: descriptor's [preprocess].target_res wins, else base.toml's
-    # target_res; final fallback [1024].
+    # target_res; final fallback [1024]. CAVEAT (free-fit): a pair whose
+    # members free-fit to different shapes is cross-shape-paired (or dropped if
+    # truly unpaired) — see _near_twins_build_cond.
     target_res = pp.get("target_res")
     if target_res is None:
         from ._common import _path_overrides
@@ -424,39 +438,14 @@ def _near_twins_preprocess(adapter: str, cfg: dict, base: str, extra) -> None:
         target_res = _path_overrides().get("target_res", [1024])
     if not isinstance(target_res, (list, tuple)):
         target_res = [target_res]
-    target_res_flag = (
-        ["--target_res", *[str(e) for e in target_res]] if target_res else []
-    )
-    # Free-fit: [preprocess].freefit wins, else base.toml's freefit. CAVEAT: a
-    # pair whose members free-fit to different shapes is cross-shape-paired
-    # (or dropped if truly unpaired) — see _near_twins_build_cond.
-    freefit = pp.get("freefit")
-    if freefit is None:
-        from ._common import _path_overrides
 
-        freefit = bool(_path_overrides().get("freefit", False))
-    freefit_flag: list[str] = []
-    if freefit:
-        freefit_flag = ["--freefit"]
-        if pp.get("freefit_max_ratio") is not None:
-            freefit_flag += ["--freefit_max_ratio", str(pp["freefit_max_ratio"])]
-
-    # Resize staging tree into buckets. min_pixels defaults to 0 (not 0.5MP) so a
-    # small member can't be dropped and orphan its pair partner.
-    run(
-        [
-            PY,
-            "scripts/preprocess/resize_images.py",
-            "--src",
-            staging,
-            "--dst",
-            resized,
-            "--min_pixels",
-            str(pp.get("min_pixels", 0)),
-            *target_res_flag,
-            *freefit_flag,
-            *recursive,
-        ]
+    # Resize staging tree into buckets.
+    _resize_tree(
+        staging,
+        resized,
+        target_res=tuple(int(e) for e in target_res),
+        recursive=bool(recursive),
+        freefit_max_ratio=pp.get("freefit_max_ratio"),
     )
     run(
         [
@@ -727,6 +716,58 @@ def _inpaint_preprocess(adapter: str, cfg: dict, base: str, extra) -> None:
     )
 
 
+def _render_stage(adapter: str, cfg: dict, base: str, extra) -> None:
+    """plan_render staging: cut the S0b panel samples into the trainer tree
+    (``render/cut.py``: crop → 768-tier free-fit → caption + boxes.jsonl, CPU)
+    and gray-hole the boxes into ``staging/`` (``prep_render.py mask``).
+    ``[staging].edition`` picks the edition; the corpus root comes from
+    ``ANIMA_RENDER_CORPUS`` / ``--corpus`` in ``extra`` (never a default)."""
+    knobs = dict(cfg.get("staging") or {})
+    edition = str(knobs.pop("edition", "en"))
+    extra = list(extra or [])
+    cut_extra = [t for t in extra if t != "--overwrite"]
+    run(
+        [
+            PY,
+            "project/finished/cjk_aware_anima_dit/render/cut.py",
+            "--editions",
+            edition,
+            *_toml_table_to_argv(knobs),
+            *cut_extra,
+        ]
+    )
+    run(
+        [
+            PY,
+            "project/finished/cjk_aware_anima_dit/render/prep_render.py",
+            "mask",
+            "--edition",
+            edition,
+            *(["--overwrite"] if "--overwrite" in extra else []),
+        ]
+    )
+
+
+def _render_preprocess(adapter: str, cfg: dict, base: str, extra) -> None:
+    """plan_render preprocess: target + cond latents and the verbatim-caption
+    TE cache (``prep_render.py encode text``). ``[preprocess].vocab_pack``
+    selects the arm's tokenizer ("" = stock for EN, a pack path for JA)."""
+    knobs = dict(cfg.get("preprocess") or {})
+    edition = str(knobs.pop("edition", "en"))
+    run(
+        [
+            PY,
+            "project/finished/cjk_aware_anima_dit/render/prep_render.py",
+            "encode",
+            "text",
+            "--edition",
+            edition,
+            *_toml_table_to_argv(knobs),
+            *list(extra or []),
+        ]
+    )
+
+
 def _region_stage(adapter: str, cfg: dict, base: str, extra) -> None:
     """Region staging: solo-1girl + 1girl1boy targets → SAM3 masks → paint cond tree.
 
@@ -771,7 +812,7 @@ def _region_preprocess(adapter: str, cfg: dict, base: str, extra) -> None:
 
 
 def _subject_stage(adapter: str, cfg: dict, base: str, extra) -> None:
-    """Subject staging: mine cross-image same-character pairs (directedit_ec Phase 2).
+    """Subject staging: mine cross-image same-character pairs.
 
     ``easycontrol_adapters/tools/subject_pairs.py`` reads its ``[staging]``
     table and rewrites the blueprint tail in place (near_twins contract).
@@ -811,7 +852,7 @@ def _subject_preprocess(adapter: str, cfg: dict, base: str, extra) -> None:
 
 
 def _subject_edit_stage(adapter: str, cfg: dict, base: str, extra) -> None:
-    """Subject-edit staging: mine delta-caption edit pairs (directedit_ec Phase 2.5).
+    """Subject-edit staging: mine delta-caption edit pairs.
 
     ``easycontrol_adapters/tools/subject_edit_pairs.py`` — subject_pairs
     contract, but the staged ``.txt`` files are REAL files holding the tag
@@ -878,8 +919,7 @@ def _phash_edit_preprocess(adapter: str, cfg: dict, base: str, extra) -> None:
 
     Differs from :func:`_near_twins_preprocess` in what gets *encoded*. There a
     pair tree is staged per pair, so a member that joins several pairs (and both
-    directions of each) is resized and VAE-encoded once per view — 7,424 encodes
-    over 2,722 distinct images at the shipped phash_edit knobs. Here the miner
+    directions of each) is resized and VAE-encoded once per view. Here the miner
     stages a deduplicated ``pool/`` instead, and the pair views are symlinks:
 
       1. purge the derived pair links (so the VAE pass only ever sees the pool)
@@ -921,24 +961,13 @@ def _phash_edit_preprocess(adapter: str, cfg: dict, base: str, extra) -> None:
         target_res = _path_overrides().get("target_res", [1024])
     if not isinstance(target_res, (list, tuple)):
         target_res = [target_res]
-    target_res_flag = (
-        ["--target_res", *[str(e) for e in target_res]] if target_res else []
-    )
 
     _phash_edit_purge_links(resized, cond, mono_src, mono, mono_cache)
-    run(
-        [
-            PY,
-            "scripts/preprocess/resize_images.py",
-            "--src",
-            pool,
-            "--dst",
-            resized,
-            "--min_pixels",
-            str(pp.get("min_pixels", 0)),
-            *target_res_flag,
-            *recursive,
-        ]
+    _resize_tree(
+        pool,
+        resized,
+        target_res=tuple(int(e) for e in target_res),
+        recursive=bool(recursive),
     )
     run(
         [
@@ -1128,7 +1157,7 @@ def _phash_edit_build_links(
     shuffles — that is how the colorize arm gets its own dropout regime inside a
     run whose global ``caption_tag_dropout_rate`` is 0.
     """
-    from library.preprocess.caption_variants import (
+    from anime_tools.captions.variants import (
         variants_sidecar_path,
         write_variants_sidecar,
     )
@@ -1274,14 +1303,20 @@ _EASY_ADAPTERS = {
     },
     # Aligned-pair instruction editor: bespoke staging over the census manifest,
     # then the near_twins preprocess pass verbatim (same _tags/_no_tags shape).
-    # NB the twin_edit tool + descriptor were removed with the directedit_ec
-    # archive (2026-08-19); this entry is dead until they are restored.
+    # NB the twin_edit tool + descriptor are archived (directedit_ec); this
+    # entry is dead until they are restored.
     "twin_edit": {"stage": _twin_edit_stage, "preprocess": _near_twins_preprocess},
     # phash-mined aligned instruction editor: the twin_edit objective on pairs
     # found by perceptual hash over the RAW crawl pool instead of by tag delta
     # over the curated one. Bespoke preprocess: the miner stages a deduplicated
     # pool and the pair views are symlinks, so each image is encoded ONCE.
     "phash_edit": {"stage": _phash_edit_stage, "preprocess": _phash_edit_preprocess},
+    # plan_render bubble-fill probe (archived line): one descriptor per
+    # edition; trees under post_image_dataset/render/<ed>/.
+    "render_en": {"stage": _render_stage, "preprocess": _render_preprocess},
+    "render_ja": {"stage": _render_stage, "preprocess": _render_preprocess},
+    # S6 body arm: render_ja's trees + a prompt_embeds TE cache (text_body/).
+    "render_ja_body": {"stage": _render_stage, "preprocess": _render_preprocess},
 }
 
 

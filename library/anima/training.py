@@ -2,9 +2,8 @@ import argparse
 import gc
 import math
 import os
-import random
 import time
-from typing import List, Optional
+from typing import Optional
 
 import numpy as np
 import torch
@@ -30,94 +29,31 @@ import logging  # noqa: E402
 logger = logging.getLogger(__name__)
 
 
-# Sentinel users can drop into captions that lack a real artist tag, so the
-# shuffle/drop boundary keeps working. Stripped from caption variants before
-# they reach the tokenizer (see _generate_caption_variants in
-# scripts/preprocess/cache_text_embeddings.py). Callers of anima_smart_shuffle_caption
-# that feed the result to a tokenizer must strip it themselves — kept inside
-# the shuffle so the boundary index stays consistent with the input.
-NO_ARTIST_SENTINEL = "@no-artist"
-
-
-def _is_artist_tag(tag: str) -> bool:
-    """True for @-prefixed artist handles; False for booru emoticons like ``@ @``.
-
-    Matches the predicate the Anima Tagger uses (see
-    ``scripts/anima_tagger/vocab.py``): a single ``@`` followed by non-space
-    characters. ``@ @`` (``@_@`` after the corpus-wide ``_``→`` `` normalization)
-    is a general-category eye-shape tag and must not trigger the shuffle
-    boundary.
-    """
-    return len(tag) >= 2 and tag[0] == "@" and not tag[1].isspace()
-
-
-def find_anima_prefix_end(tags: List[str]) -> int:
-    """Index one past the trailing artist-handle in the leading run.
-
-    Walks ``tags`` accepting any non-artist tags up front, then any consecutive
-    artist tags, and stops at the first non-artist tag that follows an artist.
-    Returns 0 if no artist tag is present anywhere (the no-artist case the
-    ``@no-artist`` sentinel exists to fix). Multi-artist captions
-    (e.g. ``@artist1, @artist2, …``) protect the full handle run, not just the
-    first handle.
-    """
-    split_idx = 0
-    saw_artist = False
-    for idx, tag in enumerate(tags):
-        if _is_artist_tag(tag):
-            split_idx = idx + 1
-            saw_artist = True
-        elif saw_artist:
-            break
-    return split_idx
-
-
-def strip_no_artist_sentinel(tags: List[str]) -> List[str]:
-    """Drop every occurrence of :data:`NO_ARTIST_SENTINEL` from ``tags``."""
-    return [t for t in tags if t != NO_ARTIST_SENTINEL]
-
-
-def anima_smart_shuffle_caption(flex_tokens: List[str]) -> List[str]:
-    """Shuffle caption tags with awareness of @artist prefix and 'on the ...' sections.
-
-    - Tags up to and including the trailing artist tag of the leading run are
-      kept in order (see :func:`find_anima_prefix_end`). Multi-artist captions
-      and the ``@no-artist`` sentinel both preserve the full handle run.
-    - Remaining tags are split into sections by 'on the ...' / 'in the ...'
-      delimiters; tags within each section are shuffled independently.
-    - The ``@no-artist`` sentinel is preserved in the output so the boundary
-      index stays usable; callers that feed the result to a tokenizer must
-      call :func:`strip_no_artist_sentinel` before joining.
-    """
-    split_idx = find_anima_prefix_end(flex_tokens)
-
-    prefix = flex_tokens[:split_idx]
-    suffix = flex_tokens[split_idx:]
-
-    # Split suffix into sections delimited by "on the ..." tags
-    sections: list[list[str]] = [[]]
-    for tag in suffix:
-        if tag.startswith("On the ") or tag.startswith("In the "):
-            sections.append([tag])
-        else:
-            sections[-1].append(tag)
-
-    result = list(prefix)
-    for section in sections:
-        if not section:
-            continue
-        if section[0].startswith("On the ") or section[0].startswith("In the "):
-            header, body = [section[0]], section[1:]
-        else:
-            header, body = [], section
-        shuffled = body.copy()
-        random.shuffle(shuffled)
-        result.extend(header + shuffled)
-    return result
+# Caption shuffle grammar lives in anime_tools.captions.shuffle (curation side). Re-exported here so trainer callers keep their import path.
+from anime_tools.captions.shuffle import (  # noqa: E402,F401
+    NO_ARTIST_SENTINEL,
+    anima_smart_shuffle_caption,
+    find_anima_prefix_end,
+    strip_no_artist_sentinel,
+)
 
 
 def add_anima_training_arguments(parser: argparse.ArgumentParser):
     """Add Anima-specific training arguments to the parser."""
+    parser.add_argument(
+        "--vocab_pack",
+        "--ext_pack",  # pre-v2 research spelling (run_unmask_r2.py); same dest
+        dest="vocab_pack",
+        type=str,
+        default=None,
+        help="CJK vocab pack prefix (path without .safetensors/.json; '' = off). "
+        "Same key as configs/base.toml `vocab_pack`. Routes the T5 stream of "
+        "inline TE caching + sample prompts through the pack, hooks its rows onto "
+        "the DiT's llm_adapter for sampling, and stamps ss_ext_pack / "
+        "ss_ext_pack_sha on the saved LoRA so a different pack at inference is "
+        "detectable (library.anima.vocab_pack). Training steps read only the "
+        "cached embeddings, which must have been encoded through the same pack.",
+    )
     parser.add_argument(
         "--qwen3",
         type=str,
@@ -416,17 +352,8 @@ def add_anima_training_arguments(parser: argparse.ArgumentParser):
         "--timestep_sampling",
         type=str,
         default="sigmoid",
-        choices=[
-            "sigma",
-            "uniform",
-            "sigmoid",
-            "shift",
-            "flux_shift",
-            "qinglong_flux",
-        ],
-        help="Timestep sampling method (default: sigmoid (logit normal)). "
-        "qinglong_flux: triple hybrid — 79%% resolution-shifted logit-normal "
-        "+ 11%% style-friendly logSNR + 10%% low-noise logSNR2 per sample.",
+        choices=["sigma", "uniform", "sigmoid", "shift", "flux_shift"],
+        help="Timestep sampling method (default: sigmoid (logit normal))",
     )
     parser.add_argument(
         "--sigmoid_scale",
@@ -526,7 +453,7 @@ def add_anima_training_arguments(parser: argparse.ArgumentParser):
     )
 
     # Variance-reduced flow-matching loss (AsymFlow §5.2, arXiv:2605.12964;
-    # bench/fm_vr_headroom/proposal.md). Gated off by default.
+    # _archive/bench/fm_vr_headroom/proposal.md). Gated off by default.
     parser.add_argument(
         "--vr_loss_weight",
         type=float,
@@ -706,18 +633,82 @@ def add_anima_training_arguments(parser: argparse.ArgumentParser):
     )
 
 
+# E[w] = 1 normalizers for the min_snr scheme, keyed by (gamma, density). Mean-1
+# normalization keeps a reweighting arm from doubling as an LR change.
+_MIN_SNR_NORM_CACHE: dict[tuple, float] = {}
+
+
+def min_snr_weighting(sigmas: torch.Tensor, gamma: float) -> torch.Tensor:
+    """Min-SNR-γ in its v-prediction form, ``min(SNR, γ) / (SNR + 1)``.
+
+    Rectified flow regresses ``ε - x`` (a velocity), so the v-pred form is the
+    right analog: with ``SNR(σ) = ((1-σ)/σ)²`` the weight peaks where ``SNR = γ``
+    (σ ≈ 0.31 at γ=5) and rolls off toward both ends. The high-σ roll-off is the
+    point — ``bench/grad_init/README.md`` §gradient noise scale measured σ>0.5
+    samples carrying 4–10× the noise energy of low-σ ones for comparable signal
+    (``B_simple`` 111/81 vs 8/15 per band), so they buy less per step than a
+    uniform weighting spends on them.
+    """
+    snr = ((1.0 - sigmas) / sigmas.clamp_min(1e-4)) ** 2
+    return snr.clamp_max(gamma) / (snr + 1.0)
+
+
+def min_snr_normalizer(
+    gamma: float,
+    *,
+    timestep_sampling: str = "sigmoid",
+    sigmoid_scale: float = 1.0,
+    sigmoid_bias: float = 0.0,
+    n: int = 1 << 20,
+) -> float:
+    """``E[w]`` of :func:`min_snr_weighting` under the configured σ density.
+
+    Monte-Carlo with a fixed seed (so paired ``--deterministic`` arms get the
+    identical constant) over the trainer's own draw: logit-normal for
+    ``timestep_sampling="sigmoid"``, uniform otherwise — the modes that need the
+    scheduler grid fall back to uniform, which is within a few percent.
+    """
+    key = (round(float(gamma), 6), timestep_sampling, sigmoid_scale, sigmoid_bias, n)
+    hit = _MIN_SNR_NORM_CACHE.get(key)
+    if hit is not None:
+        return hit
+    gen = torch.Generator(device="cpu").manual_seed(0x5EED)
+    if timestep_sampling == "sigmoid":
+        sig = torch.sigmoid(
+            sigmoid_scale * torch.randn((n,), generator=gen) + sigmoid_bias
+        )
+    else:
+        sig = torch.rand((n,), generator=gen)
+    mean = float(min_snr_weighting(sig, float(gamma)).mean())
+    _MIN_SNR_NORM_CACHE[key] = mean
+    return mean
+
+
 def compute_loss_weighting_for_anima(
-    weighting_scheme: str, sigmas: torch.Tensor
+    weighting_scheme: str, sigmas: torch.Tensor, args=None
 ) -> torch.Tensor:
     """Compute loss weighting for Anima training.
 
-    Same schemes as SD3 but can add Anima-specific ones if needed in future.
+    Same schemes as SD3 plus ``min_snr`` (Anima-specific: the v-pred Min-SNR-γ
+    form, mean-1 normalized over the run's σ density). ``args`` supplies
+    ``min_snr_gamma`` and the density knobs; it is optional so callers that only
+    use the σ-only schemes keep the two-argument form.
     """
     if weighting_scheme == "sigma_sqrt":
         weighting = (sigmas**-2.0).float()
     elif weighting_scheme == "cosmap":
         bot = 1 - 2 * sigmas + 2 * sigmas**2
         weighting = 2 / (math.pi * bot)
+    elif weighting_scheme == "min_snr":
+        gamma = float(getattr(args, "min_snr_gamma", 5.0) or 5.0)
+        weighting = min_snr_weighting(sigmas.float(), gamma)
+        norm = min_snr_normalizer(
+            gamma,
+            timestep_sampling=str(getattr(args, "timestep_sampling", "sigmoid")),
+            sigmoid_scale=float(getattr(args, "sigmoid_scale", 1.0) or 1.0),
+            sigmoid_bias=float(getattr(args, "sigmoid_bias", 0.0) or 0.0),
+        )
+        weighting = weighting / max(norm, 1e-8)
     elif weighting_scheme == "none" or weighting_scheme is None:
         weighting = torch.ones_like(sigmas)
     else:
@@ -1089,10 +1080,9 @@ def sample_images(
         dit.switch_block_swap_for_training()
         if net is not None:
             net.train()
-        # No clean_memory_on_device() here on purpose: emptying the CUDA cache
-        # at the sample<->train boundary is what made VRAM visibly fluctuate.
-        # Letting the caching allocator hold its blocks keeps usage flat (peak
-        # settles at max(training, sampling) and stays there).
+        # No clean_memory_on_device() here: emptying the CUDA cache at the
+        # sample<->train boundary makes VRAM fluctuate; holding the allocator's
+        # blocks keeps peak at max(training, sampling).
 
     # Decode this round's latents now for per-epoch visibility; block-swap runs
     # defer to end-of-training decode_pending_samples (see _should_decode_inline).
@@ -1196,7 +1186,7 @@ def _sample_image_inference(
     # Band-aware: under --compile_seq_bands the graphs are per-band, so a
     # seq_len in an inter-band gap has no tight graph even though the union
     # range "covers" it. _dynamic_seq_bands is [union range] in classic mode,
-    # so the membership check degenerates to the old range check there.
+    # so the membership check is a plain range check there.
     from library.datasets.buckets import band_for_seq
 
     seq_range = getattr(dit, "_dynamic_seq_range", None)
@@ -1314,9 +1304,9 @@ def _sample_image_inference(
         neg_crossattn_emb,
     )
 
-    # Stash the latent rather than decode now: loading the VAE to GPU mid-run on
-    # top of the resident DiT + block-swap buffers is an OOM risk on tight cards,
-    # so decode is deferred to decode_pending_samples() at end of training.
+    # Stash the latent rather than decode now: loading the VAE to GPU on top of
+    # the resident DiT + block-swap buffers is an OOM risk on tight cards.
+    # decode_pending_samples() decodes later (see _should_decode_inline).
     ts_str = time.strftime("%Y%m%d%H%M%S", time.localtime())
     num_suffix = f"e{epoch:06d}" if epoch is not None else f"{steps:06d}"
     seed_suffix = "" if seed is None else f"_{seed}"

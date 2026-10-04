@@ -1,10 +1,7 @@
 """``GenerationRequest`` — a typed front door for a single generation call.
 
 ``generate(args, gen_settings)`` reads ~40 fields off an ``argparse.Namespace``
-via ``getattr``, so historically the only safe way to build one was to call the
-CLI parser (what ``examples/01`` and ``03`` do). This dataclass makes the request
-the canonical constructor and turns the CLI parser into *one* consumer instead of
-the only one::
+via ``getattr``; this dataclass builds that namespace::
 
     from anima_lora import GenerationRequest, generate, get_generation_settings
 
@@ -72,6 +69,10 @@ class GenerationRequest:
     easycontrol_weight: Optional[str] = None
     easycontrol_image: Optional[str] = None
     pooled_text_proj: Optional[str] = None
+    # CJK vocab pack path prefix (``library.anima.vocab_pack``). ``None`` =
+    # the `vocab_pack` key in configs/base.toml; ``no_vocab_pack`` forces off.
+    vocab_pack: Optional[str] = None
+    no_vocab_pack: bool = False
 
     dit: Optional[str] = None
     vae: Optional[str] = None
@@ -135,6 +136,8 @@ class GenerationRequest:
             argv += ["--easycontrol_image", self.easycontrol_image]
         if self.pooled_text_proj is not None:
             argv += ["--pooled_text_proj", self.pooled_text_proj]
+        if self.vocab_pack is not None:
+            argv += ["--vocab_pack", self.vocab_pack]
 
         if self.lora_weight is not None:
             argv += ["--lora_weight", *self.lora_weight]
@@ -154,6 +157,8 @@ class GenerationRequest:
             argv += ["--no_vae_2d"]
         if self.text_encoder_cpu:
             argv += ["--text_encoder_cpu"]
+        if self.no_vocab_pack:
+            argv += ["--no_vocab_pack"]
 
         argv += list(self.extra_argv)
         return argv
@@ -165,9 +170,8 @@ class GenerationRequest:
         """Build a fully-defaulted ``argparse.Namespace`` for ``generate()``.
 
         Routes ``to_argv()`` through ``library.inference.args.build_default_args``
-        (lazy-imported) — the same parser ``inference.parse_args`` now delegates
-        to, so the request stays entirely inside ``library`` with no edge into
-        the root ``inference`` entry-point script. Pass an explicit ``parse_args``
+        (lazy-imported) — the same parser ``inference.parse_args`` delegates
+        to. Pass an explicit ``parse_args``
         to inject a different parser (the test suite does this). The parser fills
         every knob this dataclass doesn't model, and validates choices/requireds —
         so a request with no ``prompt`` raises here, the same as the CLI.

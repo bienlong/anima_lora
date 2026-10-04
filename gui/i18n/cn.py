@@ -404,6 +404,8 @@ STRINGS: dict[str, str] = {
     "qs_advanced": '高级模式 →',
     "qs_advanced_hint": '切换到完整的 Config / Preprocess 页（全部参数）。',
     "qs_log_placeholder": '任务提交与报错会显示在这里。',
+    "zen_hint_html": '<b>禅模式</b>：Space = 保留并下一张 · X = 淘汰并下一张 · ←/→ = 翻页 · D = 移动标记 · S/F = 跳过预处理/清除 · Z = 一键打标+缓存',
+    "zen_no_preprocess_tab": '预处理页不可用——请先打开一次预处理页。',
     "qs_need_folder": '请先在步骤 1 选择数据集文件夹。',
     "qs_running_cache": '提交“打标 + 预处理”链…',
     "qs_not_trainable": '前几步还没完成——先把上面的流水线走完。',

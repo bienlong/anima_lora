@@ -478,6 +478,8 @@ STRINGS: dict[str, str] = {
     "qs_advanced": 'Advanced mode →',
     "qs_advanced_hint": 'Switch to the full Config / Preprocess tabs (every knob).',
     "qs_log_placeholder": 'Job submissions and errors appear here.',
+    "zen_hint_html": '<b>Zen flow</b>: Space = keep &amp; next · X = skip &amp; next · ←/→ = browse · D = move-mark · S/F = skip-preproc/clear · Z = run tag+cache chain',
+    "zen_no_preprocess_tab": 'Preprocess tab not available — open it once first.',
     "qs_need_folder": 'Pick a dataset folder first (step 1).',
     "qs_running_cache": 'Submitting auto-tag + preprocess chain…',
     "qs_not_trainable": 'Steps 1-3 are not complete yet — finish the pipeline above first.',

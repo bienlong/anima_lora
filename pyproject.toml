@@ -12,11 +12,15 @@ dependencies = [
     "torchvision>=0.27.0,<0.28 ; sys_platform != 'win32'",
     "accelerate>=1.13.0",
     "transformers>=5.10.1",
-    "diffusers>=0.39.0",
+    # Pinned to a git commit in [tool.uv.sources]: the QwenImage21 classes
+    # (project/qwen21_lora/) exist only on main, not in any release.
+    "diffusers>=0.41.0.dev0",
     "einops>=0.7.0",
     # Optimizers
     "pytorch-optimizer>=3.9.0",
     "prodigyopt>=1.1.2",
+    # CJK glossary (scripts/distill_cjk/corpus, --lang zh): pure-python OpenCC
+    "opencc-python-reimplemented>=0.1.7",
     # Data & Config
     "toml>=0.10.2",
     "tomlkit>=0.13",  # style-preserving TOML for the GUI's sectioned distill-config editor
@@ -34,11 +38,14 @@ dependencies = [
     "Pillow",
     "psutil",
     "opencv-python>=4.11.0.86",
-    # Masking
+    # Masking moved to anime-tools (curation split). The direct sam3 row is now
+    # redundant -- its last trainer-side consumer, probe_autocaption.py, moved to
+    # _archive/bench/position_captions/ (2026-09-08), and anime-tools declares sam3
+    # itself -- kept only so that archived probe still resolves.
+    # segmentation-models-pytorch is gone from both sides with the MIT text masker
+    # (anime_tools 0.5).
     "pyyaml",
     "sam3 @ git+https://github.com/facebookresearch/sam3.git",
-    "segmentation-models-pytorch>=0.3.4",
-    "albumentations>=1.4.0",
     "packaging",
     "pycocotools>=2.0.11",
     "flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.17/flash_attn-2.8.3+cu132torch2.12-cp313-cp313-linux_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
@@ -63,13 +70,11 @@ dependencies = [
     "pytest>=9.0.3",
     "blake3>=1.0.8",
     "softtorch>=0.1.1",
-    "controlnet-aux>=0.0.10",
     "scikit-learn>=1.9.0",
-    "datasets>=4.8.5",
-    "send2trash>=2.1.0",
-    "onnxruntime-gpu>=1.27.0; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'win32'",
-    # PyPI onnxruntime-gpu has no aarch64 wheels; Microsoft ships CUDA-13 builds for ARM64.
-    "onnxruntime-gpu @ https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-13/pypi/download/onnxruntime-gpu/1.26.0/onnxruntime_gpu-1.26.0-cp313-cp313-manylinux_2_34_aarch64.whl ; platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "peft>=0.20.0",
+    # Curation package (caption grammar, Anima Tagger, caption stages — split
+    # out 2026-08-30); pinned to a release tag in [tool.uv.sources].
+    "anime-tools",
 ]
 
 [project.optional-dependencies]
@@ -115,15 +120,27 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
+# diffusers: `QwenImage21Pipeline` / `QwenImage21Transformer2DModel` /
+# `AutoencoderKLQwenImage21` (the Qwen-Image-2.1 sidecar) landed on main after
+# the 0.40.0 release, so there is no wheel to pin to. Pinned to a commit rather
+# than floating `main` — the trainer's own diffusers surface is small
+# (`randn_tensor`, `EulerAncestralDiscreteScheduler`, `ConfigMixin`,
+# `modular_pipelines.anima`) but it still rides this pin. Bump deliberately.
+diffusers = { git = "https://github.com/huggingface/diffusers", rev = "80c7ed262aeffbeb43ef13ae04baeb9b84515a69" }
+# anime_tools: pinned release tag only. No sibling-checkout path source — the
+# lock would then reference ../anime_tools, and a flagless `uv sync` fails on
+# every machine without one. Test an unreleased change with
+# PYTHONPATH=../anime_tools instead.
+anime-tools = { git = "https://github.com/sorryhyun/anime_tools", tag = "v0.7.6" }
 torch = [
     { index = "pytorch-cu132", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
     { index = "pytorch-cu132", group = "cuda-windows" },
-    { index = "amd-rocm-714", group = "rocm-windows" },
+    { index = "amd-rocm-100", group = "rocm-windows" },
 ]
 torchvision = [
     { index = "pytorch-cu132", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
     { index = "pytorch-cu132", group = "cuda-windows" },
-    { index = "amd-rocm-714", group = "rocm-windows" },
+    { index = "amd-rocm-100", group = "rocm-windows" },
 ]
 
 [[tool.uv.index]]
@@ -134,8 +151,8 @@ explicit = true
 # This index also hosts the ROCm runtime/device packages pulled by the device
 # extras, so it cannot be explicit-only.
 [[tool.uv.index]]
-name = "amd-rocm-714"
-url = "https://repo.amd.com/rocm/whl-multi-arch/"
+name = "amd-rocm-100"
+url = "https://stable.repo.amd.com/rocm/whl-next/"
 
 [tool.ruff.lint.per-file-ignores]
 # `train.py` / `inference.py` call `install_no_window_default()` at module scope
@@ -177,9 +194,7 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [dependency-groups]
-dev = [
-    "markdownify",
-]
+dev = []
 # Windows accelerator backends. `cuda-windows` is in default-groups (see
 # [tool.uv]) so it composes into every plain `uv sync`; every dep is
 # win32-marked, so both groups are inert on Linux/macOS.
@@ -192,8 +207,8 @@ cuda-windows = [
 rocm-windows = [
     # Initial RDNA 4 path. AMD's device-all extra currently includes Linux-only
     # Instinct packages and cannot resolve on Windows, so select gfx120X only.
-    "torch[device-gfx1200,device-gfx1201]==2.12.0+rocm7.14.0 ; sys_platform == 'win32'",
-    "torchvision[device-gfx1200,device-gfx1201]==0.27.0+rocm7.14.0 ; sys_platform == 'win32'",
+    "torch[device-gfx1200,device-gfx1201]==2.13.0+rocm10.0.0 ; sys_platform == 'win32'",
+    "torchvision[device-gfx1200,device-gfx1201]==0.28.0+rocm10.0.0 ; sys_platform == 'win32'",
     # AMD's Windows wheel metadata currently points at a Linux-only `triton`
     # distribution. The Windows package provides the same import/runtime used
     # by torch.compile in the working ROCm environment.

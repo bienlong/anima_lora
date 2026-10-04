@@ -45,7 +45,7 @@ class TeacherFeatureDiscriminator(nn.Module):
     native-shape patch grid + compiled fake-5D ``(B, 1, L, 1, D)`` layout. Both
     granularities here sidestep it by never reshaping to a grid:
 
-    - ``granularity="pooled"`` (v0): mean-pool each tap over every axis between
+    - ``granularity="pooled"``: mean-pool each tap over every axis between
       batch and channel -> ``(B, D)``, then a 2-layer MLP per tap -> ``(B, num_taps)``.
     - ``granularity="token"`` (LADD-style dense head): same per-tap MLP applied
       to every token (no reshape needed) -> ``(B, num_taps·N)``.
@@ -366,8 +366,7 @@ class TurboDMDNetwork:
             raise ValueError("adaln_alpha > 0 requires train_adaln=true")
         # τ-split critic: 2 = a second fake stack (fake_hi) owning the high-τ
         # band. Which bank answers/trains is the CALLER's choice via
-        # set_fake_bank. 1 = the second stack is never constructed and every
-        # path below is byte-identical to the pre-bank harness.
+        # set_fake_bank. 1 = the second stack is never constructed.
         self.fake_tau_banks = int(fake_tau_banks)
         if self.fake_tau_banks not in (1, 2):
             raise ValueError(f"fake_tau_banks={self.fake_tau_banks}: expected 1 or 2.")
@@ -705,14 +704,17 @@ class TurboDMDNetwork:
         transiently-gated pool's grads escape clipping.
         """
         return [
-            p for pool in self.student_pools for p in pool.parameters() if p.requires_grad
+            p
+            for pool in self.student_pools
+            for p in pool.parameters()
+            if p.requires_grad
         ]
 
     def student_param_groups(self, student_lr: float, div_pool_lr: float = 0.0):
         """AdamW param groups: pool B at ``student_lr``, pool A at ``div_pool_lr``.
 
         ``div_pool_lr=0`` inherits ``student_lr``. Under single-pool this is one
-        group — the shipped path stays byte-identical.
+        group.
         """
         groups = [{"params": list(self.student.parameters()), "lr": student_lr}]
         if self.student_div is not None:
@@ -815,11 +817,6 @@ class TurboDMDNetwork:
             self._save_student_step_expert(sd, file, dtype, metadata)
             return
 
-        # Delegate to the network's own save so the full distill chain runs.
-        # GOTCHA: an OrthoInit/OrthoLoRA student stores P_init/Q_init/lambda_layer
-        # (or Cayley/SVD bases), NOT lora_down/lora_up — save_weights distills
-        # those into the standard factorization. A naive pre-filter here would
-        # strip them before the distill step ever sees them.
         self.student.save_weights(file, dtype, metadata)
         logger.info(f"saved student LoRA → {file}")
 

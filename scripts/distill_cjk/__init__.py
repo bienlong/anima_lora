@@ -1,4 +1,4 @@
-"""CJK vocab-pack distillation (project/cjk_aware_anima, Phase 2b).
+"""CJK vocab-pack distillation (the frozen ``project/finished/cjk_aware_anima`` line, Phase 2b).
 
 Trains the *extended* rows of the LLM Adapter's T5-side query table so that
 
@@ -16,12 +16,17 @@ Two CLIs::
 
 Modules:
 
-* :mod:`scripts.distill_cjk.config`    — CLI → frozen dataclass (distill_mod precedent).
+* :mod:`scripts.distill_cjk.config`    — CLI → frozen dataclass.
 * :mod:`scripts.distill_cjk.ext_table` — parameterization ladder + split embedding.
 * :mod:`scripts.distill_cjk.data`      — pairs, span alignment, on-disk cache.
 * :mod:`scripts.distill_cjk.losses`    — L_flat / L_span / L_attn / L_pool.
 * :mod:`scripts.distill_cjk.attn_bank` — DiT cross-attn K/V probe bank (no DiT load).
+* :mod:`scripts.distill_cjk.rows`      — per-row bookkeeping / holdout.
+* :mod:`scripts.distill_cjk.adapter_lora` — ext-gated LoRA on the adapter's Linears.
+* :mod:`scripts.distill_cjk.build_query_bank` — cross-attn probe queries for ``attn``.
+* :mod:`scripts.distill_cjk.corpus`    — the pair-file builders (glossary, lexicon,
+  ``build_pairs`` + synth registers); ``make exp-cjk-corpus ARGS='<stage> …'``.
 
-Why not ``train.py``: there is no DiT, no VAE, no latents and no sampler here —
-the whole loop is a 6-block adapter forward over cached text features.
+The loop runs outside ``train.py``: no DiT, VAE, latents or sampler, only a 6-block
+adapter forward over cached text features.
 """

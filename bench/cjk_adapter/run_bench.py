@@ -247,6 +247,15 @@ def main() -> None:
         "paid once across all arms).",
     )
     parser.add_argument(
+        "--lora",
+        nargs="*",
+        default=None,
+        help="DiT LoRA checkpoint(s) to load (merge-or-live per checkpoint "
+        "metadata, applied inside load_dit_model before any block compile). "
+        "Use it to render an ext-trained LoRA through the ext encoder.",
+    )
+    parser.add_argument("--lora_multiplier", type=float, default=1.0)
+    parser.add_argument(
         "--ext",
         action="store_true",
         help="Add {lang}_ext arms: native CJK on both sides, T5 side through "
@@ -258,7 +267,15 @@ def main() -> None:
         default=Path(__file__).resolve().parent / "assets" / "ext_embed",
         help="Path prefix of the {.safetensors,.json} vocab pack the ext arms "
         "read. Defaults to the Phase-1 zero-shot build; point it at a distilled "
-        "pack (output/ckpt/cjk_vocab_pack*) to score Phase 2c.",
+        "pack (output/ckpt/cjk_vocab/cjk_vocab_pack*) to score Phase 2c.",
+    )
+    parser.add_argument(
+        "--adapter_lora",
+        default=None,
+        help="ext-gated adapter LoRA sidecar (plan3) to hook onto llm_adapter "
+        "before encoding; 'auto' = <ext_prefix>.adapter_lora.safetensors. "
+        "EN / t5en arms carry no ext id so their gate is 0 — only *_ext arms "
+        "see the delta.",
     )
     parser.add_argument(
         "--prompts",
@@ -289,6 +306,8 @@ def main() -> None:
         guidance_scale=opts.cfg,
         image_size=(opts.size[0], opts.size[1]),
         seed=opts.seed,
+        lora_weight=opts.lora or None,
+        lora_multiplier=opts.lora_multiplier if opts.lora else None,
     ).to_args()
     args.device = device
     # Block compile (repo-preferred over whole-model torch.compile): applied
@@ -331,6 +350,34 @@ def main() -> None:
             [emb.weight.data, ext_table.to(emb.weight.dtype).to(emb.weight.device)]
         )
         anima.llm_adapter.embed = torch.nn.Embedding.from_pretrained(new_w)
+    adapter_lora = None
+    if opts.adapter_lora:
+        from scripts.distill_cjk.adapter_lora import AdapterLoRA
+
+        lora_path = (
+            opts.ext_prefix.with_name(
+                opts.ext_prefix.name + ".adapter_lora.safetensors"
+            )
+            if opts.adapter_lora == "auto"
+            else Path(opts.adapter_lora)
+        )
+        if ext_table is None:
+            raise SystemExit(
+                "--adapter_lora needs --ext (the gate never opens otherwise)"
+            )
+        adapter_lora = AdapterLoRA.load(anima.llm_adapter, lora_path)
+        print(
+            f"adapter LoRA: r={adapter_lora.rank} targets={','.join(adapter_lora.targets)} "
+            f"({adapter_lora.n_params() / 1e6:.2f} M) hooked from {lora_path}"
+        )
+    elif opts.ext:
+        sib = opts.ext_prefix.with_name(
+            opts.ext_prefix.name + ".adapter_lora.safetensors"
+        )
+        if sib.exists():
+            print(
+                f"NOTE: {sib.name} exists but --adapter_lora not given — rows-only arm"
+            )
     text_encoder = load_text_encoder(args, dtype=torch.bfloat16, device=device)
     shared = {"text_encoder": text_encoder, "conds_cache": {}}
 
@@ -347,12 +394,14 @@ def main() -> None:
     # ---- adapter-output diagnostics ----------------------------------------
     diagnostics = {}
     for content, table in arms.items():
-        base = contexts[(content, "en")][0]["embed"][0]
+        # `--arms` may drop `en` (ext-only grids); cos_vs_en is then undefined.
+        base_ctx = contexts.get((content, "en"))
+        base = base_ctx[0]["embed"][0] if base_ctx is not None else None
         rows = {}
         for arm in table:
             emb = contexts[(content, arm)][0]["embed"]
             row = t5_side_stats(emb)
-            row["cos_vs_en"] = flat_cos(emb[0], base)
+            row["cos_vs_en"] = flat_cos(emb[0], base) if base is not None else None
             rows[arm] = row
         diagnostics[content] = rows
 
@@ -390,6 +439,8 @@ def main() -> None:
                 f"  {arm:14s} t5_nonpad={row['t5_tokens_nonpad']:3d} "
                 f"unk={row['t5_unk']:2d} ext={row['t5_ext']:2d} "
                 f"cos_vs_en={row['cos_vs_en']:+.4f}"
+                if row["cos_vs_en"] is not None
+                else "cos_vs_en=n/a"
             )
     print("[p1-vs-p2 discrimination]")
     for arm, cos in discrimination.items():
@@ -451,6 +502,17 @@ def main() -> None:
                 else {}
             ),
             "ext_prefix": str(opts.ext_prefix) if opts.ext else None,
+            "lora": list(opts.lora or []),
+            "lora_multiplier": opts.lora_multiplier if opts.lora else None,
+            "adapter_lora": (
+                {
+                    "r": adapter_lora.rank,
+                    "targets": list(adapter_lora.targets),
+                    "n_params": adapter_lora.n_params(),
+                }
+                if adapter_lora is not None
+                else None
+            ),
             "arms": {c: list(t) for c, t in arms.items()},
             "images_rendered": sorted(images),
         },

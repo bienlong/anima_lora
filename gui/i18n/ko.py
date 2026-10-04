@@ -463,6 +463,8 @@ STRINGS: dict[str, str] = {
     "qs_advanced": '고급 모드 →',
     "qs_advanced_hint": '전체 Config / Preprocess 탭으로 전환.',
     "qs_log_placeholder": '작업 제출과 오류가 여기 표시됩니다.',
+    "zen_hint_html": '<b>젠 모드</b>: Space = 유지하고 다음 · X = 제외하고 다음 · ←/→ = 탐색 · D = 이동 표시 · S/F = 전처리 건너뛰기/해제 · Z = 태그+캐시 실행',
+    "zen_no_preprocess_tab": '전처리 탭을 먼저 열어주세요.',
     "qs_need_folder": '먼저 1단계에서 폴더를 선택하세요.',
     "qs_running_cache": '태그 + 전처리 체인 제출…',
     "qs_not_trainable": '위 단계를 먼저 완료하세요.',

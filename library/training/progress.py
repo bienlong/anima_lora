@@ -1,8 +1,8 @@
-"""Structured training-progress sink (Phase 0 of the daemon plan).
+"""Structured training-progress sink.
 
 Writes a JSONL event stream next to the checkpoint so any consumer (the GUI
-progress bar, the future training daemon, an MCP client) can follow a run by
-tailing one file instead of regex-parsing tqdm stdout. Append-only,
+progress bar, the daemon, an MCP client) can follow a run by tailing one
+file. Append-only,
 line-buffered, main-process only. One event per line:
 
     {"ev": "run_start", "ts": 0.0, "run": ..., "method": ..., "preset": ...,
@@ -16,9 +16,8 @@ line-buffered, main-process only. One event per line:
      "error": ...}
 
 ``log`` events mirror WARNING+ records from the root logger (see
-:meth:`ProgressSink.attach_log_mirror`) so a debugging reader gets the run's
-warnings/errors from this one structured file instead of grepping the
-tqdm-noisy stdout capture.
+:meth:`ProgressSink.attach_log_mirror`), so the run's warnings/errors are in
+this one structured file.
 
 A reader tails the file: missing file = not started; last line ``run_end`` =
 done. Every write is wrapped so a logging failure can never crash training.
@@ -308,10 +307,9 @@ def _pid_alive(pid: Optional[int]) -> Optional[bool]:
 def read_status(path: str, *, rate_window: int = 20) -> dict:
     """Digest a ``progress.jsonl`` stream into one run-status dict.
 
-    The cheap answer to "what step is this run at, and is it still alive?" —
-    a whole-file read of an append-only stream (a few thousand short lines even
-    for a long run), so callers don't export TensorBoard events and reimplement
-    the parse. Truncated / partially-written lines are skipped, so it is safe to
+    Answers "what step is this run at, and is it still alive?" with a
+    whole-file read of an append-only stream (a few thousand short lines even
+    for a long run). Truncated / partially-written lines are skipped, so it is safe to
     call against a live run mid-write.
 
     Keys: ``run``/``method``/``preset``/``pid``/``log_dir`` (from ``run_start``),
@@ -424,7 +422,9 @@ def run_scope(
     ``run_start`` must already have fired (the sink is constructed earlier so it
     can be handed to the checkpoint saver). On block exit this maps the outcome
     to a status: normal return → ``ok``; ``KeyboardInterrupt`` → ``stopped``;
-    any other exception → ``error`` (re-raised either way). ``final_step`` is
+    :class:`~library.training.pause.TrainingPaused` → ``paused`` (with the
+    ``state_dir`` to resume from); any other exception → ``error`` (re-raised
+    either way). ``final_step`` is
     read lazily at exit so the event records where training actually stopped;
     ``extra_fields`` likewise — its dict (e.g. the liveness summary) is merged
     into the ``run_end`` event, and a failure inside it is swallowed so it can
@@ -447,10 +447,20 @@ def run_scope(
     if sink is None:
         yield
         return
+    from library.training.pause import TrainingPaused
+
     try:
         yield
     except KeyboardInterrupt:
         sink.run_end(status="stopped", final_step=final_step(), **_extra())
+        raise
+    except TrainingPaused as paused:
+        sink.run_end(
+            status="paused",
+            final_step=final_step(),
+            state_dir=paused.state_dir,
+            **_extra(),
+        )
         raise
     except BaseException as exc:
         sink.run_end(

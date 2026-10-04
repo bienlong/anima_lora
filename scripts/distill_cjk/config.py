@@ -18,7 +18,7 @@ REPO = Path(__file__).resolve().parents[2]
 DEFAULT_PAIRS = REPO / "post_image_dataset" / "cjk_distill" / "pairs.jsonl"
 DEFAULT_CACHE = REPO / "post_image_dataset" / "cjk_distill" / "cache"
 DEFAULT_EXT = REPO / "bench" / "cjk_adapter" / "assets" / "ext_embed"
-DEFAULT_OUT = REPO / "output" / "ckpt" / "cjk_vocab_pack"
+DEFAULT_OUT = REPO / "output" / "ckpt" / "cjk_vocab" / "cjk_vocab_pack"
 
 # Per-`via` trust used by the span loss. The composed caption is the *student's*
 # input, so a mistranslated tag trains that tag's ext rows toward the wrong
@@ -50,6 +50,22 @@ TRUST_POLICIES = {
         # below `wiki` — and note these rows have *no* supervision otherwise, so
         # the comparison is against 0, not against a better wording.
         "tagpair": 0.6,
+        # KO r5: sub-floor KB keyword that lost (or never faced) back-translation
+        # arbitration — community field, unverified, same trust class as
+        # `tagpair`. Replaces `mt_unverified` wording for 97% of the KO tail
+        # (reports/0901_ko_phase_k3.md).
+        "kb_unverified": 0.6,
+        # zh (plan_zh.md Z1): a curated community-pack wording (NGA / byzod)
+        # that back-translated to the tag — same class as `wiki_verified`.
+        "kb_verified": 1.0,
+        # zh: curated pack wording chosen without back-translation support
+        # (`kb` primary tier, above the floor, no candidate cleared F1) —
+        # human community translation, unverified: `tagpair` class.
+        "kb": 0.6,
+        # desc_ko full-width spans (EN wiki sentence ↔ KB KO description):
+        # human community translation, but loosely aligned (the KO side is a
+        # summary, sometimes a sentence longer) — mt_verified class.
+        "kb_desc": 0.8,
         "mt_unverified": 0.3,
         "unresolved": 0.0,
         "unmapped": 0.0,
@@ -122,7 +138,13 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--text_encoder", default=None, help="Qwen3 text encoder")
     p.add_argument("--pairs", type=Path, default=DEFAULT_PAIRS)
     p.add_argument("--ext_prefix", type=Path, default=DEFAULT_EXT)
-    p.add_argument("--cache_dir", type=Path, default=DEFAULT_CACHE)
+    p.add_argument(
+        "--cache_dir",
+        default=str(DEFAULT_CACHE),
+        help="staged cache dir; distill also accepts a comma-separated list "
+        "for joint training over separately staged corpora (plan_ko K2: "
+        "cache_synth3,cache_ko — JA rows are never re-encoded)",
+    )
     p.add_argument(
         "--registers",
         default="",
@@ -153,11 +175,135 @@ def build_argparser() -> argparse.ArgumentParser:
     )
     p.add_argument("--rank", type=int, default=64, help="rank of the global map")
     p.add_argument(
+        "--freeze_diag",
+        action="store_true",
+        help="global/global_row: keep the per-dim diagonal at identity (not "
+        "trained) — low-rank + scalar gain only. Preserves the init key "
+        "geometry the learned diagonal otherwise collapses.",
+    )
+    p.add_argument(
         "--min_visits",
         type=int,
         default=5,
         help="rows below this visit count get no per-row residual (they ride "
         "the global map alone) — 933 of 3002 visited rows are seen 1-4×.",
+    )
+    p.add_argument(
+        "--tunable_rows_from",
+        type=int,
+        default=0,
+        help="freeze every ext row below this index at its init (row/global_row "
+        "modes) — the word-minting smoke trains only appended rows on top of a "
+        "trained pack passed as --ext_prefix.",
+    )
+    p.add_argument(
+        "--span_focus_from",
+        type=int,
+        default=0,
+        help="zero the span-loss weight of every span whose student tokens are "
+        "all below this ext-row index — concentrates the whole gradient on "
+        "minted-row spans instead of diluting it across the frozen 90%%.",
+    )
+    p.add_argument(
+        "--span_focus_bg",
+        type=float,
+        default=0.0,
+        help="with --span_focus_from: weight kept by non-minted spans instead "
+        "of 0 (plan_ko3 M2a mixed focus — a small background weight keeps the "
+        "surrounding scene in the loss so minted rows stay on-manifold; the "
+        "smoke's pure focus drifted renders into sketch/robot styles).",
+    )
+    p.add_argument(
+        "--row_anchor",
+        type=float,
+        default=0.0,
+        help="plan_ko3 M2b init-anchor: add λ·mean(‖residual‖²/‖init‖²) over "
+        "the tunable rows so a minted row cannot buy span-cos with a large "
+        "off-manifold excursion (m1 drift was ‖Δ‖/‖init‖ 0.13–0.29 and "
+        "renders left the manifold while span loss improved).",
+    )
+
+    # ---- coverage (plan_zh2 U4 / U1) -----------------------------------------
+    p.add_argument(
+        "--holdout_rows",
+        type=float,
+        default=0.0,
+        help="U4 row-disjoint holdout: hold out this fraction of the *visited* "
+        "rows (seeded, stratified by script) — every span touching one leaves "
+        "the training pool (spans, not pairs) and is scored at eval as "
+        "`eval.row_holdout.*`, the first direct read of how the map does on a "
+        "row it never trained. 0 = off.",
+    )
+    p.add_argument(
+        "--holdout_rows_min_visits",
+        type=int,
+        default=5,
+        help="rows eligible for --holdout_rows need at least this many visits "
+        "(a row seen once has one occurrence to score).",
+    )
+    p.add_argument(
+        "--holdout_rows_max_visits",
+        type=int,
+        default=500,
+        help="rows at or above this visit count are never held out — the "
+        "500+ band (~140 rows) carries a third of all visits, so holding it "
+        "out strips ~5%% of the pool's span tokens for a question it does "
+        "not answer. 0 = no cap.",
+    )
+    p.add_argument(
+        "--holdout_rows_eval",
+        type=int,
+        default=2048,
+        help="held-out spans scored per eval (the same count of trained spans "
+        "is scored alongside as the in-distribution control).",
+    )
+    p.add_argument(
+        "--span_min_visits",
+        type=int,
+        default=0,
+        help="U1 visit floor: a span whose student tokens contain any ext row "
+        "visited fewer than this many times (over the training pool) gets "
+        "weight 0 — a row seen once is not a teacher; it rides the map like "
+        "an unvisited one and is tagged `mapped-unseen` in the pack. 2 drops "
+        "singletons, 5 matches --min_visits. 0 = off.",
+    )
+    p.add_argument(
+        "--span_min_visits_bg",
+        type=float,
+        default=0.0,
+        help="with --span_min_visits: weight kept by below-floor spans instead "
+        "of 0 (mirrors --span_focus_bg).",
+    )
+
+    # ---- adapter capacity (plan3: ext-gated LoRA on the LLM Adapter) --------
+    p.add_argument(
+        "--adapter_lora",
+        type=int,
+        default=0,
+        help="rank of an ext-gated LoRA on the adapter's per-block Linears "
+        "(0 = off, rows only). Trained jointly with the ext table; the delta "
+        "is gated to sequences carrying an ext id so pure-EN prompts stay "
+        "bit-exact by construction. Written as <out>.adapter_lora.safetensors.",
+    )
+    p.add_argument(
+        "--adapter_lora_targets",
+        default="self_qkvo,cross_q",
+        help="comma list of self_q|self_k|self_v|self_o|self_qkvo|cross_q|"
+        "cross_k|cross_v|cross_o|cross_kv|mlp (per block, all 6 blocks)",
+    )
+    p.add_argument(
+        "--adapter_lora_lr",
+        type=float,
+        default=1e-4,
+        help="LoRA param-group LR (the table keeps --lr)",
+    )
+    p.add_argument(
+        "--init_pack",
+        type=Path,
+        default=None,
+        help="warm-start the ext rows from a trained pack prefix (its "
+        "materialized ext_embed becomes the table's init) instead of the "
+        "zero-shot --ext_prefix build",
     )
 
     # ---- objective --------------------------------------------------------
@@ -234,7 +380,8 @@ class CJKDistillConfig:
     text_encoder: str
     pairs: Path
     ext_prefix: Path
-    cache_dir: Path
+    cache_dir: Path  # primary (staging writes here); distill reads cache_dirs
+    cache_dirs: tuple[Path, ...]
     registers: tuple[str, ...]
     train_registers: tuple[str, ...]
     max_pairs: int
@@ -243,6 +390,22 @@ class CJKDistillConfig:
     param: str
     rank: int
     min_visits: int
+    freeze_diag: bool = False
+    tunable_rows_from: int = 0
+    span_focus_from: int = 0
+    span_focus_bg: float = 0.0
+    row_anchor: float = 0.0
+    holdout_rows: float = 0.0
+    holdout_rows_min_visits: int = 5
+    holdout_rows_max_visits: int = 500
+    holdout_rows_eval: int = 2048
+    span_min_visits: int = 0
+    span_min_visits_bg: float = 0.0
+
+    adapter_lora: int = 0
+    adapter_lora_targets: str = "self_qkvo,cross_q"
+    adapter_lora_lr: float = 1e-4
+    init_pack: Path | None = None
 
     losses: dict[str, float] = field(default_factory=dict)
     trust: str = "provenance"
@@ -298,6 +461,31 @@ def resolve_config(args: argparse.Namespace) -> CJKDistillConfig:
             "seen once; expect memorization, not generalization"
         )
 
+    if args.adapter_lora:
+        from scripts.distill_cjk.adapter_lora import parse_targets
+
+        parse_targets(args.adapter_lora_targets)  # fail at parse time, not at attach
+        if "attn" in losses:
+            logger.info(
+                "--adapter_lora with the attn loss: plan3 Phase 2 regulariser. "
+                "(§9's 'attn hurts renders' was rows-only; with LoRA capacity, "
+                "span-only smears — the attn term charges that. Health-metric "
+                "interaction, not a wiring hazard.)"
+            )
+    if (
+        args.init_pack is not None
+        and not Path(args.init_pack).with_suffix(".safetensors").exists()
+    ):
+        raise FileNotFoundError(f"--init_pack {args.init_pack}.safetensors not found")
+
+    if not 0.0 <= args.holdout_rows < 1.0:
+        raise ValueError("--holdout_rows must be in [0, 1)")
+    if args.holdout_rows and "span" not in losses:
+        logger.warning(
+            "--holdout_rows without the span loss: rows are held out of a loss "
+            "that is not being trained; the row-holdout metric is still reported"
+        )
+
     blocks = tuple(int(b) for b in str(args.attn_blocks).split(",") if b.strip() != "")
     if "attn" in losses and not blocks:
         raise ValueError("--loss attn needs at least one --attn_blocks entry")
@@ -307,7 +495,8 @@ def resolve_config(args: argparse.Namespace) -> CJKDistillConfig:
         text_encoder=args.text_encoder or ckpt.text_encoder,
         pairs=Path(args.pairs),
         ext_prefix=Path(args.ext_prefix),
-        cache_dir=Path(args.cache_dir),
+        cache_dir=Path(str(args.cache_dir).split(",")[0]),
+        cache_dirs=tuple(Path(p) for p in str(args.cache_dir).split(",") if p.strip()),
         registers=tuple(r for r in str(args.registers).split(",") if r.strip()),
         train_registers=tuple(
             r.strip() for r in str(args.train_registers).split(",") if r.strip()
@@ -317,6 +506,21 @@ def resolve_config(args: argparse.Namespace) -> CJKDistillConfig:
         param=args.param,
         rank=int(args.rank),
         min_visits=int(args.min_visits),
+        freeze_diag=bool(args.freeze_diag),
+        tunable_rows_from=int(args.tunable_rows_from),
+        span_focus_from=int(args.span_focus_from),
+        span_focus_bg=float(args.span_focus_bg),
+        row_anchor=float(args.row_anchor),
+        holdout_rows=float(args.holdout_rows),
+        holdout_rows_min_visits=int(args.holdout_rows_min_visits),
+        holdout_rows_max_visits=int(args.holdout_rows_max_visits),
+        holdout_rows_eval=int(args.holdout_rows_eval),
+        span_min_visits=int(args.span_min_visits),
+        span_min_visits_bg=float(args.span_min_visits_bg),
+        adapter_lora=int(args.adapter_lora),
+        adapter_lora_targets=str(args.adapter_lora_targets),
+        adapter_lora_lr=float(args.adapter_lora_lr),
+        init_pack=Path(args.init_pack) if args.init_pack else None,
         losses=losses,
         trust=args.trust,
         register_sampling=parse_register_sampling(args.register_sampling),

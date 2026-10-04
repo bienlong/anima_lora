@@ -1,7 +1,7 @@
 """Pairs, span alignment, and the on-disk cache reader (CPU only).
 
 The corpus (``post_image_dataset/cjk_distill/pairs.jsonl``, built by
-``project/cjk_aware_anima/datasets/build_pairs.py``) is a list of
+``scripts/distill_cjk/corpus/build_pairs.py``) is a list of
 ``{en, ja, register, spans}`` records. ``spans`` is what makes the span loss
 possible: D1 captions are *composed* tag-by-tag from the glossary, so each EN
 tag maps to exactly one JA tag in the same order. This module turns that free
@@ -148,7 +148,14 @@ def _en_span_chars(text: str, segments: list[str]) -> list[tuple[int, int]]:
     return out
 
 
-def _ja_span_chars(segments: list[str], joiner: str = "、") -> list[tuple[int, int]]:
+# Pre-2026-08-30 records carry no ``joiner`` field and were built with 、;
+# newer builders (build_pairs / synth_names) record the joiner per pair.
+LEGACY_JOINER = "、"
+
+
+def _ja_span_chars(
+    segments: list[str], joiner: str = LEGACY_JOINER
+) -> list[tuple[int, int]]:
     """Char spans inside ``joiner.join(segments)`` — exact by construction."""
     out, pos = [], 0
     for seg in segments:
@@ -230,7 +237,9 @@ class PairEncoder:
         raw = pair.get("spans") or []
         if raw:
             en_chars = _en_span_chars(en, [s["en"] for s in raw])
-            ja_chars = _ja_span_chars([s["ja"] for s in raw])
+            ja_chars = _ja_span_chars(
+                [s["ja"] for s in raw], joiner=pair.get("joiner") or LEGACY_JOINER
+            )
             for s, ec, jc in zip(raw, en_chars, ja_chars):
                 t_idx = _tokens_in_span(t_offsets, t_mask, ec)
                 s_idx = _tokens_in_span(s_offsets, s_mask, jc)
@@ -304,17 +313,34 @@ class CachedPairs:
     the attention loss, which is the only place their count matters.
     """
 
-    def __init__(self, cache_dir: Path, split: str = "train"):
+    def __init__(self, cache_dir, split: str = "train"):
         from safetensors.torch import load_file
 
-        self.dir = Path(cache_dir) / split
-        meta_path = self.dir / "meta.json"
-        if not meta_path.exists():
-            raise FileNotFoundError(
-                f"no cache at {self.dir} — run `python -m scripts.distill_cjk.cache`"
-            )
-        self.meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        self.records = self.meta["pairs"]
+        # One dir, or a sequence of dirs staged separately (plan_ko K2: the
+        # JA cache is untouched and KO lands in its own `cache_ko` — joint
+        # training concatenates the records; each record remembers its dir).
+        dirs = (
+            [Path(cache_dir)]
+            if isinstance(cache_dir, (str, Path))
+            else [Path(d) for d in cache_dir]
+        )
+        self.dirs = [d / split for d in dirs]
+        self.dir = self.dirs[0]  # primary, kept for messages/back-compat
+        self.records = []
+        self.meta: dict = {"pairs": self.records}
+        for d in self.dirs:
+            meta_path = d / "meta.json"
+            if not meta_path.exists():
+                raise FileNotFoundError(
+                    f"no cache at {d} — run `python -m scripts.distill_cjk.cache`"
+                )
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            for rec in meta["pairs"]:
+                rec["_dir"] = str(d)
+            self.records.extend(meta["pairs"])
+            for k, v in meta.items():
+                if k != "pairs":
+                    self.meta.setdefault(k, v)
         self._shards: dict[str, dict] = {}
         self._span_cache: dict[int, dict] = {}
         self._load_file = load_file
@@ -351,10 +377,11 @@ class CachedPairs:
             rec["spans"] = kept
         self._span_cache.clear()
 
-    def _shard(self, name: str) -> dict:
-        if name not in self._shards:
-            self._shards[name] = self._load_file(str(self.dir / name))
-        return self._shards[name]
+    def _shard(self, name: str, dir_: str | None = None) -> dict:
+        path = str(Path(dir_ or self.dir) / name)
+        if path not in self._shards:
+            self._shards[path] = self._load_file(path)
+        return self._shards[path]
 
     def _span_index(self, i: int) -> dict:
         """Flat (token, span) index tensors for one pair — built once, reused.
@@ -387,7 +414,7 @@ class CachedPairs:
 
     def get(self, i: int) -> CachedPair:
         rec = self.records[i]
-        sd = self._shard(rec["shard"])
+        sd = self._shard(rec["shard"], rec.get("_dir"))
         k = rec["key"]
         spans = [
             Span(list(s[0]), list(s[1]), float(s[2]), str(s[3]), float(s[4]))

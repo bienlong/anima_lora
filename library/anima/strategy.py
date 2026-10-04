@@ -159,9 +159,9 @@ class AnimaTextEncodingStrategy(TextEncodingStrategy):
         ``library/preprocess/uncond.py``). When provided, dropped rows of
         ``crossattn_emb`` are replaced with it so the trained adapter sees
         the *same* unconditional embedding at CFG-uncond time that
-        ``library/inference/text.py:99-127`` feeds at inference. When None,
-        falls back to zeros — legacy behavior that drives the LoRA's
-        learned CFG-uncond branch out of distribution.
+        ``library/inference/text.py::prepare_text_inputs`` (negative-prompt
+        branch) feeds at inference. When None, falls back to zeros, which
+        puts the LoRA's learned CFG-uncond branch out of distribution.
         """
         device_tensor = next(
             (
@@ -273,6 +273,16 @@ class AnimaTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
         try:
             with _safe_open(cache_path, framework="pt") as f:
                 keys = set(f.keys())
+                # Pack stamp: a cache encoded through a different vocab pack
+                # (or none) than the active one still "exists", so say so
+                # once — the ids inside no longer match the tokenizer.
+                from library.anima.vocab_pack import check_cache_stamp, strategy_pack
+
+                check_cache_stamp(
+                    f.metadata(),
+                    cache_path,
+                    strategy_pack(TokenizeStrategy.get_strategy()),
+                )
                 if "num_variants" in keys:
                     num_variants = int(f.get_tensor("num_variants"))
             # Adapter-output caches prune the unused Qwen tensors and store only
@@ -395,15 +405,12 @@ class AnimaTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
                 sfx = ""
 
             # Serve whatever the cache actually holds, independent of this
-            # run's cache_llm_adapter_outputs flag. A pruned adapter cache
-            # stores only crossattn_emb (no prompt_embeds); gating the read on
-            # the run flag hard-crashed in safetensors when preprocess (flag on
-            # → wrote crossattn-only) and training (flag off → read
-            # prompt_embeds) disagreed. The downstream consumer
-            # (library/training/forward/text_conds.py) switches on tuple shape,
-            # not the flag, so returning crossattn whenever the file carries it
-            # is always correct — and it's the only readable path for a pruned
-            # cache. The flag governs writing/encoding, never reading.
+            # run's cache_llm_adapter_outputs flag: a pruned adapter cache
+            # stores only crossattn_emb (no prompt_embeds), so gating the read
+            # on the run flag crashes when preprocess and training disagree.
+            # The downstream consumer (library/training/forward/text_conds.py)
+            # switches on tuple shape, not the flag. The flag governs
+            # writing/encoding, never reading.
             crossattn_key = f"crossattn_emb{sfx}"
             crossattn_emb = (
                 f.get_tensor(crossattn_key) if crossattn_key in keys else None
@@ -578,7 +585,18 @@ class AnimaTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
                     save_dict["prompt_embeds"] = pe_i
                     save_dict["attn_mask"] = am_i
                     save_dict["t5_input_ids"] = t5_i
-                _save_safetensors(save_dict, info.text_encoder_outputs_npz)
+                # Stamp the vocab pack the ids were routed through (None when
+                # the stock tokenizer encoded them) so a later run with a
+                # different pack state can warn instead of silently training
+                # on mismatched ids. Mirrors library/preprocess/text.py.
+                from library.anima.vocab_pack import strategy_pack
+
+                pack = strategy_pack(tokenize_strategy)
+                _save_safetensors(
+                    save_dict,
+                    info.text_encoder_outputs_npz,
+                    metadata=pack.cache_metadata() if pack is not None else None,
+                )
             else:
                 if ce_i is None:
                     info.text_encoder_outputs = (
@@ -703,17 +721,14 @@ class AnimaLatentsCachingStrategy(LatentsCachingStrategy):
 # (``set_strategy`` / ``get_strategy`` on the base classes in
 # ``library.anima.text_strategies``). The inference side installs its pair via
 # ``library.inference.text.ensure_text_strategies``; these two functions are
-# the training-side counterpart, replacing the per-strategy ``get_*_strategy``
-# factory hooks ``train.py`` inherited from the sd-scripts subclass-override
-# design (one architecture now — the indirection bought nothing).
+# the training-side counterpart.
 
 
 @dataclass
 class TrainingStrategies:
     """Handles for the strategies :func:`setup_training_strategies` installed.
 
-    The same objects the globals hold — returned so ``train()`` can use them
-    directly instead of fishing them back out with ``get_strategy()``.
+    The same objects the globals hold.
     """
 
     tokenize: AnimaTokenizeStrategy
@@ -725,17 +740,19 @@ def setup_training_strategies(args) -> TrainingStrategies:
     """Build + install the arg-stable strategy singletons for a training run.
 
     Call BEFORE dataset construction — dataset init reads the tokenize and
-    latents-caching strategies. The text-encoding strategy is stateless, so
-    installing it here (earlier than its first use in the TE caching pass) is
-    free and keeps every install in one place.
+    latents-caching strategies. The text-encoding strategy is stateless and
+    installed here too.
 
-    The text-encoder-OUTPUTS caching strategy is deliberately NOT installed
-    here: it reads ``args.cache_llm_adapter_outputs``, which
-    ``assert_extra_args`` may still mutate (it auto-disables the flag when text
-    caching is off) — install it after that via
+    The text-encoder-OUTPUTS caching strategy is NOT installed here — see
     :func:`setup_text_encoder_outputs_caching_strategy`.
     """
-    tokenize = AnimaTokenizeStrategy(
+    # A CJK vocab pack (``vocab_pack`` in the config chain, "" = off) swaps in
+    # the pack-routing tokenizer so inline TE caching and sample prompts see the
+    # same T5 ids the preprocess caches were built with. EN stays bit-exact.
+    from library.anima.vocab_pack import load_vocab_pack, make_tokenize_strategy
+
+    tokenize = make_tokenize_strategy(
+        load_vocab_pack(getattr(args, "vocab_pack", None)),
         qwen3_path=args.qwen3,
         t5_tokenizer_path=args.t5_tokenizer_path,
         qwen3_max_length=args.qwen3_max_token_length,
@@ -763,8 +780,8 @@ def setup_text_encoder_outputs_caching_strategy(
 ) -> Optional[AnimaTextEncoderOutputsCachingStrategy]:
     """Build + install the TE-outputs caching strategy; ``None`` when caching is off.
 
-    Split from :func:`setup_training_strategies` because it reads args that
-    ``assert_extra_args`` may mutate (``cache_llm_adapter_outputs``) — call it
+    Reads ``args.cache_llm_adapter_outputs``, which ``assert_extra_args`` may
+    still mutate (it auto-disables the flag when text caching is off) — call it
     after that, and before anything probes the TE cache for completeness.
     """
     if not args.cache_text_encoder_outputs:

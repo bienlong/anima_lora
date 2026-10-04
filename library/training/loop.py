@@ -1,16 +1,15 @@
 """Training-loop orchestration.
 
-Owns the per-epoch / per-step body that used to live inline in
-``AnimaTrainer.train()``. The entrypoint is :func:`run_training_loop`, which
-takes a built :class:`LoopState` plus the trainer instance so override hooks
-(``process_batch``, ``on_step_start``, ``sample_images``,
-``generate_step_logs``, ``step_logging``, ``epoch_logging``) keep working
-unchanged. The validation pass lives in :mod:`library.training.validation`.
+Owns the per-epoch / per-step body of ``AnimaTrainer.train()``. The entrypoint
+is :func:`run_training_loop`, which takes a built :class:`LoopState` plus the
+trainer instance so override hooks (``process_batch``, ``on_step_start``,
+``sample_images``, ``generate_step_logs``, ``step_logging``,
+``epoch_logging``) stay overridable. The validation pass lives in
+:mod:`library.training.validation`.
 
-State that used to be on ``self`` for cross-call signaling —
-``_last_router_H_postfix``, ``_cudagraph_mark_step``, ``_hydra_warmup_step``,
-``_adapters`` — stays on the trainer; this module reads them through the
-``trainer`` handle.
+Cross-call signaling state — ``_last_router_H_postfix``,
+``_cudagraph_mark_step``, ``_hydra_warmup_step``, ``_adapters`` — lives on the
+trainer; this module reads it through the ``trainer`` handle.
 """
 
 from __future__ import annotations
@@ -34,11 +33,12 @@ from library.training.checkpoints import CheckpointSaver
 from library.training.contexts import TrainCtx, ValCtx
 from library.training.method_adapter import StepCtx
 from library.training.metrics import MetricContext, collect_metrics
+from library.training.pause import PauseWatcher, TrainingPaused
 from library.training.validation import run_validation
 
 logger = logging.getLogger(__name__)
 
-# Liveness early check (issues.md P1.1): late enough that warmups / partial
+# Liveness early check: late enough that warmups / partial
 # sidecar coverage have had a chance to fire at least once, early enough that
 # a silently-dead feature aborts a strict run in minutes instead of hours.
 LIVENESS_EARLY_CHECK_STEP = 25
@@ -46,7 +46,7 @@ LIVENESS_EARLY_CHECK_STEP = 25
 
 @dataclass
 class LoopState:
-    """Bundles every local that used to live in ``train()``'s for-epoch scope.
+    """Bundles the locals of ``train()``'s for-epoch scope.
 
     Most fields are constants for the run; ``global_step``, ``profile_started``,
     ``profile_range``, ``initial_step``, and ``text_encoder(s)`` are mutated
@@ -96,6 +96,8 @@ class LoopState:
 
     global_step: int = 0
     profile_started: bool = False
+    # Release-pause request poller (daemon jobs only; None outside the daemon).
+    pause_watcher: Optional[PauseWatcher] = None
 
 
 def build_loop_state(
@@ -132,10 +134,10 @@ def build_loop_state(
     epoch_to_start,
     initial_step,
     metadata,
+    resume_step: int = 0,
 ) -> LoopState:
-    """Build :class:`LoopState`. Mirrors the pre-loop setup that used to sit
-    between ``_prepare_with_accelerator()`` and the for-epoch loop in
-    ``train()``: noise scheduler, trackers, loss recorders, optional text
+    """Build :class:`LoopState`: the pre-loop setup between
+    ``_prepare_with_accelerator()`` and the for-epoch loop — noise scheduler, trackers, loss recorders, optional text
     encoder eviction, ``--sample_at_first``, train/val ctx construction,
     progress bar, profiler parsing.
     """
@@ -200,27 +202,21 @@ def build_loop_state(
         is_tracking=is_tracking,
     )
 
-    # Resume skip prelude: fast-forward global_step before tqdm so the bar
-    # total is sized right, and consume per-epoch skip credit so
-    # skip_first_batches has the right first-epoch offset.
-    global_step = 0
+    # Resume prelude: ``resume_step`` (optimizer steps already taken) seeds
+    # global_step so the tqdm total is sized right; ``epoch_to_start`` skips
+    # whole epochs and ``initial_step`` is the residual batch count inside the
+    # resumed epoch, consumed by skip_first_batches in _run_epoch_steps.
+    global_step = resume_step
+    if epoch_to_start > 0:
+        logger.info(f"resuming at epoch {epoch_to_start + 1}, step {global_step}")
     if initial_step > 0:
-        global_step = initial_step // args.gradient_accumulation_steps
-        for skip_epoch in range(epoch_to_start):
-            logger.info(
-                f"skipping epoch {skip_epoch + 1} because initial_step "
-                f"(multiplied) is {initial_step}"
-            )
-            initial_step -= len(train_dataloader)
+        logger.info(f"skipping {initial_step} batches of epoch {epoch_to_start + 1}")
 
     logger.info(f"unet dtype: {unet_weight_dtype}, device: {unet.device}")
     _ts_parts = [f"timestep_sampling={args.timestep_sampling}"]
-    if args.timestep_sampling in ("sigmoid", "shift", "flux_shift", "qinglong_flux"):
+    if args.timestep_sampling in ("sigmoid", "shift", "flux_shift"):
         _ts_parts.append(f"sigmoid_scale={args.sigmoid_scale}")
         _ts_parts.append(f"sigmoid_bias={getattr(args, 'sigmoid_bias', 0.0)}")
-    if args.timestep_sampling == "qinglong_flux":
-        _ts_parts.append(f"logit_mean={args.logit_mean}")
-        _ts_parts.append(f"logit_std={args.logit_std}")
     if args.timestep_sampling in ("shift", "flux_shift"):
         _ts_parts.append(f"discrete_flow_shift={args.discrete_flow_shift}")
     if (
@@ -314,6 +310,7 @@ def build_loop_state(
         profile_range=profile_range,
         on_step_start_for_network=on_step_start_for_network,
         global_step=global_step,
+        pause_watcher=PauseWatcher.from_env(),
     )
 
 
@@ -405,6 +402,7 @@ def _run_epoch_steps(trainer, state: LoopState, epoch: int) -> None:
             _sample_at_step(trainer, state)
             state.saver.maybe_save_step(state.network, state.global_step, epoch)
             state.optimizer_train_fn()
+            _maybe_release_pause(state, epoch)
 
         _log_step(
             trainer,
@@ -421,6 +419,24 @@ def _run_epoch_steps(trainer, state: LoopState, epoch: int) -> None:
 
         if state.global_step >= args.max_train_steps:
             break
+
+
+def _maybe_release_pause(state: LoopState, epoch: int) -> None:
+    """Daemon release-pause: on a pending request, write the resumable state
+    at this optimizer-step boundary and leave the loop via
+    :class:`TrainingPaused` (``run_scope`` turns it into ``run_end paused``)."""
+    watcher = state.pause_watcher
+    if watcher is None or not watcher.poll(state.accelerator):
+        return
+    logger.info(
+        f"release-pause requested: saving resumable state at step "
+        f"{state.global_step} (epoch {epoch + 1})"
+    )
+    state.optimizer_eval_fn()
+    state_dir = state.saver.save_release_pause(state.network, state.global_step, epoch)
+    if state.accelerator.is_main_process:
+        watcher.acknowledge(state_dir, global_step=state.global_step, epoch=epoch)
+    raise TrainingPaused(state_dir, state.global_step, epoch)
 
 
 def _run_step(trainer, state: LoopState, batch) -> torch.Tensor:
@@ -702,7 +718,7 @@ def _log_epoch_average(trainer, state: LoopState, epoch: int) -> None:
 
 
 def _audit_liveness(trainer, state: LoopState, *, where: str) -> None:
-    """Liveness audit (issues.md P1.1): a configured-ON aux loss that never
+    """Liveness audit: a configured-ON aux loss that never
     consumed its aux input is a silent baseline — flag it loudly.
 
     Reads the trainer-owned ``LivenessLedger`` that the per-step composer

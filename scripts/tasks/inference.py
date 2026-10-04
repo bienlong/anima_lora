@@ -176,13 +176,13 @@ def cmd_test(extra):
 
 
 def cmd_gen(extra):
-    """Batch generation routed through the daemon (attach-by-default, Phase 1c).
+    """Batch generation routed through the daemon (attach-by-default).
 
     Same argv as ``make test`` (shares ``_base_test_args`` — NOLORA / SPECTRUM /
     MOD / DAVE / FSG env levers all compose), but submitted as a GPU command job
     so it **queues behind** a live training run instead of OOM-colliding with it,
     survives the terminal closing, and lands a generation manifest in the job
-    record (Phase 1a result-lift). ``--queue`` detaches (overnight seed/ckpt
+    record. ``--queue`` detaches (overnight seed/ckpt
     sweeps), ``--inline`` bypasses the daemon (identical to ``make test``).
 
     Point at a specific adapter / prompt file / seed grid via ARGS, e.g.
@@ -197,7 +197,7 @@ def cmd_gen(extra):
 
 def cmd_test_hydra(extra):
     # Uses the moe sibling (router-live); static-merge is auto-skipped in
-    # library/inference_pipeline.py:_is_hydra_moe detection.
+    # library/inference/models.py:_is_hydra_moe detection.
     run([*INFERENCE_BASE, "--lora_weight", str(latest_hydra()), *extra])
 
 
@@ -304,7 +304,33 @@ def cmd_test_easycontrol(extra):
         "region": {
             "weight": "anima_easycontrol_region",
             "out": "region",
-            "ref_dir": ROOT / "post_image_dataset" / "easycontrol" / "region" / "cond_images",
+            "ref_dir": ROOT
+            / "post_image_dataset"
+            / "easycontrol"
+            / "region"
+            / "cond_images",
+            "empty_prompt": False,
+        },
+        # render_<ed>: plan_render bubble-fill probe — ref is a gray-holed panel
+        # from the held-out staging tree; the prompt carries the text clause.
+        "render_en": {
+            "weight": "anima_render_en",
+            "out": "render_en",
+            "ref_dir": ROOT
+            / "post_image_dataset"
+            / "render"
+            / "en"
+            / "heldout_staging",
+            "empty_prompt": False,
+        },
+        "render_ja": {
+            "weight": "anima_render_ja",
+            "out": "render_ja",
+            "ref_dir": ROOT
+            / "post_image_dataset"
+            / "render"
+            / "ja"
+            / "heldout_staging",
             "empty_prompt": False,
         },
         # subject: ref is a DIFFERENT image of the character to retrieve; the

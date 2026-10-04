@@ -140,11 +140,8 @@ class BaseLoRAModule(torch.nn.Module):
     # Forward scaffold (template method): the invariant chain (enable/fuse
     # short-circuit, eval delegation, module dropout, dtype policy, T-LoRA
     # gate, dropout, residual add) lives here once; two-GEMM variants (LoRA,
-    # OrthoInit, StepExpert) supply only _down/_gate/_up. Variants whose
-    # forward genuinely differs — Cayley modules (OrthoLoRA/OrthoHydra, one
-    # batched solve shared between down/up) and router-gated MoE modules
-    # (Hydra/StackedExperts/Chimera, gate consumed inside the up-projection
-    # rather than an elementwise multiply) keep their own forward instead.
+    # StepExpert) supply only _down/_gate/_up. The router-gated Hydra module
+    # (gate consumed inside the up-projection) keeps its own forward.
 
     def forward(self, x):
         if not self.enabled or getattr(self, "_fused", False):
@@ -160,9 +157,9 @@ class BaseLoRAModule(torch.nn.Module):
             return org_forwarded
 
         # Rank GEMMs run in the model compute dtype (org_forwarded.dtype), not
-        # x.dtype — AdaLN's LayerNorm hands fp32 under autocast(bf16), and
-        # keying off x left the rank path fp32 (OOM'd _rebalance) for zero
-        # numeric gain. See networks/CLAUDE.md and tests/test_lora_dtype_policy.py.
+        # x.dtype — AdaLN's LayerNorm hands fp32 under autocast(bf16), which
+        # would leave the rank path fp32 (OOMs in _rebalance). Pinned by
+        # tests/test_lora_dtype_policy.py.
         work = org_forwarded.dtype
         x_lora = self._rebalance(x.to(work))
         lx = self._down(x_lora, work)
@@ -175,8 +172,7 @@ class BaseLoRAModule(torch.nn.Module):
 
     def _gate(self, lx: torch.Tensor, work: torch.dtype) -> torch.Tensor:
         """Default T-LoRA gate: ``lx * mask`` (fp32 mask promotes ``lx``; ``_up``
-        casts back to ``work``). Override to gate differently, e.g. OrthoInit's
-        ``lambda_layer``."""
+        casts back to ``work``). Override to gate differently."""
         return lx * self._timestep_mask
 
     def _down(self, x_lora: torch.Tensor, work: torch.dtype) -> torch.Tensor:

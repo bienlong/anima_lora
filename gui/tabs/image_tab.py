@@ -402,6 +402,13 @@ class ImageViewerTab(DaemonJobMixin, LazyTabMixin, QWidget):
         self.guide.setStyleSheet(
             f"QLabel {{ color:{tok('text_dim')}; font-size:11px; padding:2px 4px; }}"
         )
+        self.zen_hint = QLabel(t("zen_hint_html"))
+        self.zen_hint.setTextFormat(Qt.RichText)
+        self.zen_hint.setStyleSheet(
+            f"color: {tok('text_dim')}; font-size: 11px; padding: 2px 6px;"
+            f"background: {tok('panel')}; border-radius: 4px;"
+        )
+        rl.addWidget(self.zen_hint)
         rl.addWidget(self.guide)
 
         sp.addWidget(right)
@@ -414,6 +421,24 @@ class ImageViewerTab(DaemonJobMixin, LazyTabMixin, QWidget):
         QShortcut(QKeySequence("Right"), self, lambda: self._nav(1))
         QShortcut(QKeySequence("Left"), self, lambda: self._nav(-1))
         QShortcut(QKeySequence.Save, self, self._save)
+        # 禅模式键盘流（移植自 dskit/AnimaLora-DatasetTools）：
+        # Space=保留并前进、X=淘汰并前进、F=清除标记、Z=自动跑完整预处理链。
+        # WidgetShortcut on tree/img——焦点在字幕编辑器时按键不劫持。
+        for target in (self.tree, self.img):
+            keep_sc = QShortcut(
+                QKeySequence("Space"),
+                target,
+                lambda: self._set_current_preprocess_decision("use", advance=True),
+            )
+            keep_sc.setContext(Qt.WidgetShortcut)
+            reject_sc = QShortcut(
+                QKeySequence("X"),
+                target,
+                lambda: self._set_current_preprocess_decision("skip", advance=True),
+            )
+            reject_sc.setContext(Qt.WidgetShortcut)
+        zen_sc = QShortcut(QKeySequence("Z"), self, self._run_tag_and_cache_chain)
+        zen_sc.setContext(Qt.WidgetShortcut)
         # Delete toggles the move mark, Esc un-marks; WidgetShortcut-scoped to
         # the tree so they don't hijack the caption editor on focus.
         for target in (self.tree, self.img):
@@ -585,6 +610,20 @@ class ImageViewerTab(DaemonJobMixin, LazyTabMixin, QWidget):
 
     def _restore_group_idle_ui(self) -> None:
         self.group_btn.setEnabled(True)
+
+    def _run_tag_and_cache_chain(self) -> None:
+        """Z 键：勾选自动打标并提交完整预处理链（打标→resize→VAE→TE）。"""
+        pp = self._preprocess_tab
+        if pp is None:
+            self._append_log_line(t("zen_no_preprocess_tab"))
+            return
+        st = pp.quickstart._status if hasattr(pp, "quickstart") else {}
+        pp.caption_autotag_chk.setChecked(bool(st.get("missing_captions")))
+        try:
+            pp.persist_preprocess_inputs()
+        except Exception:
+            pass
+        pp._run_te()
 
     def _run_autotag(self) -> None:
         """Tag the current image with the resident Anima Tagger (see

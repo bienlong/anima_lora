@@ -17,10 +17,11 @@ logger = logging.getLogger(__name__)
 def _resolve_default_mask_dir() -> Optional[str]:
     """Resolve the default mask directory.
 
-    Prefers the new ``post_image_dataset/masks/`` layout produced by
-    ``make mask``; falls back to the legacy ``masks/{merged,sam,mit}/``
-    triple so users who haven't re-run masking after the consolidation
-    keep training without manual intervention.
+    Prefers the ``post_image_dataset/masks/`` layout produced by
+    ``make mask``; falls back to the legacy ``masks/{merged,sam}/`` pair.
+    Whether the result is *used* is ``--masked_loss``'s call — when that is
+    off, ``train.py`` sets every subset's ``mask_dir`` to ``""`` at the
+    blueprint (``loader.disable_masks_in_blueprint``), which skips this.
 
     Returned path is relative, matching how other paths are resolved from the
     training CWD (anima_lora/).
@@ -29,11 +30,30 @@ def _resolve_default_mask_dir() -> Optional[str]:
         "post_image_dataset/masks",
         "masks/merged",
         "masks/sam",
-        "masks/mit",
     )
     for candidate in candidates:
         if os.path.isdir(candidate):
             return candidate
+    return None
+
+
+def resolve_configured_mask_dir(mask_dir: Optional[str]) -> Optional[str]:
+    """Gate a *config-level* ``mask_dir`` (``configs/preprocess.toml`` →
+    preset → method → ``--mask_dir``) on the directory existing.
+
+    The config default names where ``make mask`` *would* write, which is not
+    the same as masks being present. Handing a nonexistent root to every
+    subset would flip ``alpha_mask`` on for maskless checkouts and suppress
+    the legacy ``masks/{merged,sam}`` auto-resolution, so drop it here and
+    let ``_resolve_default_mask_dir`` run. A subset that names its own
+    ``mask_dir`` in the dataset blueprint bypasses this and keeps the loud
+    "resolved 0 masks" warning from the dataset build.
+    """
+    if not mask_dir:
+        return None
+    if os.path.isdir(mask_dir):
+        return mask_dir
+    logger.debug("Configured mask_dir %s does not exist; ignoring.", mask_dir)
     return None
 
 

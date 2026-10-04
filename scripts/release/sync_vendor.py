@@ -4,17 +4,13 @@ Each ComfyUI node tries to import the live ``library.*`` first, falling back
 to a bundled vendor copy when the host install isn't sitting inside the
 anima_lora repo. This script keeps those vendor copies fresh.
 
-Five targets:
+Four targets:
 
-* ``custom_nodes/comfyui-anima-tagger/_vendor/`` — captioning + PE encoder
-  inference path (AnimaTagger, tag rules/groups, vision encoder, vendored PE).
 * ``custom_nodes/comfyui-anima-directedit/_vendor/`` — directedit primitives,
   trimmed sampling helper, the trimmed ``CONSTANT_TOKEN_BUCKETS`` constant,
   and a tiny ``library.anima.models`` stub so the lazy ``Anima`` annotation
-  resolves. DirectEdit no longer pulls in AnimaTagger / vision / edit
-  dispatcher — its node consumes ``source_tag`` / ``target_tag`` STRINGs
-  directly, with image-driven captioning handled externally by
-  ``AnimaTaggerCaption``.
+  resolves. The node consumes ``source_tag`` / ``target_tag`` STRINGs
+  directly (no tagger / vision / edit dispatcher vendored).
 * ``ComfyUI-Anima_lora-Adapter/_vendor/`` — the pure-compute router kernels
   imported by ``adapter.py`` + ``fera.py`` (FEI 2-band / n-band, σ sinusoidal
   features, σ-band partition mask). This node was **extracted to a standalone
@@ -25,7 +21,11 @@ Five targets:
   ``library/runtime/fei.py`` and ``networks/lora_modules/router_state.py``
   transitively, so we vendor all three verbatim. Trained router weights are
   bit-sensitive to these kernels, so any drift between the live tree and
-  vendored copy produces silently corrupted gates at inference. Skipped (with a
+  vendored copy produces silently corrupted gates at inference. Also vendors
+  ``library/anima/ext_vocab.py`` — the CJK vocab-pack runtime (tokenizer
+  segmentation + ``HybridT5Encoder``) the ``AnimaVocabPackLoader`` node uses;
+  the trained ext rows are keyed to its exact segmentation, so drift here
+  silently mis-routes prompts to wrong rows. Skipped (with a
   warning) when the standalone repo isn't checked out beside anima_lora.
 * ``custom_nodes/comfyui-anima-trainer/_vendor/`` — the stdlib daemon *client*
   the trainer node submits jobs through. Lets the node be installed outside
@@ -40,9 +40,8 @@ Five targets:
   hydralora target this is a standalone published repo (default a sibling of
   anima_lora's parent; override ``ANIMA_SPECTRUM_NODE_REPO``); sync_vendor writes
   the tree *into that repo*. Each core is torch/numpy only — no ``comfy`` and no
-  anima-model imports — so drift between the live tree and the vendored copy is
-  the bug class this target eliminates. Skipped (with a warning) when the repo
-  isn't checked out beside anima_lora.
+  anima-model imports. Skipped (with a warning) when the repo isn't checked out
+  beside anima_lora.
 
 Run before bumping a node version / publishing:
 
@@ -59,13 +58,10 @@ import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-TAGGER_VENDOR = ROOT / "custom_nodes" / "comfyui-anima-tagger" / "_vendor"
 DIRECTEDIT_VENDOR = ROOT / "custom_nodes" / "comfyui-anima-directedit" / "_vendor"
 TRAINER_VENDOR = ROOT / "custom_nodes" / "comfyui-anima-trainer" / "_vendor"
 
-# The hydralora node (Anima Adapter Loader) is a standalone published repo;
-# sync_vendor writes its router-kernel vendor tree *into that repo*. Default is
-# a sibling checkout; override with ``ANIMA_ADAPTER_NODE_REPO``.
+# Standalone node repos (see module docstring); override via env.
 ADAPTER_NODE_REPO = Path(
     os.environ.get(
         "ANIMA_ADAPTER_NODE_REPO", ROOT.parents[1] / "ComfyUI-Anima_lora-Adapter"
@@ -73,104 +69,12 @@ ADAPTER_NODE_REPO = Path(
 )
 HYDRALORA_VENDOR = ADAPTER_NODE_REPO / "_vendor"
 
-# The Spectrum KSampler is also a standalone published repo (default a sibling of
-# anima_lora's parent; override with ``ANIMA_SPECTRUM_NODE_REPO``). sync_vendor
-# writes the pure-compute *_core kernels (FSG / SMC / CNS / SPD numerics)
-# into its ``_vendor/`` tree. The node imports the live ``library.*`` / ``networks.*``
-# first and falls back to this tree when installed outside the repo.
 SPECTRUM_NODE_REPO = Path(
     os.environ.get(
         "ANIMA_SPECTRUM_NODE_REPO", ROOT.parents[1] / "ComfyUI-Spectrum-KSampler"
     )
 )
 SPECTRUM_VENDOR = SPECTRUM_NODE_REPO / "_vendor"
-
-# Tagger-only captioning + vision subset. Since the directedit node takes
-# ``source_tag``/``target_tag`` STRINGs directly (no embedded tagger), this
-# tree is only needed by the tagger vendor.
-TAGGER_VERBATIM: list[tuple[str, str]] = [
-    ("library/captioning/anima_tagger.py", "library/captioning/anima_tagger.py"),
-    (
-        "library/captioning/anima_tagger_model.py",
-        "library/captioning/anima_tagger_model.py",
-    ),
-    ("library/captioning/tag_rules.py", "library/captioning/tag_rules.py"),
-    ("library/captioning/tag_groups.py", "library/captioning/tag_groups.py"),
-    # dbv4 backend (external caformer behind the same contract) + the
-    # torch-free tag-shape helpers it needs; hf_download fetches the gated
-    # upstream weights + card.
-    ("library/captioning/dbv4_backend.py", "library/captioning/dbv4_backend.py"),
-    ("library/captioning/taxonomy.py", "library/captioning/taxonomy.py"),
-    ("library/runtime/hf_download.py", "library/runtime/hf_download.py"),
-    ("library/vision/encoder.py", "library/vision/encoder.py"),
-    ("library/vision/encoders.py", "library/vision/encoders.py"),
-    ("library/vision/buckets.py", "library/vision/buckets.py"),
-    ("library/models/pe.py", "library/models/pe.py"),
-    (
-        "networks/methods/ip_adapter_pe_lora.py",
-        "networks/methods/ip_adapter_pe_lora.py",
-    ),
-]
-
-TAGGER_PACKAGE_DIRS: list[str] = [
-    "library",
-    "library/captioning",
-    "library/vision",
-    "library/models",
-    "library/datasets",
-    "library/runtime",
-    "networks",
-    "networks/methods",
-]
-
-TRIMMED_IMAGE_UTILS = '''"""Trimmed extract of library/datasets/image_utils.py for the vendored
-inference path. Contains only ``IMAGE_TRANSFORMS`` — the [-1, 1] normalization
-the AnimaTagger and PE pipelines apply post-resize.
-
-DO NOT EDIT — regenerated by scripts/release/sync_vendor.py.
-"""
-
-from __future__ import annotations
-
-from torchvision import transforms
-
-IMAGE_TRANSFORMS = transforms.Compose(
-    [
-        transforms.ToTensor(),
-        transforms.Normalize([0.5], [0.5]),
-    ]
-)
-'''
-
-TRIMMED_ANIMA_TAGGER_DATA = '''"""Trimmed extract of library/captioning/anima_tagger_data.py for the vendored
-inference path. Contains only ``pil_resize_to_bucket`` — the LANCZOS pre-resize
-to the encoder's nearest-aspect bucket. The full live module also exposes
-training-only dataset / cache builders; those aren't needed at inference.
-
-DO NOT EDIT — regenerated by scripts/release/sync_vendor.py.
-"""
-
-from __future__ import annotations
-
-from PIL import Image
-
-from library.vision.buckets import BucketSpec, bucket_pixel_size, pick_bucket
-
-
-def pil_resize_to_bucket(img: Image.Image, spec: BucketSpec) -> Image.Image:
-    """LANCZOS-resize a PIL image to its closest bucket size for ``spec``."""
-    w, h = img.size
-    h_p, w_p = pick_bucket(h, w, spec)
-    target_h, target_w = bucket_pixel_size((h_p, w_p), spec)
-    if (h, w) != (target_h, target_w):
-        img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
-    return img
-'''
-
-TAGGER_TRIMMED: list[tuple[str, str]] = [
-    ("library/datasets/image_utils.py", TRIMMED_IMAGE_UTILS),
-    ("library/captioning/anima_tagger_data.py", TRIMMED_ANIMA_TAGGER_DATA),
-]
 
 DIRECTEDIT_VERBATIM: list[tuple[str, str]] = [
     (
@@ -238,9 +142,9 @@ DO NOT EDIT — regenerated by scripts/release/sync_vendor.py.
 
 from __future__ import annotations
 
-# Per-tier (lo, hi) token bands — kept in lockstep with the live
-# library/datasets/buckets.py. If you change the live constant, re-run
-# scripts/release/sync_vendor.py to refresh this file.
+# Per-tier (lo, hi) token bands — kept in lockstep with the live value, which
+# ``anime_tools.buckets`` owns (library/datasets/buckets.py re-exports it). If
+# the package's table changes, re-run scripts/release/sync_vendor.py.
 EDGE_TOKEN_BANDS = {{EDGE_TOKEN_BANDS_LITERAL}}
 '''
 
@@ -264,15 +168,18 @@ class Anima:
 
 
 def _read_edge_token_bands_literal() -> str:
-    """Pull the live ``EDGE_TOKEN_BANDS`` source slice so the trimmed file mirrors
-    the canonical per-tier token bands exactly. Avoids hand-syncing two copies."""
-    src = (ROOT / "library" / "datasets" / "buckets.py").read_text()
-    marker = "EDGE_TOKEN_BANDS: dict = "
-    start = src.index(marker) + len(marker)
-    # The literal is a Python dict spanning multiple lines until the matching
-    # ``}`` at column 0.
-    end = src.index("\n}\n", start) + 2
-    return src[start:end]
+    """Render the live ``EDGE_TOKEN_BANDS`` (owned by ``anime_tools.buckets``,
+    re-exported by ``library/datasets/buckets.py``) as a dict literal so the
+    trimmed file mirrors the canonical per-tier token bands exactly. Avoids
+    hand-syncing two copies."""
+    from library.datasets.buckets import EDGE_TOKEN_BANDS
+
+    lines = ["{"]
+    for edge in sorted(EDGE_TOKEN_BANDS):
+        lo, hi = EDGE_TOKEN_BANDS[edge]
+        lines.append(f"    {edge}: ({lo}, {hi}),")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
 
 
 DIRECTEDIT_TRIMMED_TEMPLATES: list[tuple[str, str]] = [
@@ -316,21 +223,6 @@ def _resolve_directedit_trimmed() -> list[tuple[str, str]]:
     return out
 
 
-def build_tagger_vendor() -> None:
-    print(f"\n[tagger] -> {TAGGER_VENDOR.relative_to(ROOT)}")
-    if TAGGER_VENDOR.exists():
-        shutil.rmtree(TAGGER_VENDOR)
-    TAGGER_VENDOR.mkdir(parents=True)
-    (TAGGER_VENDOR / "__init__.py").write_text(
-        '"""Bundled inference subset of anima_lora.\n\n'
-        "Synced by scripts/release/sync_vendor.py — do not edit by hand.\n"
-        '"""\n'
-    )
-    _write_pkg_markers(TAGGER_VENDOR, TAGGER_PACKAGE_DIRS)
-    _copy_verbatim(TAGGER_VENDOR, TAGGER_VERBATIM)
-    _write_trimmed(TAGGER_VENDOR, TAGGER_TRIMMED)
-
-
 def build_directedit_vendor() -> None:
     print(f"\n[directedit] -> {DIRECTEDIT_VENDOR.relative_to(ROOT)}")
     if DIRECTEDIT_VENDOR.exists():
@@ -346,18 +238,20 @@ def build_directedit_vendor() -> None:
     _write_trimmed(DIRECTEDIT_VENDOR, _resolve_directedit_trimmed())
 
 
-# Hydralora vendor tree — pure-compute kernels for adapter.py + fera.py in the
-# standalone ComfyUI-Anima_lora-Adapter repo. router_compute.py is the single
-# import surface; it pulls fei.py + router_state.py transitively, so all three
-# are vendored verbatim (router weights are bit-sensitive to these kernels).
+# Hydralora vendor tree (see module docstring; router weights are bit-sensitive
+# to these kernels).
 HYDRALORA_VERBATIM: list[tuple[str, str]] = [
     ("library/inference/router_compute.py", "library/inference/router_compute.py"),
     ("library/runtime/fei.py", "library/runtime/fei.py"),
     ("networks/lora_modules/router_state.py", "networks/lora_modules/router_state.py"),
+    # CJK vocab-pack runtime (segment_runs / HybridT5Encoder / load_ext_assets)
+    # for the AnimaVocabPackLoader node — pure CPU, torch + safetensors only.
+    ("library/anima/ext_vocab.py", "library/anima/ext_vocab.py"),
 ]
 
 HYDRALORA_PACKAGE_DIRS: list[str] = [
     "library",
+    "library/anima",
     "library/inference",
     "library/runtime",
     "networks",
@@ -387,11 +281,8 @@ def build_hydralora_vendor() -> None:
     _copy_verbatim(HYDRALORA_VENDOR, HYDRALORA_VERBATIM)
 
 
-# Trainer vendor tree — the stdlib daemon *client* the trainer node submits
-# jobs through. config.py + client.py copied verbatim (pure stdlib); proc.py
-# trimmed to read_pidfile only — dropping its psutil import keeps the vendored
-# client pure-stdlib (the node never auto-starts the daemon, so spawn/kill is
-# never exercised).
+# Trainer vendor tree (see module docstring): proc.py is trimmed to
+# read_pidfile so the vendored client stays pure-stdlib.
 TRAINER_VERBATIM: list[tuple[str, str]] = [
     ("anima_daemon/config.py", "anima_daemon/config.py"),
     ("anima_daemon/client.py", "anima_daemon/client.py"),
@@ -446,11 +337,7 @@ def build_trainer_vendor() -> None:
     _write_trimmed(TRAINER_VENDOR, TRAINER_TRIMMED)
 
 
-# Spectrum vendor tree — the pure-compute ``*_core`` kernels shared verbatim
-# between the library's sampler-boundary plugins and the node's ComfyUI seam
-# wrappers. Each core is torch/numpy only (no comfy / no anima-model imports),
-# so the copied files' internal imports keep working unchanged. The node files
-# import the live ``library.*`` / ``networks.*`` first and fall back to this tree.
+# Spectrum vendor tree (see module docstring).
 SPECTRUM_VERBATIM: list[tuple[str, str]] = [
     (
         "library/inference/corrections/fsg_core.py",
@@ -464,17 +351,15 @@ SPECTRUM_VERBATIM: list[tuple[str, str]] = [
         "library/inference/corrections/smc_cfg.py",
     ),
     # Mod-guidance projection (σ-flat / σ-FiLM pooled-text head) + per-block
-    # schedule. The node imports project_pooled / build_block_schedule from here,
-    # replacing its hand-mirrored _project / _project_film / _build_schedule.
+    # schedule. The node imports project_pooled / build_block_schedule from here.
     (
         "library/inference/corrections/mod_guidance_core.py",
         "library/inference/corrections/mod_guidance_core.py",
     ),
     # Spectrum Chebyshev forecasters (ChebyshevForecaster + SpectrumPredictor) +
-    # the SEA cache-decision metric / auto-δ calibration. Both are pure torch and
-    # were hand-mirrored node-side (forecaster.py + the verbatim-ported SEA math);
-    # the node now imports them and keeps only its ComfyUI seam (disk δ-cache,
-    # model_function_wrapper state machine).
+    # the SEA cache-decision metric / auto-δ calibration (pure torch). The node
+    # keeps only its ComfyUI seam (disk δ-cache, model_function_wrapper state
+    # machine).
     ("networks/spectrum_forecast.py", "networks/spectrum_forecast.py"),
     ("networks/spectrum_sea.py", "networks/spectrum_sea.py"),
     # SPD spectral primitives (DCT helpers + spectral_expand geometry). The node
@@ -523,7 +408,6 @@ def build_spectrum_vendor() -> None:
 
 
 def main() -> None:
-    build_tagger_vendor()
     build_directedit_vendor()
     build_hydralora_vendor()
     build_trainer_vendor()

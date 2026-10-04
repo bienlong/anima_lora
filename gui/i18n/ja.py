@@ -424,6 +424,8 @@ STRINGS: dict[str, str] = {
     "qs_advanced": '詳細モード →',
     "qs_advanced_hint": '完全な Config / Preprocess タブへ切替。',
     "qs_log_placeholder": 'ジョブ投入とエラーはここに表示。',
+    "zen_hint_html": '<b>禅モード</b>: Space = 保持して次へ · X = 落として次へ · ←/→ = 閲覧 · D = 移動マーク · S/F = 前処理スキップ/解除 · Z = タグ+キャッシュ実行',
+    "zen_no_preprocess_tab": '前処理タブを先に開いてください。',
     "qs_need_folder": 'まずステップ 1 でフォルダを選択してください。',
     "qs_running_cache": 'タグ + 前処理チェーンを投入…',
     "qs_not_trainable": '上のステップを先に完了してください。',

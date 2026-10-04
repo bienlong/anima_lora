@@ -6,16 +6,12 @@ temp dir, then merges over the working tree using a 3-way reconciliation
 of (baseline / user / new) sha256 hashes:
 
   - Datasets, outputs, models, caches, .venv: never touched.
-  - Configs in configs/methods/, configs/gui-methods/,
-    configs/preprocess.toml, configs/presets.toml, configs/sam_mask.yaml,
-    configs/clause_vocabulary.yaml: prompt on conflict
+  - User configs (``CONFLICT_GLOBS``): prompt on conflict
     (keep yours / overwrite / backup-and-overwrite / show diff).
   - Code files (library/, scripts/, train.py, etc.) AND configs/base.toml:
     overwritten silently when unmodified; user-modified versions are copied to
     .anima-update-backups/<timestamp>/ before being overwritten. base.toml is
-    deliberately treated as code — it's shared infrastructure, so new keys added
-    upstream must always reach the user (even under --keep-conflicts), with the
-    user's prior copy preserved in the backup dir.
+    overwritten even under --keep-conflicts.
 
 The baseline manifest lives at .anima_release.json. If it doesn't exist
 (first run after upgrading from a release that predates this script), every
@@ -100,11 +96,10 @@ def _selected_windows_backend() -> str:
         if saved in {"cuda", "rocm"}:
             return saved
 
-    # Existing installs predate the marker. Decide from the hardware, NOT from
-    # the venv's torch build: the v1.16.0→v1.16.1 transition ran the old
-    # extra-unaware `uv sync`, which installed the ROCm torch on every Windows
-    # machine (GH #92) — trusting `torch.version.hip` here would lock NVIDIA
-    # users into that broken state on every subsequent update.
+    # No marker yet: decide from the hardware, NOT from the venv's torch build —
+    # an older extra-unaware `uv sync` installed ROCm torch on every Windows
+    # machine (GH #92), so trusting `torch.version.hip` would lock NVIDIA users
+    # into that state.
     vendor = _detect_windows_gpu_vendor()
     if vendor == "amd":
         return "rocm"
@@ -191,9 +186,8 @@ BACKUP_ROOT = ROOT / ".anima-update-backups"
 
 # Directories never touched by update (user data, caches, env, downloads).
 # Matched by leading path segments, so "archive/graft/runtime" matches that
-# prefix while leaving the rest of archive/ updatable. The whole "_archive/"
-# tree is user-owned (retired methods + frozen bench results), so it's
-# preserved wholesale and never overwritten or pruned by an update.
+# prefix while leaving the rest of archive/ updatable. "_archive/" is
+# preserved wholesale (never overwritten or pruned).
 PRESERVE_DIRS: tuple[str, ...] = (
     "_archive",
     "image_dataset",
@@ -225,9 +219,8 @@ PRESERVE_FILES: tuple[str, ...] = (
 )
 
 # Files that prompt on conflict instead of silent overwrite (globs relative to
-# ROOT). NB: configs/base.toml is intentionally NOT here — it's shared infra,
-# so new upstream keys must always be delivered; it rides the code-file path
-# (always overwrite, backing up a user copy) and ignores --keep-conflicts.
+# ROOT). configs/base.toml is not here: it takes the code-file path (see the
+# module docstring).
 CONFLICT_GLOBS: tuple[str, ...] = (
     "configs/methods/*.toml",
     "configs/gui-methods/*.toml",
@@ -236,8 +229,7 @@ CONFLICT_GLOBS: tuple[str, ...] = (
     "configs/sam_mask.yaml",
     "configs/clause_vocabulary.yaml",
     "configs/datasets/*",
-    # Self-contained per-method dirs (EasyControl pilot) — same policy as
-    # configs/methods/*.toml.
+    # Self-contained per-method dirs (EasyControl).
     "configs/easycontrol/*.toml",
 )
 
@@ -343,9 +335,9 @@ def _download(url: str, dest: Path) -> None:
 def _skip_links_filter(member, path):
     """The data filter, but symlinks/hardlinks are dropped instead of fatal.
 
-    A stray committed symlink in the release tarball (absolute target →
-    LinkOutsideDestinationError) once bricked every update; release content
-    must never depend on links, so skipping is always safe.
+    A committed symlink in the release tarball (absolute target →
+    LinkOutsideDestinationError) would otherwise abort the update; release
+    content never depends on links, so skipping is safe.
     """
     if member.islnk() or member.issym():
         print(f"  skipping link in tarball: {member.name}")

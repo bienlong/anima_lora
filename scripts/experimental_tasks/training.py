@@ -1,15 +1,8 @@
-"""Experimental training entry-points: chimera, byg.
+"""Experimental training entry-points (soft tokens, BYG data, CJK distill).
 
-These are wired up under ``make exp-*`` / ``python tasks.py exp-*`` to keep
-the unstable methods visually separate from the shipped ones (lora family,
-modulation guidance, hydra, EasyControl). Each ``cmd_*`` is a thin shim that
-translates env vars + extra argv into the right ``train.py`` (via
-``accelerate launch``) or ``scripts/preprocess/*.py`` call.
-
-(EasyControl and Turbo graduated to the shipped ``make easycontrol*`` /
-``make turbo`` targets — see ``scripts/tasks/training.py``. The SPD distillation
-LoRA — "Case B" — was archived 2026-07-05 to ``_archive/spd/``; SPD now ships
-only as the training-free ``--spd`` / ``SPD=1`` inference stack.)
+Wired up under ``make exp-*`` / ``python tasks.py exp-*``. Each ``cmd_*`` is a
+thin shim that translates env vars + extra argv into a ``train.py`` or script
+call.
 """
 
 from __future__ import annotations
@@ -25,49 +18,8 @@ def cmd_soft_tokens(extra):
     train("soft_tokens", extra)
 
 
-def cmd_chimera(extra):
-    """ChimeraHydra (dual-pool additive routing — docs/proposal/chimera_hydra.md).
-
-    Drives ``configs/methods/chimera.toml``: OrthoHydra split into a content
-    pool (K_c=3, per-layer rank-R router on pooled lx) and a freq pool
-    (K_f=3, network-level FreqRouter on concat(FEI, σ-features)). Pool
-    outputs are added (no multiplicative gate, no σ-band overlap mask).
-    Single-phase co-training; per-pool balance loss; T-LoRA mask on the
-    content branch only.
-    """
-    train("chimera", extra)
-
-
-def cmd_byg(extra):
-    """BYG — Bootstrap Your Generator unpaired instruction editing.
-
-    Plain rank-64 LoRA trained with a multi-forward unpaired objective (bootstrap
-    rollout + DDS prior + cycle + identity), conditioned on a parameter-free
-    token-concat source latent. Reads ``configs/methods/byg.toml``.
-
-    Run ``exp-byg-data`` first to build the per-image edit-tuple sidecars under
-    ``post_image_dataset/byg/``. The image VAE/TE caches are the standard
-    ``preprocess`` ones (the source image IS the training image).
-    """
-    train("byg", extra)
-
-
-def cmd_cjk_cache(extra):
-    """Stage the CJK distillation cache (Qwen hidden states + teacher output).
-
-    One pass over ``post_image_dataset/cjk_distill/pairs.jsonl``. The teacher
-    is frozen and both arms share the Qwen side, so this is computed once and
-    reused by every ``exp-distill-cjk`` arm — rebuild only when the corpus, the
-    tokenizer, or the ext *mapping* changes (not when the ext *values* do).
-    The holdout split additionally caches the all-EN reference and the
-    unk-wall arms, which is what makes the recovery-fraction metric possible
-    without a text encoder at train time.
-    """
-    run([PY, "-m", "scripts.distill_cjk.cache", *extra])
-
-
 def cmd_distill_cjk(extra):
-    """Distill the extended T5-side vocab rows (project/cjk_aware_anima 2b).
+    """Distill the extended T5-side vocab rows (the frozen cjk_aware_anima line, 2b).
 
     Run the gates in order — ``--mode oracle`` (loop + trimming invariant),
     ``--mode capacity`` (can the ext rows express the teacher at all?), then
@@ -77,25 +29,32 @@ def cmd_distill_cjk(extra):
     run([PY, "-m", "scripts.distill_cjk.distill", *extra])
 
 
-def cmd_cjk_gates(extra):
-    """Phase-2b closing gates G3 + G4 (project/cjk_aware_anima).
+CJK_CORPUS_STAGES = (
+    "wikidata_lexicon",
+    "tag_glossary",
+    "tag_pairs",
+    "build_pairs",
+    "synth_names",
+    "synth_tags",
+    "desc_pairs",
+    "build_pairs_sym",
+    "mt",
+)
 
-    ``G3`` measures the *teacher ceiling per register* on the whole holdout —
-    the Phase-2c gate is a fraction of a ceiling that was only ever measured on
-    two hand-written prompts, and a register whose ceiling and floor nearly
-    coincide has nothing to distil regardless of how many pairs it adds.
-    ``G4`` is corpus health (token-count ratio, occurrence-weighted span
-    provenance, ext-row visit bands) plus the trust ablation. Read these before
-    deciding how much further to grow the corpus.
 
-    The driver is a one-off gate script and lives with the line
-    (``project/cjk_aware_anima/gates/``), not in ``scripts/distill_cjk/`` — the
-    latter holds only what a later phase reuses (cache, loop, losses, table).
-    Its siblings there run the same way, by path:
-    ``g2.py`` (the loss × parameterization cross-tab) and ``g5.py`` (what the
-    settled objective's *exact optimum* scores on the Phase-2c gate).
+def cmd_cjk_corpus(extra):
+    """Run one corpus-builder stage of the CJK distillation (``scripts/distill_cjk/corpus/``).
+
+    ``ARGS="<stage> [flags]"`` → ``python -m scripts.distill_cjk.corpus.<stage> [flags]``.
+    GPU stages (``tag_glossary --mt``, ``mt``) go through the daemon instead:
+    ``make daemon-run ARGS="-m scripts.distill_cjk.corpus.tag_glossary --mt"``.
     """
-    run([PY, "project/cjk_aware_anima/gates/g34.py", *extra])
+    if not extra or extra[0] not in CJK_CORPUS_STAGES:
+        raise SystemExit(
+            "usage: make exp-cjk-corpus ARGS='<stage> [flags]'  stages: "
+            + ", ".join(CJK_CORPUS_STAGES)
+        )
+    run([PY, "-m", f"scripts.distill_cjk.corpus.{extra[0]}", *extra[1:]])
 
 
 def cmd_byg_data(extra):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cross-platform task runner -- replaces Makefile for Windows compatibility.
+"""Cross-platform task runner; the Makefile forwards every target here.
 
 Usage:
     python tasks.py <command> [extra args...]
@@ -7,14 +7,10 @@ Usage:
 Examples:
     python tasks.py lora
     python tasks.py lora --network_dim 32 --max_train_epochs 64
-    python tasks.py test
-    python tasks.py test                     # add SPECTRUM=1 to enable Spectrum
-    python tasks.py test                     # add MOD=1 to enable modulation guidance
-    python tasks.py test                     # add NOLORA=1 to run against the bare DiT
+    python tasks.py test                     # env: SPECTRUM=1 or SPD=1, MOD=1, NOLORA=1
     python tasks.py download-models
     python tasks.py turbo                    # DP-DMD 4-step distillation
-    python tasks.py exp-chimera              # experimental method
-    python tasks.py test                     # add SPD=1 for progressive-resolution inference
+    python tasks.py exp-soft-tokens          # experimental method
 
 Command implementations live under ``scripts/tasks/`` (shipped methods) and
 ``scripts/experimental_tasks/`` (unstable methods exposed under ``exp-*``).
@@ -26,15 +22,8 @@ import sys
 
 
 class _LazyCmd:
-    """A command callable that imports its module only when first invoked.
-
-    tasks.py is a pure dispatch table: a single ``python tasks.py <cmd>`` needs
-    exactly one command module, but importing all of them up front to build
-    ``COMMANDS`` cost ~100ms (the daemon client's urllib/http chain dominates) —
-    wasted for the common case (``make gui`` immediately spawns a child for the
-    real work). Wrapping each entry defers the import to dispatch time, so every
-    target stops paying for modules it won't run.
-    """
+    """A command callable that imports its module only when first invoked, so a
+    single ``python tasks.py <cmd>`` imports only the one module it runs."""
 
     def __init__(self, modpath: str, name: str):
         self._modpath = modpath
@@ -64,7 +53,6 @@ gui = _LazyModule("scripts.tasks.gui")
 inference = _LazyModule("scripts.tasks.inference")
 masking = _LazyModule("scripts.tasks.masking")
 preprocess = _LazyModule("scripts.tasks.preprocess")
-multires = _LazyModule("scripts.tasks.multires")
 tagger = _LazyModule("scripts.tasks.tagger")
 training = _LazyModule("scripts.tasks.training")
 utilities = _LazyModule("scripts.tasks.utilities")
@@ -76,12 +64,6 @@ COMMANDS = {
     "lora": (
         training.cmd_lora,
         "LoRA family (lora|tlora|hydralora via configs/methods/lora.toml)",
-    ),
-    "register": (
-        training.cmd_register,
-        "Register-token adapter on a frozen DiT (DSR registers + self-attn QKV "
-        "surface; configs/methods/register.toml). Kept-live at inference via the "
-        "comfyui-anima-register node.",
     ),
     "lora-gui": (
         training.cmd_lora_gui,
@@ -121,11 +103,20 @@ COMMANDS = {
         daemon.cmd_daemon,
         "Start the local training-job daemon (idempotent; detached, waits for /health).",
     ),
-    "daemon-status": (
-        daemon.cmd_daemon_status,
-        "Daemon status as JSON (health + resolved base_url + compact job "
-        "summaries; --full for raw records, --job <id>/JOB=<id> for one record "
-        "+ its result envelope). Passive — never starts a daemon; exit 1 when down.",
+    "daemon-jobs": (
+        daemon.cmd_daemon_jobs,
+        "Job history as lines, OLDEST first — the newest row is last, so "
+        "'| tail -5' means the five most recent. Filters: "
+        "--limit N/--all/--running/--failed/--done/--state s; reads the "
+        "on-disk records when the daemon is down. One job's full record + its "
+        "result envelope: python -m anima_daemon status <id>.",
+    ),
+    "daemon-log": (
+        daemon.cmd_daemon_log,
+        "Dump a job's captured stdout from disk: JOB=<id> (default: the most "
+        'recent job), ARGS="-n 200" to bound the tail (-n 0 = whole file). '
+        "Works on finished jobs and with the daemon down — daemon-attach only "
+        "follows a live stream.",
     ),
     "daemon-run": (
         daemon.cmd_daemon_run,
@@ -149,11 +140,14 @@ COMMANDS = {
         daemon.cmd_daemon_pause,
         "Freeze the running job (or JOB=<id>) in place — SIGSTOP the process "
         "tree; VRAM stays allocated, SM util drops to zero, resume is instant. "
-        "The queue does not advance past it.",
+        "The queue does not advance past it. RELEASE=1: the trainer saves a "
+        "resumable state at its next step and exits instead — GPU freed, queue "
+        "advances, daemon-resume relaunches it (train jobs only).",
     ),
     "daemon-resume": (
         daemon.cmd_daemon_resume,
-        "Thaw a paused job (or JOB=<id>) — SIGCONT the process tree back to running.",
+        "Thaw a paused job (or JOB=<id>) — SIGCONT the process tree back to "
+        "running; a RELEASE-paused job is re-enqueued at the front with --resume.",
     ),
     "daemon-kill": (
         daemon.cmd_daemon_kill,
@@ -221,12 +215,6 @@ COMMANDS = {
         preprocess.cmd_preprocess_resize,
         "Resize images to bucket resolutions",
     ),
-    "multires": (
-        multires.cmd_multires,
-        "Multi-resolution training prep (多重分辨率): one preprocess pass per "
-        "tier (same image at every listed resolution) + a weighted dataset "
-        'blueprint. Usage: ARGS="--tiers 1024,896 --weights 1024:2,896:1"',
-    ),
     "preprocess-reconcile": (
         preprocess.cmd_preprocess_reconcile,
         "Remove resized/latent/PE/mask caches stale for the configured "
@@ -274,11 +262,21 @@ COMMANDS = {
         'Dry-run by default; ARGS="--apply" writes, then `make preprocess-te` '
         "is REQUIRED.",
     ),
+    "caption-full": (
+        preprocess.cmd_caption_full,
+        "The whole derived-caption chain in the one order that composes: "
+        "position clauses -> OCR read -> OCR lines attached to the caption as "
+        "text clauses ('Japanese text reads as \"…\"'). Writes the resized "
+        "captions (post_image_dataset/), never the image_dataset/ master — so "
+        'it WRITES by default (ARGS="--dry_run" to plan instead), and `make '
+        'preprocess-te` after it is REQUIRED. ARGS="--skip_position --skip_ocr '
+        '--ocr_min_det 0.6" re-combines from the sidecars already read.',
+    ),
     # ── Curation ──────────────────────────────────────────────────────
     "curate-group": (
         curate.cmd_curate_group,
         "Group dataset images by PE-Spatial visual similarity (per-artist "
-        "connected-components) → post_image_dataset/groups/groups.json. The GUI "
+        "connected-components) → workspace/groups/groups.json. The GUI "
         'Dataset tab reads it to filter by group. ARGS="--threshold 0.95".',
     ),
     # ── Anima Tagger ──────────────────────────────────────────────────
@@ -288,7 +286,7 @@ COMMANDS = {
         "CAPTION_CORPUS_DIR in .env), or any other CLI mode via "
         'ARGS="--mode predict|scan_role_markers|derive_groups". PE-head '
         "training was archived 2026-08-27 — sidecar training runs via "
-        "daemon-run scripts/anima_tagger/train_sidecar.py.",
+        "daemon-run -m anime_tools.tagger.cli.train_sidecar.",
     ),
     "test-tagger": (
         tagger.cmd_test_tagger,
@@ -299,7 +297,7 @@ COMMANDS = {
         tagger.cmd_tagger_dbv4,
         "Build the dbv4-backed (external caformer_b36) tagger checkpoint dir "
         "from the archived anima-tagger-v5's vocab; sidecar training runs via "
-        "daemon-run scripts/anima_tagger/train_sidecar.py.",
+        "daemon-run -m anime_tools.tagger.cli.train_sidecar.",
     ),
     "autotag": (
         tagger.cmd_autotag,
@@ -308,7 +306,20 @@ COMMANDS = {
         "one-shot — the GUI Dataset tab uses a resident worker instead.",
     ),
     # ── Downloads ─────────────────────────────────────────────────────
-    "download-models": (downloads.cmd_download_models, "Download all models"),
+    "download-models": (
+        downloads.cmd_download_models,
+        "Download the first-run model set (Anima base + PE + CJK vocab pack + "
+        "tagger + tag KB)",
+    ),
+    "download-list": (
+        downloads.cmd_download_list,
+        "List every model catalog row: installed / MISSING, repo, destination",
+    ),
+    "download-model": (
+        downloads.cmd_download_model,
+        "Download models by pack, legacy alias or catalog id; ARGS='ocr sam3 pe', "
+        "no args lists them",
+    ),
     "download-anima": (downloads.cmd_download_anima, "Download Anima model"),
     "download-anima-variant": (
         downloads.cmd_download_anima_variant,
@@ -316,7 +327,6 @@ COMMANDS = {
         "2.9B); ARGS=<name>, no args lists them",
     ),
     "download-sam3": (downloads.cmd_download_sam3, "Download SAM3 model"),
-    "download-mit": (downloads.cmd_download_mit, "Download MIT model"),
     "download-pe": (
         downloads.cmd_download_pe,
         "Download PE-Core-L14-336 (img2emb encoder)",
@@ -327,7 +337,8 @@ COMMANDS = {
     ),
     "download-tagger": (
         downloads.cmd_download_tagger,
-        "Download Anima Tagger v2 vocab.json (caption-index dependency; not the full model)",
+        "Download the Anima Tagger checkpoint (vocab/rules/thresholds/sidecar; "
+        "not the gated backbone — see download-tagger-model)",
     ),
     "download-tagger-model": (
         downloads.cmd_download_tagger_model,
@@ -338,17 +349,29 @@ COMMANDS = {
         downloads.cmd_download_danbooru_tags,
         "Download danbooru tag tables (KR base + EN sibling) for caption correction",
     ),
+    "download-vocab-pack": (
+        downloads.cmd_download_vocab_pack,
+        "Re-fetch the CJK vocab pack (JA/KO/ZH prompt + caption rows) to "
+        "models/vocab_packs/; part of download-models, on by default via "
+        "`vocab_pack` in configs/base.toml",
+    ),
     # ── Masking ───────────────────────────────────────────────────────
     "mask": (
         masking.cmd_mask,
-        "Run SAM + MIT (via tempdir) and write merged masks under post_image_dataset/masks/",
+        "Run the SAM3 mask rules (via tempdir) and write merged masks under "
+        "mask_dir (configs/preprocess.toml; default post_image_dataset/masks/). "
+        "Training reads them only with masked_loss = true",
     ),
     "mask-clean": (
         masking.cmd_mask_clean,
-        "Remove post_image_dataset/masks/",
+        "Remove mask_dir/ (configs/preprocess.toml; default post_image_dataset/masks/)",
     ),
     # ── GUI ───────────────────────────────────────────────────────────
     "gui": (gui.cmd_gui, "Launch PySide6 GUI"),
+    "gui-qwen": (
+        gui.cmd_gui_qwen,
+        "Launch the Qwen-Image-2.1 LoRA GUI (preprocess + train only)",
+    ),
     "gui-shortcut": (
         gui.cmd_gui_shortcut,
         "Create a Windows desktop shortcut that launches the GUI (no console window)",
@@ -384,33 +407,15 @@ COMMANDS = {
         "Refresh custom_nodes/*/_vendor/ from live library/* (run before publishing nodes)",
     ),
     # ── Experimental ──────────────────────────────────────────────────
-    # Unstable methods kept under exp-* so they don't pollute the main command
-    # surface. May produce broken output, change without notice, or be removed.
+    # May produce broken output, change without notice, or be removed.
     "exp-soft-tokens": (
         exp_training.cmd_soft_tokens,
         "[experimental] SoftREPA-style per-layer × per-t soft tokens (training-only v1)",
-    ),
-    "exp-chimera": (
-        exp_training.cmd_chimera,
-        "[experimental] ChimeraHydra dual-pool additive routing "
-        "(content + freq pools on OrthoHydra; configs/methods/chimera.toml)",
-    ),
-    "exp-byg": (
-        exp_training.cmd_byg,
-        "[experimental] BYG unpaired instruction-editing training (plain LoRA, "
-        "bootstrap + DDS prior + cycle + identity; configs/methods/byg.toml). "
-        "Run exp-byg-data first.",
     ),
     "exp-byg-data": (
         exp_training.cmd_byg_data,
         "[experimental] Build BYG edit-tuple sidecars (tag-swap) into "
         "post_image_dataset/byg/. Usage: exp-byg-data [--limit N --overwrite].",
-    ),
-    "exp-cjk-cache": (
-        exp_training.cmd_cjk_cache,
-        "[experimental] Stage the CJK distillation cache (Qwen hidden states + "
-        "frozen-teacher adapter outputs) from post_image_dataset/cjk_distill/"
-        "pairs.jsonl. Reused by every exp-distill-cjk arm.",
     ),
     "exp-distill-cjk": (
         exp_training.cmd_distill_cjk,
@@ -418,21 +423,18 @@ COMMANDS = {
         "en-translation teacher. Gates in order: ARGS='--mode oracle' → "
         "'--mode capacity' → '--mode train'. Emits a vocab pack, not a LoRA.",
     ),
-    "exp-cjk-gates": (
-        exp_training.cmd_cjk_gates,
-        "[experimental] CJK Phase-2b closing gates: G3 (teacher ceiling per "
-        "register — is the 2c cos>=0.6 gate even the right number?) and G4 "
-        "(corpus health + trust ablation). ARGS='--gates g3,g4a,g4b'.",
+    "exp-cjk-corpus": (
+        exp_training.cmd_cjk_corpus,
+        "[experimental] Run one CJK distillation corpus-builder stage "
+        "(scripts/distill_cjk/corpus/). Usage: exp-cjk-corpus ARGS='<stage> [flags]' "
+        "— stages: wikidata_lexicon, tag_glossary, tag_pairs, build_pairs, synth_names, "
+        "synth_tags, desc_pairs, build_pairs_sym, mt. Recipes: docs/methods/cjk_vocab_pack.md.",
     ),
     "exp-test-soft": (
         exp_inference.cmd_test_soft,
         "[experimental] Inference with latest soft_tokens weight "
         "(SoftREPA-style per-layer × per-t bank, spliced into cross-attn via "
         "monkey-patched Block.forward). Composes freely with --spectrum.",
-    ),
-    "exp-test-byg": (
-        exp_inference.cmd_test_byg,
-        "[experimental] Inference with latest BYG editing LoRA. Usage: exp-test-byg <ref_image> --prompt 'change background to a forest'",
     ),
     "exp-test-directedit": (
         exp_inference.cmd_test_directedit,
@@ -450,15 +452,11 @@ COMMANDS = {
 
 
 def _force_utf8_stdio():
-    """Make stdout/stderr UTF-8 so non-UTF-8 consoles don't crash on glyphs.
+    """Reconfigure stdout/stderr as UTF-8 with ``errors="replace"``.
 
-    Several commands print Unicode status glyphs (``✓``/``✗``). On a Windows
-    console whose code page isn't UTF-8 (e.g. cp949 on a Korean install)
-    ``print`` raises ``UnicodeEncodeError`` and aborts the whole task. Re-encode
-    stdio as UTF-8 with ``errors="replace"`` so output is never fatal — UTF-8
-    when the terminal can show it, a replacement char at worst when it can't.
-    Best-effort: some wrapped streams (pytest capture, certain pipes) lack
-    ``reconfigure``; skip them silently.
+    Status glyphs (``✓``/``✗``) otherwise raise ``UnicodeEncodeError`` on a
+    non-UTF-8 Windows console (e.g. cp949). Streams without ``reconfigure``
+    (pytest capture, some pipes) are skipped.
     """
     for stream in (sys.stdout, sys.stderr):
         try:

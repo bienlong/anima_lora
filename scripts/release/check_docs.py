@@ -17,7 +17,7 @@ Source of truth, never hard-coded here:
   * cli flags    : every ``--flag`` literal appearing in any tracked ``.py``.
   * file paths   : the working tree itself.
 
-Design choices that keep it low-noise:
+Skipped references:
   * Paths are only checked when their first segment is a git-tracked top-level
     entry, so URLs (``claude.ai/code``), repo slugs (``sorryhyun/anima_lora``)
     and runtime/data dirs (``output/…``, ``post_image_dataset/…``) are skipped,
@@ -25,12 +25,12 @@ Design choices that keep it low-noise:
   * ``make <x>`` and flags are read only from inline-code spans and fenced
     blocks, so English prose ("make sure", "we make use of") never trips the
     target check.
+  * Gitignored paths (``configs/gui-methods/custom/…``, ``output/…``) are
+    machine-local, so a doc citing one is never flagged.
 
 CLI-flag caveat: the "known flags" set is every ``--x`` mentioned anywhere in
-the ``.py`` sources — permissive on purpose (a noisy linter gets disabled). It
-reliably catches a *fully removed* flag but won't notice one that lingers only
-in a comment. Several benign mentions are suppressed so they don't read as
-drift, since that's why flags are WARN, not ERROR:
+the ``.py`` sources, so it catches a *fully removed* flag but not one that
+lingers only in a comment. Suppressed mentions:
   * foreign tool flags in shell snippets (uv / gh / ruff …) → ``FOREIGN_FLAGS``;
   * bare placeholders in example payloads (``--some_flag``) → ``PLACEHOLDER_FLAGS``;
   * truncated glob/prefix families (``--region-*`` → ``--region-``, ``--ddp_*``
@@ -58,6 +58,7 @@ import re
 import subprocess
 import sys
 from collections import namedtuple
+from functools import lru_cache
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -193,6 +194,24 @@ def known_make_targets() -> set[str]:
     return targets
 
 
+@lru_cache(maxsize=None)
+def _is_ignored(rel: str) -> bool:
+    """True when git ignores ``rel`` (repo-relative), tracked files excluded.
+
+    Pattern-based, so it answers for paths that don't exist — which is exactly
+    the case that matters: a doc citing a user-local artifact
+    (``configs/gui-methods/custom/x.toml``) must not read as drift just because
+    this checkout never generated it.
+    """
+    return (
+        subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "check-ignore", "-q", "--", rel],
+            capture_output=True,
+        ).returncode
+        == 0
+    )
+
+
 def _check_path(tok: str, top: set[str], base: Path | None = None) -> str | None:
     """Return the token if it's a broken path reference, else None.
 
@@ -225,6 +244,14 @@ def _check_path(tok: str, top: set[str], base: Path | None = None) -> str | None
             return None
         # Docs often cite a module without its extension (`bench/_common`).
         if (root / f"{tok}.py").exists():
+            return None
+    # Missing *and* gitignored → machine-local, not drift (see ``_is_ignored``).
+    for root in roots:
+        try:
+            rel = (root / tok).resolve().relative_to(REPO_ROOT)
+        except ValueError:
+            continue  # base outside the repo (tests' tmp_path)
+        if _is_ignored(str(rel)):
             return None
     return tok
 
