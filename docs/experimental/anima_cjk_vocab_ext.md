@@ -1,7 +1,8 @@
 # CJK vocab ext rows — how preview5's rows are made
 
 How the Japanese rows of the shipped [CJK vocab pack](../methods/cjk_vocab_pack.md)
-(`anima_cjk_vocab_pack_preview5`, the v2 default) are trained so that the
+(`anima_cjk_vocab_pack_preview5`; the default is now `_preview51` = preview5
+plus the mark rows below) are trained so that the
 base model **renders** them as glyphs. This page covers which rows a caption
 reaches (per-glyph routing and the encode fold), where the images come from
 (a self-generated canvas with pasted text), which σ each item trains at (the
@@ -26,6 +27,18 @@ next pack is in `project/cjk_anima_reseed/`.
 | Coverage | Every Japanese text clause in the training set's captions (615 captions) is fully covered by trained singles. On the dialogue corpus, the top 1 000 glyphs cover 99.06 % of occurrences. |
 | ComfyUI | ComfyUI-Anima_lora-Adapter ≥ 3.13.0 (3.12.0 added routing, 3.13.0 the fold). Older nodes ignore both keys. |
 | Hub | `sorryhyun/anima-vocab-pack-cjk` |
+
+## What preview51 changes (2026-10-05)
+
+preview5's rows, with six mark rows replaced: `～ … ♡ ♥ 、 。`. retrain_kana
+had trained `〜` / `～` / `、` / `。` almost only as a lone glyph in a grid cell,
+and the `～` row drew a green leaf in dialogue. The new rows train cold inside
+words (2–6 char windows around the seed's trained letters, Manga109 dialogue
+lines, synthesised heart lines), every other row frozen, on a base pack with
+new encode rules: `〜` → `～`, `―` → `ー`, `，` → `、`, and a dot run → an
+appended `…` row (ext 69 558, initialised at T5's `...`). Record:
+`project/cjk_anima_reseed/reports/ruler_2026_10_05.md` § 5 (the leaf gone and
+the page closer to the EN reference; OCR reads of short `…` strings down).
 
 ## What trains
 
