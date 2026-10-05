@@ -51,11 +51,34 @@ experiment.
 filling the banner's slots. An arm that lost on it is not lost on the
 target until it is read on the dialogue ruler — first `retrain_kana`,
 `kana_up`, `ball_rk_bubble` and `stick_nlg_high` (the one arm that drew
-the bubble layout and lost the banner read).
+the bubble layout and lost the banner read). Read 10-05
+(`reports/ruler_2026_10_05.md`): none beats the floor; ball_rk_bubble leans
+up on ≤ 2 edits, stick_nlg_high loses the text. On the sensitive prompts
+(§ 4) gs_rkstick, ball_rk_bubble and kana_up tie retrain_kana,
+stick_nlg_high loses, seed_retrain_0930 (its kanji rows) is the best table.
 
-## Open, set when the ruler is built
+## The ruler as built (10-05, `ruler.py build`)
 
-- the string set — lengths, words vs phrases, the sources (scene pools and
-  line pools of record; no new pool without asking);
-- the prompts — the scene pools' manga / comic prompts;
-- whether the readers read a two-column bubble as one string.
+- **Strings** (user, 10-05): the training set's own bubble dialogue —
+  captions tagged `speech bubble` / `comic` / `dialogue`, their `Japanese
+  text reads as` clause, not SFX — one string per image, 32 per bin: short
+  2–4 glyphs (16 interjections, 16 lexical), mid 5–9, long 10–20. OCR
+  misreads, SFX filed as dialogue and non-word fragments dropped by eye
+  (`DROP`). 96 strings, 96 images.
+- **Prompts** (user, 10-05): each string's own image caption, text clauses
+  and other-language text tags out, `speech bubble, japanese text` in; the
+  rating `sensitive` and the explicit tags out (`ruler.py` `EXPLICIT`);
+  characters and artist as captioned. Source images tagged as a child leave
+  the pool; an image gives up to two strings.
+- **Seen / unseen**: the reseed windows came from these same lines, so
+  every string carries `cov3` (its trigrams' share in the arms of record's
+  training text). A read reports all strings and `cov3 ≤ 0.15` apart; the
+  unseen side is 25 short / 9 mid / 4 long, so only the short bin can call
+  a direction on it. Not yet held out of later builds: `window_pool` holds
+  a string by its trigrams (a 2-glyph one by its bigram), so the short
+  bin's `うっ` / `おっ` / `はっ` would strip every window holding them —
+  open, decided before the next build.
+- **EN reference** (user, 10-05): each line's EN rendering (hand-written,
+  `en.json`), same prompt with `english text`, `English text reads as`.
+
+Still open: whether the readers read a two-column bubble as one string.

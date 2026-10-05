@@ -10,6 +10,7 @@ The JA vocab pack's rows re-seeded cold. Why: `motivation2.md`; what an arm is j
 | `run.py` | front door: `run.py <run> data [--frac f] \| train \| read` (`read`: the plain read against `READ_AGAINST` → `results/`) |
 | `probe_split.py` | rows swapped at render, no training: two runs' rows split at a σ switch, one run's rows as stick / spikes, x̂0 per σ (`reports/probe_split_2026_10_04.md`); a cold arm's ball on retrain_kana's stick and back (`reports/ball_2026_10_04.md`); the ball runs as trained (`reports/ball_rk_2026_10_04.md`) |
 | `stick_fit.py` | CPU: the stick runs' sticks, the kana / kanji burr, the band arms' sticks, the hiragana rows as stick + ball and the swap arms' EN-ref cos (`--legs ball`), scene numbers and sheets on cached renders (`reports/ball_2026_10_04.md`, `reports/stick_fit_2026_10_04.md`, `reports/stick_scene_2026_10_04.md`, `reports/stick_rk_2026_10_04.md`, `reports/stick_rk_jt50_2026_10_04.md`) |
+| `ruler.py` | the dialogue ruler (`criteria.md`): `build` (CPU) draws 96 bubble-dialogue strings from the training set's captions, each with its own image's prompt and an EN reference line → `output/cjk_anima_reseed/ruler/ruler.json`; `run [--arms a,b] [--label l]` (GPU) renders what is missing — the floor (EN refs, retrain_kana, seed_retrain_0930) once — and reads every arm against it → `results/<ts>-ruler-<label>/` (`reports/ruler_2026_10_05.md`) |
 | `probe_grad.py` | the scale line's `grad_identity` pass 2 on tiers drawn here (`reports/grid_64_2026_10_03.md`) |
 | `configs/<run>.toml` | the run: `rows` (data.vocabs specs, single glyphs), `read` (held out of the windows), `seed` (`"0921"` / `"0930"`), `steps_per_row`, optional `shares` (% of the items per tier, Σ 100), optional `upper_shift` (added to every tier's upper σ edge, capped at 0.9; `kana_up`), optional `stick_from` (a stick run: that run's rows and data, the rows' mean trained only; `stick_*`), optional `rows_from` (a stick run: warm from that scale-line run's rows instead; `stick_rk_*`) and `drop_tiers` (tiers left out at train), optional `band` (a stick run: every kept item's σ band at train), optional `tag_drop` (a stick run: `[tag, p]`, the tag out of an item's caption at p per step; `stick_rk_fb_jt50`), optional `ball_on` (a ball run: the rows cold at that scale-line run's mean over them, the mean held, the rows less it trained; its merged rows the context; `ball_rk*`) and `data_from` (a ball run: a scale-line data dir instead of a build) |
 | `reseed/table.py` | **the table**: one row per tier — recipe, share, σ band, glyph px, `px_keep` — and the scene knobs |
@@ -22,6 +23,7 @@ The JA vocab pack's rows re-seeded cold. Why: `motivation2.md`; what an arm is j
 .venv/bin/python project/cjk_anima_reseed/run.py kana data
 make daemon-run ARGS="project/cjk_anima_reseed/run.py kana train"
 make daemon-run ARGS="project/cjk_anima_reseed/run.py kana read"
+make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/ruler.py run --arms kana_up --label kana_up"
 .venv/bin/python -m pytest project/cjk_anima_reseed/tests
 ```
 
