@@ -461,6 +461,8 @@ def arm_dirs() -> dict:
         "kana_up": OUT / "kana_up",
         "ball_rk_bubble": OUT / "ball_rk_bubble",
         "stick_nlg_high": OUT / "stick_nlg_high",
+        # preview51's rows (sent_plan.md's floor), read on the punct pack
+        "seed_fixed_1005_stick080": SCALE_OUT / "seed_fixed_1005_stick080",
         **PACK_ARMS.get(PACK, {}),
     }
 
@@ -470,7 +472,7 @@ FLOOR = ("en", "retrain_kana", "seed_retrain_0930")  # rendered once (criteria.m
 # arms (a run with ``pack``); ``X@<pack>`` = arm X's rows on that pack (its
 # routing), rendered beside X's on the raw pack
 PACK = ""
-PACK_ARMS = {"punct": {"punct": OUT / "punct"}}
+PACK_ARMS = {"punct": {"punct": OUT / "punct", "sent_ball": OUT / "sent_ball"}}
 
 
 def base_arm(a: str) -> str:

@@ -2,6 +2,10 @@
 
 Run: `configs/sent_ball.toml`. Judged on the dialogue ruler (`criteria.md`).
 
+**Read (10-05)**: `reports/sent_ball_2026_10_05.md` — worse than preview51
+(short exact 8 → 2), mid / long unmoved; the spikes turned to cos 0.77 at
+their length.
+
 ## Why
 
 On the sensitive ruler (`reports/ruler_2026_10_05.md` § 4) no arm moves past
