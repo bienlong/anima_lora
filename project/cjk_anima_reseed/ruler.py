@@ -455,7 +455,7 @@ def arm_dirs() -> dict:
     """The arms the ruler renders: name → run dir with a finished ``trained.pt``."""
     from cjk_scale.paths import OUT as SCALE_OUT
 
-    return {
+    dirs = {
         "retrain_kana": SCALE_OUT / "retrain_kana",
         "seed_retrain_0930": SCALE_OUT / "seed_retrain_0930",
         "kana_up": OUT / "kana_up",
@@ -465,6 +465,7 @@ def arm_dirs() -> dict:
         "seed_fixed_1005_stick080": SCALE_OUT / "seed_fixed_1005_stick080",
         **PACK_ARMS.get(PACK, {}),
     }
+    return {a: d for a, d in dirs.items() if (d / "trained.pt").exists()}
 
 
 FLOOR = ("en", "retrain_kana", "seed_retrain_0930")  # rendered once (criteria.md)
@@ -477,6 +478,8 @@ PACK_ARMS = {
         "punct": OUT / "punct",
         "sent_ball": OUT / "sent_ball",
         "sent_ball_lr2": OUT / "sent_ball_lr2",
+        "sent_whole": OUT / "sent_whole",
+        "sent_stick": OUT / "sent_stick",
     }
 }
 

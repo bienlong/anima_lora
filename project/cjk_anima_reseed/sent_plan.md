@@ -6,6 +6,8 @@ Run: `configs/sent_ball.toml`. Judged on the dialogue ruler (`criteria.md`).
 (short exact 8 → 2), mid / long unmoved; the spikes turned to cos 0.77 at
 their length. At lr 2e-4 (`sent_ball_lr2`) the rows stay (cos 0.978)
 and the same short strings fall.
+Rows free (`sent_whole`) tie preview51; the stick alone (`sent_stick`)
+ties it on short / mid and loses long (§ 7). No split buys mid / long.
 
 ## Why
 

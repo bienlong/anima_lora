@@ -12,9 +12,11 @@
                                   # (capped at 0.9)
     stick_from = "kana_up"        # optional: a stick run — that run's rows and data,
                                   # its rows' shared mean trained only (no data verb)
-    rows_from = "retrain_kana"    # optional, stick runs: warm from this scale-line run's
-                                  # merged rows (``output/cjk_anima_scale/<it>/trained.pt``)
-                                  # instead of ``stick_from``'s; the data stays its
+    rows_from = "retrain_kana"    # optional: warm from this scale-line run's merged rows
+                                  # (``output/cjk_anima_scale/<it>/trained.pt``) — a stick
+                                  # run's instead of ``stick_from``'s, the data stays its;
+                                  # without ``stick_from`` / ``ball_on`` a plain warm run,
+                                  # every row free (``sent_whole``)
     drop_tiers = ["lone_44", …]   # optional: tiers left out of the data at train
     band = [0.75, 0.95]           # optional, stick runs: every kept item's σ band at
                                   # train (the data's stamped bands replaced; not
@@ -26,7 +28,7 @@
                                   # rows less it trained; its merged rows the context
     warm = true                   # optional, ball runs: the rows warm at ``ball_on``'s
                                   # rows (not cold at their mean), that mean held
-    data_from = "run1002_grid_small/data"  # optional, ball runs: a scale-line data dir
+    data_from = "run1002_grid_small/data"  # optional, ball / plain warm runs: a scale-line data dir
                                   # (under ``output/cjk_anima_scale``) instead of a build;
                                   # a bare name (no ``/``) = that reseed run's ``data/``
     lr = 2e-4                     # optional: the rows' peak lr (``cjk_scale.train.LR``
@@ -81,13 +83,13 @@ class Run:
     shares: dict | None = None  # tier → % of the items
     upper_shift: float = 0.0  # added to every tier's upper σ edge
     stick_from: str = ""  # a stick run: warm from this run, its data, the mean trained
-    rows_from: str = ""  # a stick run: warm from this scale-line run instead
+    rows_from: str = ""  # warm from this scale-line run (stick / plain warm runs)
     drop_tiers: tuple = ()  # left out of the data at train
     band: tuple | None = None  # every kept item's σ band at train (stick runs)
     tag_drop: tuple | None = None  # (tag, p): out of a caption at p (stick runs)
     ball_on: str = ""  # a ball run: the mean held at this scale-line run's
     warm: bool = False  # a ball run: the rows warm at ball_on's, not cold at its mean
-    data_from: str = ""  # a ball run: this scale-line data dir
+    data_from: str = ""  # a ball / plain warm run: this data dir
     pack: str = ""  # the base pack (``PACKS``); "" = the raw pack
     lr: float = 0.0  # the rows' peak lr; 0 = cjk_scale.train.LR
 
@@ -186,7 +188,7 @@ def load(run: str) -> Run:
     assert set(drop) <= {t.name for t in TABLE}, f"{path}: drop_tiers {drop}"
     rows_from = raw.get("rows_from", "")
     if rows_from:
-        assert raw.get("stick_from"), f"{path}: rows_from is a stick run's"
+        assert not raw.get("ball_on"), f"{path}: rows_from or ball_on, not both"
     band = raw.get("band")
     if band is not None:
         assert raw.get("stick_from"), (
@@ -203,7 +205,8 @@ def load(run: str) -> Run:
     if ball_on:
         assert not raw.get("stick_from"), f"{path}: ball_on or stick_from, not both"
     if data_from:
-        assert ball_on, f"{path}: data_from is a ball run's"
+        assert ball_on or rows_from, f"{path}: data_from is a ball / plain warm run's"
+        assert not raw.get("stick_from"), f"{path}: a stick run trains on its data"
     warm = bool(raw.get("warm", False))
     if warm:
         assert ball_on, f"{path}: warm is a ball run's"
