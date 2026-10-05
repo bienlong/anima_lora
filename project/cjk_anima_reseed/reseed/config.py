@@ -24,6 +24,8 @@
     ball_on = "retrain_kana"      # optional: a ball run — the rows cold at this
                                   # scale-line run's mean over them, the mean held, the
                                   # rows less it trained; its merged rows the context
+    warm = true                   # optional, ball runs: the rows warm at ``ball_on``'s
+                                  # rows (not cold at their mean), that mean held
     data_from = "run1002_grid_small/data"  # optional, ball runs: a scale-line data dir
                                   # (under ``output/cjk_anima_scale``) instead of a build
     pack = "punct"                # optional: the base pack (``PACKS``) instead of the raw
@@ -54,6 +56,7 @@ KEYS = (
     "band",
     "tag_drop",
     "ball_on",
+    "warm",
     "data_from",
     "pack",
 )
@@ -79,6 +82,7 @@ class Run:
     band: tuple | None = None  # every kept item's σ band at train (stick runs)
     tag_drop: tuple | None = None  # (tag, p): out of a caption at p (stick runs)
     ball_on: str = ""  # a ball run: the mean held at this scale-line run's
+    warm: bool = False  # a ball run: the rows warm at ball_on's, not cold at its mean
     data_from: str = ""  # a ball run: this scale-line data dir
     pack: str = ""  # the base pack (``PACKS``); "" = the raw pack
 
@@ -193,6 +197,9 @@ def load(run: str) -> Run:
         assert not raw.get("stick_from"), f"{path}: ball_on or stick_from, not both"
     if data_from:
         assert ball_on, f"{path}: data_from is a ball run's"
+    warm = bool(raw.get("warm", False))
+    if warm:
+        assert ball_on, f"{path}: warm is a ball run's"
     pack = raw.get("pack", "")
     assert not pack or pack in PACKS, f"{path}: pack is one of {sorted(PACKS)}"
     return Run(
@@ -210,6 +217,7 @@ def load(run: str) -> Run:
         band=tuple(band) if band is not None else None,
         tag_drop=tuple(tag_drop) if tag_drop is not None else None,
         ball_on=ball_on,
+        warm=warm,
         data_from=data_from,
         pack=pack,
     )

@@ -37,7 +37,7 @@ called by the sign over strings that share no row, never off a total alone
 
 ## Floor
 
-The dialogue ruler has no floor yet (motivation2 § 6: "sentence-length
+The dialogue ruler has no floor yet (`_archive/motivation2.md` § 6: "sentence-length
 captions have no floor"). It is rendered once — the EN references and
 `retrain_kana` / `seed_retrain_0930` on the ruler's strings and prompts —
 and every arm after reads against that cache; it is not re-rendered per

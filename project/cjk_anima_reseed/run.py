@@ -62,7 +62,7 @@ def main():
             run.scale_config(),
             data=run.data,
             out=run.dir,
-            cold=not run.stick_from,
+            cold=not (run.stick_from or run.warm),
             steps_per_row=run.steps_per_row,
             context=run.seed_rows(),
             drop_tiers=run.drop_tiers,

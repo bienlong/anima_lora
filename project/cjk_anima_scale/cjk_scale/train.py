@@ -275,8 +275,9 @@ def train(
     is the reverse on cold rows: every trained row starts at that file's mean
     over the same rows and the mean is put back after every step, so only the
     rows less their mean train (a gradient hook does not hold it: AdamW's
-    per-element scaling un-centres a centred gradient). ``scale.py`` passes
-    none of them.
+    per-element scaling un-centres a centred gradient); with ``cold=False``
+    (``context`` = the same file) the rows start warm at that file's rows and
+    the same mean is held. ``scale.py`` passes none of them.
     A data dir built with windows (``build.json`` ``glyph_route``) is
     trained routed: ``ANIMA_VOCAB_GLYPH_ROUTE=1`` is set in-process before
     the TE cache (whose key carries it)."""
@@ -423,7 +424,7 @@ def train(
     stick_raw = None
     if ball_on:
         live = ~rows.frozen_mask
-        assert cold and not stick_only, "ball_on: cold rows, the mean held"
+        assert not stick_only, "ball_on: the mean held, the rows less it trained"
         assert bool(rows.touched_mask[live].all()), (
             "ball_on: every trained row drawn (the hold moves them all)"
         )
@@ -433,12 +434,21 @@ def train(
         assert all(e in pos for e in ids), f"ball_on: {ball_on} lacks a trained row"
         k = float(src["row_scale"]) / rows.row_scale
         stick_raw = (src["raw"][[pos[e] for e in ids]].float().mean(0) * k).to(device)
-        with torch.no_grad():
-            rows.delta.raw[live] = stick_raw
+        if cold:
+            with torch.no_grad():
+                rows.delta.raw[live] = stick_raw
+        else:  # warm ball: the rows as ball_on has them (its file the warm-from)
+            assert ctx == Path(ball_on), f"warm ball: warm from {ctx}, not {ball_on}"
+            drift = float((rows.delta.raw[live].mean(0) - stick_raw).norm())
+            assert drift < 1e-3 * float(stick_raw.norm()) + 1e-6, (
+                f"warm ball: the warm rows' mean is off {ball_on}'s by {drift:g}"
+            )
+            p.record["ball_warm"] = True
         stick0 = stick_raw * rows.row_scale
         p.record["ball_on"] = str(ball_on)
         print(
-            f"ball on {ball_on}: {int(live.sum())} rows cold at its mean over them, "
+            f"ball on {ball_on}: {int(live.sum())} rows "
+            f"{'cold at' if cold else 'warm, held at'} its mean over them, "
             f"stick |{float(stick0.norm()):.1f}| held",
             flush=True,
         )
