@@ -1,5 +1,6 @@
 """builder — a run's rows → ``<run>/data/`` (``img/``, ``train.jsonl``,
-``eval.json``, ``vocabs.json``, ``windows.json``, ``build.json``,
+``eval.json``, ``vocabs.json``, ``windows.json``, ``sentences.json`` (a
+``sent`` tier drawn), ``build.json``,
 ``sheet_<tier>.png``), in one pass::
 
     for each tier t of run.table() (n = ITEMS_PER_ROW × rows × t.share × frac):
@@ -24,7 +25,7 @@ from pathlib import Path
 
 from . import table as T
 from .config import Run
-from .pools import add_windows, build_pools
+from .pools import add_sentences, add_windows, build_pools
 from .recipes import RECIPES
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -63,6 +64,14 @@ def build(run: Run, workers: int | None = None, frac: float = 1.0) -> Path:
         for t in table
     ]
     plan = [(t, n) for t, n in plan if n]  # a share-0 tier is not drawn
+    sent = [t.params["lengths"] for t, _n in plan if t.recipe == "sent"]
+    sents = (
+        add_sentences(
+            pools, run.read, (min(a for a, _ in sent), max(b for _, b in sent)), out
+        )
+        if sent
+        else None
+    )
     print(
         f"build {run.name} → {out}: {len(pools.singles)} rows; "
         + ", ".join(f"{t.name} σ {t.band[0]:g}–{t.band[1]:g} {n}" for t, n in plan)
@@ -105,6 +114,7 @@ def build(run: Run, workers: int | None = None, frac: float = 1.0) -> Path:
         "frac": frac,
         "glyph_route": True,  # the windows: train.py routes the captions per glyph
         "windows": win,
+        **({"sentences": sents} if sents else {}),
         "scenes": {
             "pools": T.SCENES,
             "small": T.SMALL_POOL,

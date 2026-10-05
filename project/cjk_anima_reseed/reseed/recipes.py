@@ -12,6 +12,8 @@ render miss. Bands are the table's: a recipe knows nothing of σ.
               bubble fit; or ``glyph_px`` with ``fill_min`` (the text's
               length over the bubble's) and ``cross_min`` (its font px over
               the bubble's width across it)
+    sent      a dialogue line in 2–3 columns of a scene bubble at
+              ``glyph_px`` (``pools.sentences``; ``lengths`` [lo, hi] cells)
     grid      one glyph per cell at ``glyph_px``; ``1x1`` = the lone glyph.
               The plain caption: no language, one ``GRID_CLAUSES`` wording
               per item
@@ -266,6 +268,135 @@ def bubbleN(pools: Pools, rng: random.Random, p: dict):
 
 
 # ----------------------------------------------------------------------------
+# sentences
+
+
+def _sent_cuts(pools: Pools, text: str) -> list:
+    """Column breaks at Qwen piece boundaries, none opening a column on ``…``
+    (a leader opens no column, ``……`` is never split)."""
+    from data.inventory import pieces as qpieces
+
+    cuts, off = [], 0
+    for p, _row in qpieces(*pools.tokq, text):
+        off += len(p)
+        cuts.append(off)
+    return [c for c in cuts if c < len(text) and text[c] != "…"]
+
+
+def _sent_plan(region, text: str, cuts: list, target: float, min_glyph: int):
+    """``(columns, fill)`` that lands ``text`` at ``target`` font px in
+    ``region`` as 2–3 columns no square (``SENT_BLOCK_AR``) — the fewest
+    columns ``fit_text(fewest_lines=True)`` will take at that fill, every
+    fewer one missing ``min_glyph`` there — or ``None`` (one column holds it,
+    or the region is too wide, too small, or too roomy)."""
+    from common.render.scene import V_GAP, V_PITCH, split_lines
+
+    rw, rh = region[2] - region[0], region[3] - region[1]
+    if rw > T.SENT_REGION_AR * rh:
+        return None
+    lo, hi = T.SENT_FILL
+    fs1 = {}  # columns → font px at fill 1
+    for k in (1, 2, 3):
+        lines = split_lines(text, k, cuts)
+        if lines is None:
+            continue
+        m = max(len(ln) for ln in lines)
+        fs1[k] = (min(rw / (1 + (k - 1) * V_GAP), rh / (m * V_PITCH)), m)
+        f = target / max(fs1[k][0], 1e-6)
+        if f > hi:
+            continue  # this many columns cannot reach the target here
+        if k == 1 or f < lo:
+            return None
+        if any(fs1[j][0] * f >= min_glyph for j in fs1 if j < k):
+            return None  # the fit would stop at fewer columns
+        if m * V_PITCH / (1 + (k - 1) * V_GAP) < T.SENT_BLOCK_AR:
+            return None
+        return k, f
+    return None
+
+
+def sent(pools: Pools, rng: random.Random, p: dict):
+    """A dialogue line (``pools.sentences``, length uniform over
+    ``lengths``) lettered as Japanese in 2–3 columns of one scene bubble at
+    ``glyph_px`` font px, on the scenes ``_sent_plan`` places it in (and
+    ``scene_pools``'), none framed as a sign (``SENT_FRAMES_OUT``); routed
+    per glyph at encode like the windows."""
+    from common.render.flat import pick_font
+    from common.render.scene import render_into_scene
+    from data.synth import scene_caption
+
+    lo, hi = p["lengths"]
+    ns = [n for n in range(int(lo), int(hi) + 1) if pools.sentences.get(n)]
+    text = rng.choice(pools.sentences[rng.choice(ns)])
+    target = _target(rng, p)
+    min_glyph = int(0.85 * target)
+    cuts = _sent_cuts(pools, text)
+    held = set().union(*pools.opt_in.values())
+    cands = [j for j in range(len(pools.scenes)) if j not in held]
+    cands += sorted(_opted(pools, p))
+    cands = [j for j in cands if pools.scenes[j].get("frame") not in T.SENT_FRAMES_OUT]
+    cap = pools.scene_cap
+    plans = {}
+    for j in cands:
+        if cap is not None and pools.tier_used[j] >= cap:
+            continue
+        got = _sent_plan(pools.scenes[j]["region"], text, cuts, target, min_glyph)
+        if got is not None:
+            plans[j] = got
+    pool, tries = sorted(plans), []
+    while pool and len(tries) < SCENE_TRIES:
+        j = rng.choices(pool, weights=_weights(pools, pool))[0]
+        pool.remove(j)
+        tries.append(j)
+    for j in tries:
+        sc = pools.scenes[j]
+        k, f = plans[j]
+        drawn = render_into_scene(
+            scene=sc,
+            text=text,
+            font_path=pick_font(text, pools.fonts, rng),
+            rng=rng,
+            min_glyph=min_glyph,
+            stroke=False,
+            fill_frac=f,
+            max_lines=k,
+            cuts=cuts,
+            vertical_only=True,
+            fewest_lines=True,
+            tategaki=True,
+            vert_forms=True,
+            keep_outline=True,
+        )
+        if drawn is None:
+            continue
+        im, box = drawn
+        assert list(im.size) == list(sc["shape"]), (sc["i"], im.size, sc["shape"])
+        pools.used[j] += 1
+        pools.tier_used[j] += 1
+        caption = scene_caption(sc, text)
+        assert caption.count(f'"{text}"') == 1, caption
+        return Item(
+            image=im,
+            vocabs=[text],
+            layout="scene",
+            boxes=[box],
+            caption=caption,
+            src="scene",
+            shape=im.size,
+            extra={
+                "scene": sc["i"],
+                "scene_pool": sc.get("pool"),
+                "mono": j in pools.mono,
+                "fill": round(f, 3),
+                "glyph_px": round(target, 1),
+                "columns": k,
+                "horizontal": False,
+            },
+        )
+    return None
+
+
+# ----------------------------------------------------------------------------
 # grids
 
 GRIDS = {  # cols, rows, canvas (None: a lone canvas from SHAPES)
@@ -339,4 +470,4 @@ def grid(pools: Pools, rng: random.Random, p: dict):
     )
 
 
-RECIPES = {"bubble1": bubble1, "bubbleN": bubbleN, "grid": grid}
+RECIPES = {"bubble1": bubble1, "bubbleN": bubbleN, "sent": sent, "grid": grid}

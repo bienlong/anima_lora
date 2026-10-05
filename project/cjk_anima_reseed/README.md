@@ -14,8 +14,8 @@ The JA vocab pack's rows re-seeded cold. Why: `motivation2.md`; what an arm is j
 | `probe_grad.py` | the scale line's `grad_identity` pass 2 on tiers drawn here (`reports/grid_64_2026_10_03.md`) |
 | `configs/<run>.toml` | the run: `rows` (data.vocabs specs, single glyphs), `read` (held out of the windows), `seed` (`"0921"` / `"0930"`), `steps_per_row`, optional `shares` (% of the items per tier, Σ 100), optional `upper_shift` (added to every tier's upper σ edge, capped at 0.9; `kana_up`), optional `stick_from` (a stick run: that run's rows and data, the rows' mean trained only; `stick_*`), optional `rows_from` (a stick run: warm from that scale-line run's rows instead; `stick_rk_*`) and `drop_tiers` (tiers left out at train), optional `band` (a stick run: every kept item's σ band at train), optional `tag_drop` (a stick run: `[tag, p]`, the tag out of an item's caption at p per step; `stick_rk_fb_jt50`), optional `ball_on` (a ball run: the rows cold at that scale-line run's mean over them, the mean held, the rows less it trained; its merged rows the context; `ball_rk*`) and `data_from` (a ball run: a scale-line data dir instead of a build) |
 | `reseed/table.py` | **the table**: one row per tier — recipe, share, σ band, glyph px, `px_keep` — and the scene knobs |
-| `reseed/recipes.py` | `bubble1` / `bubbleN` / `grid` |
-| `reseed/pools.py` | rows, scenes (+ the `s1s` pool, mono weighting), the windowed word pool |
+| `reseed/recipes.py` | `bubble1` / `bubbleN` / `sent` / `grid` |
+| `reseed/pools.py` | rows, scenes (+ the `s1s` pool, mono weighting), the windowed word pool, the dialogue lines (`sent`) |
 | `reseed/builder.py` | one pass over the table → `output/cjk_anima_reseed/<run>/data` |
 
 ```bash
@@ -57,3 +57,15 @@ rebuild passes (`derive` / `reband`), the per-row draw weights (one
 gradient (`reports/grid_64_2026_10_03.md`), in the table at share 0 and
 last — a run's `shares` turns it on (`kana_big`); a share-0 tier is not
 drawn, so the runs before it build what they built.
+
+`sent_34` / `sent_22` (10-05, share 0 — a run's `shares` turns them on): a
+Manga109 dialogue line (8–10 / 8–14 cells) lettered in 2–3 columns of a
+bubble at font px 26–36 / 16–22 (the ink px counts the column gaps; 20–28 /
+13–19 read small). The
+line: every ellipsis drawn `…` under 4 dots, `……` at 4 or more (T5 reads it
+as `...`, no pack row); every other char routed to its own single row, as the
+windows are; the `read` strings held by trigram, the dialogue ruler's 5+
+glyph strings by 5-gram. The layout: columns cut at Qwen pieces, never on a
+`…`; one column that holds the line, a block under 1.5× as tall as wide
+(3×3, 3×4, 2×3), a region over 1.3× as wide as tall, a fill under 0.65 and a
+sign frame are all re-drawn (`table.SENT_*`).

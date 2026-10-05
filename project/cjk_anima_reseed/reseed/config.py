@@ -6,7 +6,8 @@
                                  # old seed, the kana run's) or "0930" (seed_retrain_0930)
     steps_per_row = 135
     shares = { grid_44 = 10, … }  # optional: % of the items per tier, every tier
-                                  # named, Σ 100; else table.TABLE's shares
+                                  # named but the opt-in ones (table share 0: left
+                                  # out = 0), Σ 100; else table.TABLE's shares
     upper_shift = 0.1             # optional: every tier's upper σ edge moved by this
                                   # (capped at 0.9)
     stick_from = "kana_up"        # optional: a stick run — that run's rows and data,
@@ -84,7 +85,7 @@ class Run:
         if self.shares:
             total = sum(t.share for t in TABLE)
             tbl = tuple(
-                replace(t, share=total * self.shares[t.name] / 100) for t in tbl
+                replace(t, share=total * self.shares.get(t.name, 0) / 100) for t in tbl
             )
         if self.upper_shift:
             tbl = tuple(
@@ -146,9 +147,11 @@ def load(run: str) -> Run:
         from .table import TABLE
 
         names = {t.name for t in TABLE}
-        assert set(shares) == names, (
-            f"{path}: shares names every tier — missing {sorted(names - set(shares))}, "
-            f"unknown {sorted(set(shares) - names)}"
+        opt_in = {t.name for t in TABLE if not t.share}
+        missing = names - set(shares) - opt_in
+        assert not missing and set(shares) <= names, (
+            f"{path}: shares names every tier (an opt-in one may be left out) — "
+            f"missing {sorted(missing)}, unknown {sorted(set(shares) - names)}"
         )
         assert abs(sum(shares.values()) - 100) < 1e-9, f"{path}: shares sum to 100"
     from .table import TABLE

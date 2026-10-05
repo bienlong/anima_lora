@@ -1,10 +1,11 @@
 """The pools every recipe draws from: the rows (single glyphs), the scenes,
-the windowed word pool, the lone canvases."""
+the windowed word pool, the dialogue lines, the lone canvases."""
 
 from __future__ import annotations
 
 import json
 import random
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,6 +29,7 @@ class Pools:
     shapes: object  # data.stage.ShapePool
     windows: dict = field(default_factory=dict)  # glyph → its windows
     windows_len: dict = field(default_factory=dict)  # glyph → length → its windows
+    sentences: dict = field(default_factory=dict)  # cells → dialogue lines
     used: Counter = field(default_factory=Counter)  # scene → items drawn on it
     tier_used: Counter = field(
         default_factory=Counter
@@ -358,6 +360,128 @@ def add_windows(pools: Pools, read: tuple, out: Path) -> dict:
         f"encoding check), {len(pools.windows)} glyphs, per glyph min "
         f"{stats['per_glyph_min']} median {stats['per_glyph_median']}; none for "
         f"{''.join(stats['glyphs_without']) or '-'} (lone only)",
+        flush=True,
+    )
+    return stats
+
+
+# ----------------------------------------------------------------------------
+# the dialogue lines (``sent``)
+
+# an ellipsis is drawn ``…`` under 4 dots, ``……`` at 4 or more (user, 10-05:
+# Manga109 spells it ・・ / ･･･ / ・・・・・・, the page draws the leader)
+_DOT_RUN = re.compile("[・･.．‥…]+")
+_DOTS = {"‥": 2, "…": 3}
+# what a line may hold off the pack's rows: the leader (T5's `...`) and the
+# marks the pack's fold sends to T5's ! / ?
+SENT_BASE = set("…！？!?")
+
+
+def norm_ellipsis(t: str) -> str | None:
+    """``t`` with every dot run an ellipsis (``…`` under 4 dots, ``……`` at 4
+    or more); a lone ・ / ･ is a 中黒 and stays ・; ``None`` for a lone . / ．
+    (not a mark dialogue uses)."""
+    out, at = [], 0
+    for m in _DOT_RUN.finditer(t):
+        run = m.group()
+        if len(run) == 1 and run in "・･":
+            rep = "・"
+        elif len(run) == 1 and run in ".．":
+            return None
+        else:
+            rep = "…" if sum(_DOTS.get(c, 1) for c in run) < 4 else "……"
+        out += [t[at : m.start()], rep]
+        at = m.end()
+    return "".join(out) + t[at:]
+
+
+def sentence_ok(s: str, lengths: tuple) -> str | None:
+    """Why ``s`` (normalised) is not a ``sent`` line, else ``None``."""
+    from common.render.scene import NO_HEAD
+    from data.synth import _SENT_DISTINCT, _letters
+
+    lo, hi = lengths
+    if not lo <= len(s) <= hi:
+        return "length"
+    ls = _letters(s)
+    if len(ls) < T.SENT_MIN_LETTERS or len(set(ls)) < _SENT_DISTINCT:
+        return "letters"
+    if s[0] in NO_HEAD:
+        return "head"
+    if re.search(r"([^…])\1\1", s):
+        return "run"  # ああああ: a glyph three times running
+    return None
+
+
+def add_sentences(pools: Pools, read: tuple, lengths: tuple, out: Path) -> dict:
+    """``pools.sentences`` (cells → lines): the dialogue lines with their
+    ellipses normalised, every char routed to its own single row (per glyph,
+    as the windows are) or one of ``SENT_BASE``; held out: a ``read`` string
+    by trigram (``window_pool``'s rule) and the dialogue ruler's 5+ glyph
+    strings by 5-gram. Writes ``sentences.json``; returns the stats."""
+    from cjk_scale.config import phrase_file
+
+    from . import OUT
+
+    lines = [
+        ln.split("\t")[0].strip()
+        for ln in Path(phrase_file()).read_text(encoding="utf-8").splitlines()
+    ]
+    grams = set()
+    for h in read:
+        n = min(3, len(h))
+        grams |= {h[i : i + n] for i in range(len(h) - n + 1)}
+    ruler_file = OUT / "ruler" / "ruler.json"
+    ruler = (
+        [r["text"] for r in json.loads(ruler_file.read_text("utf-8"))["items"]]
+        if ruler_file.exists()
+        else []
+    )
+    r5 = {r[i : i + 5] for r in ruler for i in range(len(r) - 4)}
+    ext = ext_encoder()
+    single: dict = {}
+
+    def rows_of(c: str):
+        if c not in single:
+            single[c] = ext(True, c)
+        return single[c]
+
+    drop, keep = Counter(), set()
+    for t in dict.fromkeys(lines):
+        s = norm_ellipsis(t)
+        why = "dot" if s is None else sentence_ok(s, lengths)
+        if why is None:
+            ids = [rows_of(c) for c in s]
+            if any((c in SENT_BASE) != (not i) or len(i) > 1 for c, i in zip(s, ids)):
+                why = "char"
+            elif any(g in s for g in grams):
+                why = "read"
+            elif any(s[i : i + 5] in r5 for i in range(len(s) - 4)):
+                why = "ruler"
+            elif ext(True, s) != [x for i in ids for x in i]:
+                why = "route"
+        if why is None:
+            keep.add(s)
+        else:
+            drop[why] += 1
+    pools.sentences = {}
+    for s in sorted(keep):
+        pools.sentences.setdefault(len(s), []).append(s)
+    stats = {
+        "lengths": list(lengths),
+        "lines": len(lines),
+        "n": len(keep),
+        "by_length": {n: len(v) for n, v in sorted(pools.sentences.items())},
+        "ellipsis": sum("…" in s for s in keep),
+        "dropped": dict(drop),
+        "ruler_strings": len(ruler),
+    }
+    (out / "sentences.json").write_text(
+        json.dumps(sorted(keep), ensure_ascii=False, indent=0), encoding="utf-8"
+    )
+    print(
+        f"sentences: {len(keep)} of {len(lines)} lines ({stats['ellipsis']} with "
+        f"an ellipsis), {lengths[0]}–{lengths[1]} cells; dropped {dict(drop)}",
         flush=True,
     )
     return stats
