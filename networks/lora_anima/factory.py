@@ -311,8 +311,9 @@ def _detect_removed_variant(
     weights_sd: Dict[str, torch.Tensor], file_metadata: Dict[str, str]
 ) -> Optional[str]:
     """Name the removed adapter family a checkpoint belongs to, or None."""
-    if "register_tokens" in weights_sd:
-        return "register-token"
+    # register_tokens is NOT a removed family here: our fork restored the
+    # register-token adapter (networks/register_injection.py) — see
+    # create_network_from_weights' detection block below.
     if str(file_metadata.get("ss_use_chimera_hydra", "")).strip().lower() == "true":
         return "ChimeraHydra"
     if str(file_metadata.get("ss_use_moe_style", "")).strip() == "independent_A":
@@ -624,6 +625,21 @@ def create_network_from_weights(
         new_router_source if new_router_source else None
     )
 
+    # Register tokens (our addition): K from the register_tokens key's shape;
+    # insert block has no tensor footprint so it rides the
+    # ss_register_insert_block metadata stamp.
+    num_registers = 0
+    register_insert_block = 8
+    _reg_tokens = weights_sd.get("register_tokens")
+    if _reg_tokens is not None:
+        num_registers = int(_reg_tokens.shape[0])
+        register_insert_block = int(file_metadata.get("ss_register_insert_block", 8))
+        logger.info(
+            f"Detected register tokens in checkpoint: K={num_registers}, "
+            f"insert_block={register_insert_block} — network stays kept-live "
+            "(registers cannot merge into DiT weights)."
+        )
+
     cfg = LoRANetworkCfg.from_weights(
         modules_dim=modules_dim,
         modules_alpha=modules_alpha,
@@ -644,6 +660,8 @@ def create_network_from_weights(
         new_use_moe_style=new_use_moe_style,
         new_route_per_layer=new_route_per_layer,
         new_router_source=new_router_source_stamp,
+        num_registers=num_registers,
+        register_insert_block=register_insert_block,
     )
 
     network = LoRANetwork(text_encoders, unet, cfg, multiplier=multiplier)

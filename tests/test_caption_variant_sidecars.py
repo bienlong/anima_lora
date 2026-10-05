@@ -16,13 +16,13 @@ from unittest import mock
 import torch
 from safetensors import safe_open
 
-from library.captioning.correction import (
+from anime_tools.captions.correction import (
     CaptionCorrectionOptions,
     load_tag_knowledge_base,
 )
-from library.captioning.preprocess import write_corrected_preprocess_captions
+from anime_tools.stages.captions import write_corrected_preprocess_captions
 from library.preprocess import text as te
-from library.preprocess.caption_variants import (
+from anime_tools.captions.variants import (
     read_variants_sidecar,
     variants_sidecar_path,
     write_variants_sidecar,
@@ -99,7 +99,7 @@ def test_caption_step_writes_sidecar_v0_is_corrected(tmp_path):
         recursive=False,
         num_variants=4,
         tag_dropout_rate=0.3,
-    )
+    ).stats
     assert stats.variants_written == 1
     corrected = (dst / "a.txt").read_text(encoding="utf-8")
     rows = read_variants_sidecar(variants_sidecar_path(dst / "a.png"))
@@ -152,7 +152,7 @@ def test_caption_step_idempotent_rerun_keeps_sidecar_stable(tmp_path):
     random.seed(99)  # different seed must NOT cause a rewrite
     stats = write_corrected_preprocess_captions(
         src, dst, _kb(tmp_path), options=opts, recursive=False, num_variants=4
-    )
+    ).stats
     after = variants_sidecar_path(dst / "a.png").read_text(encoding="utf-8")
     assert stats.variants_written == 0
     assert before == after
@@ -173,18 +173,19 @@ def test_caption_step_off_removes_stale_sidecar(tmp_path):
     assert sidecar.exists()
     stats = write_corrected_preprocess_captions(
         src, dst, _kb(tmp_path), options=opts, recursive=False, num_variants=0
-    )
+    ).stats
     assert not sidecar.exists()
     assert stats.variants_removed == 1
 
 
-def test_caption_step_missing_source_removes_sidecar(tmp_path):
+def test_caption_step_revised_caption_without_master_keeps_sidecar(tmp_path):
+    """Revised-first (anime_tools >= 0.4.0): a revised caption with no master is
+    the caption, so its sidecar is regenerated from it rather than removed."""
     src, dst = tmp_path / "src", tmp_path / "dst"
     src.mkdir()
     dst.mkdir()
-    # Resized image + leftover caption/sidecar but the source caption is gone.
     (dst / "a.png").write_bytes(b"")
-    (dst / "a.txt").write_text("stale", encoding="utf-8")
+    (dst / "a.txt").write_text("1girl, smile", encoding="utf-8")
     write_variants_sidecar(variants_sidecar_path(dst / "a.png"), [("v0", "stale")])
 
     stats = write_corrected_preprocess_captions(
@@ -194,8 +195,30 @@ def test_caption_step_missing_source_removes_sidecar(tmp_path):
         options=CaptionCorrectionOptions(),
         recursive=False,
         num_variants=2,
-    )
-    assert stats.missing_source == 1
+    ).stats
+    assert stats.no_caption == 0
+    sidecar = variants_sidecar_path(dst / "a.png")
+    assert sidecar.exists()
+    assert "stale" not in sidecar.read_text(encoding="utf-8")
+
+
+def test_caption_step_no_caption_at_all_removes_orphan_sidecar(tmp_path):
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+    # Resized image + leftover sidecar, but neither a revised nor a master caption.
+    (dst / "a.png").write_bytes(b"")
+    write_variants_sidecar(variants_sidecar_path(dst / "a.png"), [("v0", "stale")])
+
+    stats = write_corrected_preprocess_captions(
+        src,
+        dst,
+        _kb(tmp_path),
+        options=CaptionCorrectionOptions(),
+        recursive=False,
+        num_variants=2,
+    ).stats
+    assert stats.no_caption == 1
     assert not variants_sidecar_path(dst / "a.png").exists()
 
 
@@ -232,7 +255,6 @@ def test_te_encodes_sidecar_into_variant_keys(tmp_path):
             object(),
             device=torch.device("cpu"),
             recursive=False,
-            min_pixels=0,
             caption_shuffle_variants=0,  # sidecar present → variant mode regardless
         )
     assert stats.written == 1
@@ -257,7 +279,6 @@ def test_te_single_caption_when_no_sidecar_and_no_variants(tmp_path):
             object(),
             device=torch.device("cpu"),
             recursive=False,
-            min_pixels=0,
             caption_shuffle_variants=0,
         )
     with safe_open(str(d / "a_anima_te.safetensors"), framework="pt") as f:
@@ -283,7 +304,6 @@ def test_te_recaches_when_sidecar_is_newer(tmp_path):
             object(),
             device=torch.device("cpu"),
             recursive=False,
-            min_pixels=0,
         )
         cache = d / "a_anima_te.safetensors"
         # Bump the sidecar past the cache → next pass must re-encode, not skip.
@@ -298,7 +318,6 @@ def test_te_recaches_when_sidecar_is_newer(tmp_path):
             object(),
             device=torch.device("cpu"),
             recursive=False,
-            min_pixels=0,
         )
     assert stats.written == 1 and stats.skipped == 0
 
@@ -363,7 +382,7 @@ def test_mirror_keeps_clauses_the_master_does_not_have(tmp_path):
         _kb(tmp_path),
         options=CaptionCorrectionOptions(),
         recursive=False,
-    )
+    ).stats
 
     assert stats.clauses_preserved == 1
     out = (dst / "a.txt").read_text(encoding="utf-8")
@@ -388,27 +407,36 @@ def test_mirror_reruns_are_stable_on_a_clause_caption(tmp_path):
 
     stats = write_corrected_preprocess_captions(
         src, dst, _kb(tmp_path), options=opts, recursive=False
-    )
+    ).stats
 
     assert (dst / "a.txt").read_text(encoding="utf-8") == first
     assert stats.unchanged == 1
 
 
-def test_mirror_picks_up_a_master_edit_around_the_clauses(tmp_path):
-    """The master is still the authority for the flat bag."""
+def test_a_master_edit_does_not_reach_a_revised_caption(tmp_path):
+    """Revised-first (anime_tools >= 0.4.0): the revised caption is the authority
+    once it exists; deleting it is how a master edit gets re-mirrored."""
     src, dst = _clause_corpus(
         tmp_path,
         "1girl, blue hair, smile, @sincos, solo",
         "1girl, smile, @sincos. On the left, blue hair.",
     )
 
-    write_corrected_preprocess_captions(
+    stats = write_corrected_preprocess_captions(
         src, dst, _kb(tmp_path), options=CaptionCorrectionOptions(), recursive=False
-    )
-
+    ).stats
     out = (dst / "a.txt").read_text(encoding="utf-8")
-    assert "solo" in out.split(". On the")[0]
+    assert stats.from_master == 0
+    assert "solo" not in out
     assert out.endswith("On the left, blue hair.")
+
+    (dst / "a.txt").unlink()
+    stats = write_corrected_preprocess_captions(
+        src, dst, _kb(tmp_path), options=CaptionCorrectionOptions(), recursive=False
+    ).stats
+    out = (dst / "a.txt").read_text(encoding="utf-8")
+    assert stats.from_master == 1
+    assert "solo" in out and "blue hair" in out
 
 
 def test_mirror_regenerates_the_sidecar_around_restored_clauses(tmp_path):
@@ -435,8 +463,10 @@ def test_mirror_regenerates_the_sidecar_around_restored_clauses(tmp_path):
     assert all("On the left, blue hair." in text for text in rows.values())
 
 
-def test_a_hand_written_master_clause_wins_over_the_derived_one(tmp_path):
-    """Preservation only fills a gap; it never overrides a curated caption."""
+def test_the_revised_caption_wins_over_a_master_edit(tmp_path):
+    """Revised-first (anime_tools >= 0.4.0): once an image has a revised caption,
+    a hand-edit of its master no longer reaches it — edit the revised caption,
+    or delete it to re-mirror."""
     src, dst = _clause_corpus(
         tmp_path,
         "1girl, smile, @sincos. On the right, blue hair.",
@@ -445,7 +475,8 @@ def test_a_hand_written_master_clause_wins_over_the_derived_one(tmp_path):
 
     stats = write_corrected_preprocess_captions(
         src, dst, _kb(tmp_path), options=CaptionCorrectionOptions(), recursive=False
-    )
+    ).stats
 
-    assert stats.clauses_preserved == 0
-    assert "On the right, blue hair." in (dst / "a.txt").read_text(encoding="utf-8")
+    assert stats.clauses_preserved == 1
+    assert stats.from_master == 0
+    assert "On the left, blue hair." in (dst / "a.txt").read_text(encoding="utf-8")

@@ -47,6 +47,53 @@ resize skip list so a trainer-side ``make preprocess-resize`` never re-creates
 an image that was excluded in the package's own workspace."""
 
 
+def linked_paths(image_path: Path) -> list[Path]:
+    """An image plus its same-stem sidecars (.txt/.json/.caption/.bak)."""
+    exts = {".txt", ".json", ".caption", ".bak"}
+    out = [image_path]
+    for ext in exts:
+        sidecar = image_path.with_suffix(ext)
+        if sidecar.exists():
+            out.append(sidecar)
+    return out
+
+
+def _unique_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    stem, suffix = path.stem, path.suffix
+    i = 2
+    while True:
+        cand = path.with_name(f"{stem}_{i}{suffix}")
+        if not cand.exists():
+            return cand
+        i += 1
+
+
+def move_linked_files(
+    image_path: Path,
+    *,
+    source_root: Path,
+    target_root: Path,
+) -> list[Path]:
+    """Move an image and sidecars to ``target_root`` preserving layout."""
+    import shutil
+
+    moved: list[Path] = []
+    for source in linked_paths(image_path):
+        if not source.exists():
+            continue
+        try:
+            rel = source.relative_to(source_root)
+        except ValueError:
+            rel = Path(source.name)
+        target = _unique_path(target_root / rel)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(target))
+        moved.append(target)
+    return moved
+
+
 def rel_key(path: Path, root: Path) -> str:
     """Stable JSON key for an image path relative to a dataset root."""
 

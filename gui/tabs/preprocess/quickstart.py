@@ -32,14 +32,36 @@ def _count(dir_path: Path, exts: set[str]) -> int:
     return sum(1 for f in dir_path.rglob("*") if f.suffix.lower() in exts)
 
 
+def _count_all(dir_path: Path) -> dict[str, int]:
+    """One walk for every suffix class the card counts.
+
+    The multires cache tree (``resized_t*`` / ``lora_t*`` per tier) is large;
+    four separate ``rglob()`` passes made each status probe walk it four times
+    and GUI launch spend seconds in ``glob`` on a cold disk."""
+    out = {"img": 0, "txt": 0, "npz": 0, "safetensors": 0}
+    if not dir_path.is_dir():
+        return out
+    for f in dir_path.rglob("*"):
+        s = f.suffix.lower()
+        if s in IMG_EXTS:
+            out["img"] += 1
+        elif s == ".txt":
+            out["txt"] += 1
+        elif s == ".npz":
+            out["npz"] += 1
+        elif s == ".safetensors":
+            out["safetensors"] += 1
+    return out
+
+
 def pipeline_status(source_dir: str | Path, cache_dir: str | Path) -> dict:
     """Four-step status from disk. Pure function — unit-testable headless."""
-    src = Path(source_dir)
-    cache = Path(cache_dir)
-    n_imgs = _count(src, IMG_EXTS)
-    n_captions = _count(src, {".txt"})
-    n_npz = _count(cache, {".npz"})
-    n_te = _count(cache, {".safetensors"})
+    src_counts = _count_all(Path(source_dir))
+    cache_counts = _count_all(Path(cache_dir))
+    n_imgs = src_counts["img"]
+    n_captions = src_counts["txt"]
+    n_npz = cache_counts["npz"]
+    n_te = cache_counts["safetensors"]
     missing_captions = max(0, n_imgs - n_captions)
     return {
         "n_imgs": n_imgs,

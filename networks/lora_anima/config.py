@@ -198,6 +198,15 @@ class LoRANetworkCfg:
     min_rank: int = 1
     alpha_rank_scale: float = 1.0
 
+    # DSR-style register tokens (networks/register_injection.py): K learnable
+    # rows enter the self-attn seq at block ``register_insert_block``, ride to
+    # the end and are stripped before unpatchify. Kept-live inference only —
+    # registers can't merge into DiT weights.
+    num_registers: int = 0
+    register_insert_block: int = 8
+    register_lr_scale: float = 100.0
+    register_init_std: float = 0.02
+
     num_experts: int = 4
     # Gaussian perturb std for fused per-expert `lora_up_weight` init (plain
     # HydraLoRA only). Production leaves at 0.0.
@@ -295,6 +304,16 @@ class LoRANetworkCfg:
             network_dim = 4
         if network_alpha is None:
             network_alpha = 1.0
+
+        # Register tokens (our addition): validated here, block bounds at
+        # network build (needs n_blocks). Values ride train.py's net_kwargs as
+        # strings.
+        num_registers = int(kwargs.get("num_registers", 0) or 0)
+        if num_registers < 0:
+            raise ValueError(f"num_registers must be >= 0, got {num_registers}")
+        register_insert_block = int(kwargs.get("register_insert_block", 8) or 8)
+        register_lr_scale = float(kwargs.get("register_lr_scale", 100.0) or 100.0)
+        register_init_std = float(kwargs.get("register_init_std", 0.02) or 0.02)
 
         train_llm_adapter = _as_bool(kwargs.get("train_llm_adapter"))
 
@@ -587,6 +606,10 @@ class LoRANetworkCfg:
             channel_scales_dict=channel_scales_dict,
             grad_basis_dict=grad_basis_dict,
             verbose=verbose,
+            num_registers=num_registers,
+            register_insert_block=register_insert_block,
+            register_lr_scale=register_lr_scale,
+            register_init_std=register_init_std,
         )
 
     @classmethod
@@ -615,6 +638,8 @@ class LoRANetworkCfg:
         new_route_per_layer: Optional[bool] = None,
         new_router_source: Optional[str] = None,
         step_expert_K: int = 0,
+        num_registers: int = 0,
+        register_insert_block: int = 8,
     ) -> "LoRANetworkCfg":
         """Build cfg from a checkpoint key-sniff (warm-start / inference path).
 
@@ -680,4 +705,6 @@ class LoRANetworkCfg:
             ),
             fei_router_names=fei_router_names,
             step_expert_K=int(step_expert_K),
+            num_registers=int(num_registers),
+            register_insert_block=int(register_insert_block),
         )

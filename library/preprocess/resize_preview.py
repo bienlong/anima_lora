@@ -17,6 +17,11 @@ from anime_tools.stages.resize import (  # noqa: F401 — re-exports
 from anime_tools.stages.resize import (  # noqa: F401 — re-exports
     DEFAULT_CROP_ANCHOR as DEFAULT_RESIZE_CROP_ANCHOR,
 )
+
+# v1.17.1 GUI overlays still pass this; v2 freefit 是唯一模式，保留常量
+# 仅为兼容旧调用方（值本身不再参与几何计算）。
+DEFAULT_FIT_MODE = "freefit"
+FIT_MODES = ("freefit",)
 from anime_tools.stages.resize import (  # noqa: F401 — re-exports
     MARGIN_SIDES,
     normalize_crop_anchor,

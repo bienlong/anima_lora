@@ -24,6 +24,7 @@ from networks.lora_modules import (
     _sigma_sinusoidal_features,
 )
 from networks.lora_anima.network_metrics import _NetworkMetricsMixin
+from networks.register_injection import RegisterInjector
 
 # Re-exported from routers.py.
 from networks.lora_anima.routers import (  # noqa: F401
@@ -588,6 +589,39 @@ class LoRANetwork(_NetworkMetricsMixin, torch.nn.Module):
         # under-count.
         self._trained_num_blocks = len(unet.blocks) if hasattr(unet, "blocks") else 0
 
+        # DSR register tokens trained jointly with the LoRA (see
+        # networks/CLAUDE.md register_injection.py entry). Top-level dot-free
+        # key ("register_tokens") so lora key-sniffers/refusers/merge_to's
+        # prefix grouping never see it. Registers can't merge into DiT
+        # weights → is_mergeable() is False.
+        self.register_injector: Optional[RegisterInjector] = None
+        # train.py widens the compile dynamic-seq MAX bound by this constant
+        # (+K seq growth past the insert block).
+        self.extra_seq_tokens = int(cfg.num_registers)
+        if cfg.num_registers > 0:
+            n_blocks = len(unet.blocks)
+            if not (0 <= cfg.register_insert_block < n_blocks):
+                raise ValueError(
+                    f"register_insert_block must be in [0, {n_blocks}), "
+                    f"got {cfg.register_insert_block}"
+                )
+            self.register_tokens = torch.nn.Parameter(
+                torch.randn(cfg.num_registers, int(unet.model_channels))
+                * cfg.register_init_std
+            )
+            self.register_injector = RegisterInjector(
+                num_registers=cfg.num_registers,
+                insert_block=cfg.register_insert_block,
+                get_scaled_tokens=lambda: self.register_tokens * self.multiplier,
+            )
+            logger.info(
+                f"Register tokens: K={cfg.num_registers} learnable registers "
+                f"enter the self-attn seq at block {cfg.register_insert_block} "
+                f"(DSR starting-block pattern), lr scale "
+                f"×{cfg.register_lr_scale:g}, init_std={cfg.register_init_std:g}. "
+                "Checkpoint is kept-live at inference (registers can't merge)."
+            )
+
     def _wire_shared_sigma_buffers(self) -> None:
         """Alias each Hydra module's ``_sigma``/``_sigma_features``
         buffers to one network-level tensor, so a ``copy_`` on the shared
@@ -1128,8 +1162,15 @@ class LoRANetwork(_NetworkMetricsMixin, torch.nn.Module):
             lora.apply_to()
             self.add_module(lora.lora_name, lora)
 
+        # Register-token injection, installed after the LoRA monkey-patches;
+        # both must run before compile_blocks (compile-after-apply invariant).
+        if apply_unet and self.register_injector is not None:
+            self.register_injector.apply(unet)
+
     def is_mergeable(self):
-        return True
+        # Register tokens ride the sequence, not the weights — a static merge
+        # would silently drop them. Kept-live inference only.
+        return self.cfg.num_registers == 0
 
     def merge_to(self, text_encoders, unet, weights_sd, dtype=None, device=None):
         apply_text_encoder = apply_unet = False
@@ -1373,6 +1414,21 @@ class LoRANetwork(_NetworkMetricsMixin, torch.nn.Module):
                         f"({router_scale}x of unet_lr={base_lr})"
                     )
 
+        # Own lr group: a LoRA-scale lr rarely lets registers grow into sinks
+        # against the baked-in attractor.
+        if self.register_injector is not None:
+            base_lr = unet_lr if unet_lr is not None else default_lr
+            if base_lr is None or base_lr == 0:
+                logger.info("Register tokens: no base LR, skipping param group")
+            else:
+                reg_lr = float(base_lr) * float(self.cfg.register_lr_scale)
+                all_params.append({"params": [self.register_tokens], "lr": reg_lr})
+                lr_descriptions.append("register tokens")
+                logger.info(
+                    f"Register-token param group: lr={reg_lr:.2e} "
+                    f"({self.cfg.register_lr_scale:g}x of unet_lr={base_lr})"
+                )
+
         # REPA v2 projection-head param group (absolute mode only). LR =
         # repa_lr_scale × unet_lr. Training-only — stripped by lora_save.
         if getattr(self, "repa_head", None) is not None:
@@ -1441,6 +1497,14 @@ class LoRANetwork(_NetworkMetricsMixin, torch.nn.Module):
                 "true" if self.cfg.route_per_layer else "false"
             )
             metadata["ss_router_source"] = str(self.cfg.router_source)
+
+        # Register tokens (our addition): insert block leaves no tensor
+        # footprint, so stamp it (K is recoverable from register_tokens' shape).
+        if self.cfg.num_registers > 0:
+            metadata["ss_num_registers"] = str(int(self.cfg.num_registers))
+            metadata["ss_register_insert_block"] = str(
+                int(self.cfg.register_insert_block)
+            )
 
         # Informational — which lora_down seed this plain LoRA got. The slice is
         # what a merge tool would compare: two adapters on the same weight_svd

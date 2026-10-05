@@ -214,9 +214,12 @@ def build_loop_state(
 
     logger.info(f"unet dtype: {unet_weight_dtype}, device: {unet.device}")
     _ts_parts = [f"timestep_sampling={args.timestep_sampling}"]
-    if args.timestep_sampling in ("sigmoid", "shift", "flux_shift"):
+    if args.timestep_sampling in ("sigmoid", "shift", "flux_shift", "qinglong_flux"):
         _ts_parts.append(f"sigmoid_scale={args.sigmoid_scale}")
         _ts_parts.append(f"sigmoid_bias={getattr(args, 'sigmoid_bias', 0.0)}")
+    if args.timestep_sampling == "qinglong_flux":
+        _ts_parts.append(f"logit_mean={args.logit_mean}")
+        _ts_parts.append(f"logit_std={args.logit_std}")
     if args.timestep_sampling in ("shift", "flux_shift"):
         _ts_parts.append(f"discrete_flow_shift={args.discrete_flow_shift}")
     if (

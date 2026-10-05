@@ -170,7 +170,6 @@ def test_drop_groups_inside_position_clauses(tmp_path):
 
 def test_preprocess_task_wiring_forwards_drop_groups(monkeypatch):
     from scripts.tasks.preprocess import (
-        _caption_correction_args,
         _caption_correction_config,
         _caption_correction_enabled,
     )
@@ -183,10 +182,7 @@ def test_preprocess_task_wiring_forwards_drop_groups(monkeypatch):
     assert cleaned == ["--other", "x"]
     assert _caption_correction_enabled({"drop_groups": "artist"})
     assert not _caption_correction_enabled({"drop_groups": "  "})
-    assert _caption_correction_args({"drop_groups": "artist,lighting"}) == [
-        "--caption_drop_groups",
-        "artist,lighting",
-    ]
+    # v2 移除了 argv 回拼（_caption_correction_args）——config dict 直接驱动各阶段。
 
     monkeypatch.setenv("CAPTION_DROP_GROUPS", "pose")
     config, _ = _caption_correction_config([])

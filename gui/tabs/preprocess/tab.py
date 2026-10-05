@@ -1,16 +1,20 @@
-"""PreprocessingTab — composes the knob sections (image prep / text caching /
-captions / masking) over the Qt-free knob table, and owns what isn't a knob:
-the method/variant bar, Save + the Run split buttons, the status row, the
-explanation panel, the log, and the daemon job observer.
+"""PreprocessingTab — the cache builder. Composes the knob sections (image
+prep / text caching / caption mirror) over the Qt-free knob table, and owns
+what isn't a knob: the method/variant bar, Save + the Run split buttons, the
+status row, the explanation panel, the log, and the daemon job observer.
 
 Layout mirrors ConfigTab: top action bar, form+explain split, log panel.
-Surfaces the knobs the bare ``make preprocess`` / ``make mask`` paths hardcode.
+Surfaces the knobs the bare ``make preprocess`` path hardcodes.
+
+Curation (autotag, position clauses, SAM masks) is the ``anime_tools``
+panel's; this tab never runs it — ``knobs.CURATION_GATES_OFF`` rides in every
+env it builds, the Train auto-chain's included.
 
 Settings persist to the selected ``configs/gui-methods/<variant>.toml``
-``[variant]`` table. SAM prompts/threshold/dilate persist there too;
-``configs/sam_mask.yaml`` is only the CLI fallback — GUI Save no longer
-writes it, so a terminal ``make mask`` won't see GUI mask settings unless
-the YAML is edited by hand.
+``[variant]`` table: the trainer-native knobs as flat keys, each
+``anime_tools`` stage form under ``[variant.stages.<stage_id>]``. At submit the
+stage forms travel as ``PREPROCESS_STAGES_JSON`` (``stage_form.STAGE_VALUES_ENV``)
+and ``tasks.py`` builds each request through the package's ``build_argv``.
 """
 
 from __future__ import annotations
@@ -23,13 +27,12 @@ import sys
 from pathlib import Path
 
 import toml
-import yaml
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QFrame,
     QApplication,
     QComboBox,
+    QFrame,
     QLabel,
     QMenu,
     QMessageBox,
@@ -58,6 +61,7 @@ from gui import (
     merged_gui_variant_preset,
     variant_path,
 )
+from gui import anime_tools_panel
 from gui import daemon as gui_daemon
 from gui._job_mixin import DaemonJobMixin
 from gui._paths import read_gui_settings
@@ -65,68 +69,75 @@ from gui.explanations import field_help_html, preprocess_guide
 from gui.i18n import t
 from gui.progress import TQDM_RE, TqdmProgressTracker, make_progress_bar
 from gui.tabs.config_tab import ConfigTab, SplitButtonStyle
-from gui.tabs.preprocess.captions import AutotagSection, CaptionEditingSection
-from gui.tabs.preprocess.multires_section import MultiResSection
-from gui.tabs.preprocess.quickstart import QuickStartCard, pipeline_status
+from gui.tabs.preprocess.captions import CaptionEditingSection
 from gui.tabs.preprocess.image_prep import ImagePrepSection
 from gui.tabs.preprocess.knobs import (
-    DEFAULT_MASK_PATH_PATTERN,
-    DEFAULT_MIT_TEXT_THRESHOLD,
     DEFAULT_PREPROCESS_PATH_PATTERN,
     DEFAULT_TE_TAG_DROPOUT,
     PREPROCESS_ONLY_KEYS,
-    load_rules,
     load_values,
     merge_into_meta,
     resolved_defaults,
     to_env,
     to_overrides,
 )
-from gui.tabs.preprocess.masking import MitMaskSection, SamMaskSection
+# 快速开始卡片 + 多重分辨率分区：我们的自定义件，挂在 v2 上游分区栈之外
+# （quickstart 在最上方，multires 在最下方）。
+from gui.tabs.preprocess.multires_section import MultiResSection
+from gui.tabs.preprocess.quickstart import QuickStartCard, pipeline_status
+from gui.tabs.preprocess.stage_form import (
+    STAGE_IDS,
+    STAGE_VALUES_ENV,
+    argv_for,
+    load_stage_schemas,
+    load_stage_values,
+    merge_stages_into_meta,
+    seeded_defaults,
+)
 from gui.tabs.preprocess.text_caching import TextCachingSection
 from gui.theme import action_button_qss, rich_text_pt as _explain_pt, tok
 from gui.widgets import DirtyTrackingMixin, action_button, apply_variant
 from library.datasets.path_filter import filter_paths_by_glob
 
-SAM_YAML = ROOT / "configs" / "sam_mask.yaml"
 PREPROCESS_TOML = ROOT / "configs" / "preprocess.toml"
 
 PREPROCESS_METHODS = ["lora", "tlora", "hydralora"]
 
-# Sourced from base.toml via gui.config_io so this tab can't drift from the
-# Config/EasyControl tabs; fallback only, when the variant doesn't override the path.
+# Sourced from base.toml via gui.config_io (shared with the Config/EasyControl tabs);
+# fallback only, when the variant doesn't override the path.
 RESIZED_DIR = default_resized_dir()
 LORA_CACHE_DIR = default_lora_cache_dir()
 MASK_DIR = default_mask_dir()
 
-# Pre-Phase-3 widget attribute names → knob key. Kept for one release so
-# tests and ``image_tab`` that reach into ``tab.<widget>`` stay valid; new
-# code should go through ``tab.values()`` / the owning section instead.
-_WIDGET_ALIASES: dict[str, str] = {
-    "source_dir_edit": "source_image_dir",
-    "path_scope_edit": "path_scope",
-    "preprocess_path_pattern_edit": "preprocess_path_pattern",
-    "drop_lowres_chk": "drop_lowres_images",
-    "min_pixels_spin": "min_pixels",
-    "target_res_widget": "target_res",
-    "resize_crop_anchor_widget": "resize_crop_anchor",
-    "resize_crop_margins_widget": "resize_crop_margins",
-    "freefit_max_ratio_spin": "freefit_max_ratio",
-    "shuffle_spin": "caption_shuffle_variants",
-    "dropout_edit": "caption_tag_dropout_rate",
-    "caption_correct_order_chk": "caption_correct_order",
-    "caption_insert_no_artist_chk": "caption_insert_no_artist",
-    "caption_trigger_word_edit": "caption_trigger_word",
-    "caption_trigger_at_front_chk": "caption_trigger_at_front",
-    "caption_position_clauses_chk": "caption_position_clauses",
-    "caption_autotag_chk": "caption_autotag",
-    "caption_autotag_mode_combo": "caption_autotag_mode",
-    "caption_autotag_confidence_spin": "caption_autotag_min_confidence",
-    "run_sam_mask_chk": "run_sam_mask",
-    "mask_path_pattern_edit": "mask_path_pattern",
-    "run_mit_mask_chk": "run_mit_mask",
-    "mit_threshold_edit": "mit_text_threshold",
-    "mit_dilate_spin": "mit_dilate",
+# Legacy widget attribute names → (section attribute, key). Kept for
+# one release so tests and the resize preview that reach into ``tab.<widget>``
+# stay valid; new code should go through ``tab.values()`` / ``tab.stage_values()``
+# or the owning section instead. A key is a knob-table key for a trainer row
+# (``knob_widgets``) or a stage dest (``widgets``).
+_WIDGET_ALIASES: dict[str, tuple[str, str]] = {
+    "source_dir_edit": ("image_section", "source_image_dir"),
+    "path_scope_edit": ("image_section", "path_scope"),
+    "preprocess_path_pattern_edit": ("image_section", "preprocess_path_pattern"),
+    "target_res_widget": ("image_section", "target_res"),
+    "resize_crop_anchor_widget": ("image_section", "resize_crop_anchor"),
+    "resize_crop_margins_widget": ("image_section", "resize_crop_margins"),
+    "freefit_max_ratio_spin": ("image_section", "freefit_max_ratio"),
+    "shuffle_spin": ("text_section", "caption_shuffle_variants"),
+    "dropout_edit": ("text_section", "caption_tag_dropout_rate"),
+    "caption_no_correct_chk": ("caption_section", "no_correct"),
+    "caption_insert_no_artist_chk": ("caption_section", "caption_insert_no_artist"),
+    "caption_trigger_word_edit": ("caption_section", "caption_trigger_word"),
+    "caption_trigger_at_front_chk": ("caption_section", "caption_trigger_at_front"),
+    "caption_drop_groups_edit": ("caption_section", "caption_drop_groups"),
+}
+
+# Placeholder roots for validating a stage form at Save / Run (the real
+# roots are filled by ``tasks.py`` at submit); ``src`` / ``dst`` are required
+# by the ``correct`` request, so they must be non-empty here.
+_VALIDATION_ROOTS = {
+    "src": "image_dataset",
+    "dst": "post_image_dataset/resized",
+    "masks": "post_image_dataset/masks",
 }
 
 
@@ -138,15 +149,6 @@ def _load_preprocess_toml() -> dict:
     try:
         return toml.loads(PREPROCESS_TOML.read_text(encoding="utf-8"))
     except (OSError, toml.TomlDecodeError):
-        return {}
-
-
-def _load_sam_yaml() -> dict:
-    if not SAM_YAML.exists():
-        return {}
-    try:
-        return yaml.safe_load(SAM_YAML.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
         return {}
 
 
@@ -168,7 +170,7 @@ def _count_masks(mask_dir: Path, path_pattern: str | None = None) -> int:
 
 
 def _count_resized(resized_dir: Path, path_pattern: str | None = None) -> int:
-    # rglob picks up nested `<rel>/` subtrees from resize_images.py; flat trees still count correctly.
+    # rglob picks up nested `<rel>/` subtrees from the resize stage; flat trees still count correctly.
     return len(
         _filtered_files(
             resized_dir, path_pattern, lambda p: p.suffix.lower() in IMAGE_EXTS
@@ -194,6 +196,7 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         # Kept alive here because setStyle() does not take ownership.
         self._split_styles: list[SplitButtonStyle] = []
         self._variant: str | None = None
+        self._resize_preview = None  # ResizePreviewDialog, built on first open
         self._loading_variant = False
         self._dirty = False
 
@@ -279,10 +282,6 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
             t("preprocess_run_pe"), run_step_style, self._run_pe
         )
         top.addWidget(self.run_pe_btn)
-        self.run_mask_btn = self._make_run_button(
-            t("preprocess_run_mask"), run_step_style, self._run_mask
-        )
-        top.addWidget(self.run_mask_btn)
 
         top.addStretch()
         self.stop_btn = action_button(t("stop"), variant="danger", on_click=self._stop)
@@ -296,6 +295,11 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         self.status_lbl.setStyleSheet(f"color:{tok('text')}; padding: 2px 0;")
         row.addWidget(self.status_lbl)
         row.addStretch()
+        self.resize_preview_btn = QToolButton()
+        self.resize_preview_btn.setText("🔍 " + t("preprocess_resize_preview"))
+        self.resize_preview_btn.setToolTip(t("preprocess_resize_preview_tooltip"))
+        self.resize_preview_btn.clicked.connect(self._open_resize_preview)
+        row.addWidget(self.resize_preview_btn)
         self.open_dataset_btn = QToolButton()
         self.open_dataset_btn.setText("📂 " + t("preprocess_open_dataset_dir"))
         self.open_dataset_btn.setToolTip(t("preprocess_open_dataset_dir_tooltip"))
@@ -310,29 +314,40 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
 
     def _build_form(self) -> QScrollArea:
         """The section stack. Each section seeds its widgets from the same
-        three default sources ``_resolved_defaults`` reads, so a fresh tab
-        (no variant loaded yet) already shows the effective defaults."""
+        default sources ``_resolved_defaults`` / ``_stage_defaults`` read, so
+        a fresh tab (no variant loaded yet) already shows the effective
+        defaults."""
         settings = read_gui_settings()
         pp_cfg = _load_preprocess_toml()
-        sam_yaml = _load_sam_yaml()
         help_cb = self._show_field_help
+        self._schemas = load_stage_schemas()
+        stage_defaults = self._stage_defaults(pp_cfg)
 
-        self.image_section = ImagePrepSection(help_cb, pp_cfg=pp_cfg)
+        self.image_section = ImagePrepSection(
+            self._schemas["resize"],
+            help_cb,
+            pp_cfg=pp_cfg,
+            defaults=stage_defaults["resize"],
+        )
+        self.text_section = TextCachingSection(help_cb, settings=settings)
+        self.caption_section = CaptionEditingSection(
+            self._schemas["correct"],
+            help_cb,
+            defaults=stage_defaults["correct"],
+        )
+        self.sections = (
+            self.image_section,
+            self.text_section,
+            self.caption_section,
+        )
+        # stage id → the section holding its form.
+        self.stage_sections = {
+            "resize": self.image_section,
+            "correct": self.caption_section,
+        }
         # 快速开始卡片：四步流水线状态 + 一键补齐（主流程可视化，主次感）。
         self.quickstart = QuickStartCard()
         self.quickstart.run_all_requested.connect(self._run_quickstart)
-        self.text_section = TextCachingSection(help_cb, settings=settings)
-        # Auto-tagging runs first and is the only stage that can create a caption
-        # from nothing; the caption-editing box below edits text that already exists.
-        self.autotag_section = AutotagSection(help_cb, pp_cfg=pp_cfg)
-        self.caption_section = CaptionEditingSection(help_cb, pp_cfg=pp_cfg)
-        self.sam_section = SamMaskSection(
-            help_cb,
-            settings=settings,
-            sam_yaml_rules=load_rules(sam_yaml),
-            mask_path_pattern=sam_yaml.get("path_pattern") or DEFAULT_MASK_PATH_PATTERN,
-        )
-        self.mit_section = MitMaskSection(help_cb, settings=settings)
         # Multi-resolution (多重分辨率): standalone section — not a knob-table
         # member (structured tiers+weights setting, persisted via gui_settings).
         self.multires_section = MultiResSection()
@@ -341,14 +356,6 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
             self._multires_write_variant
         )
         self.multires_section.clear_requested.connect(self._multires_clear_variant)
-        self.sections = (
-            self.image_section,
-            self.text_section,
-            self.autotag_section,
-            self.caption_section,
-            self.sam_section,
-            self.mit_section,
-        )
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -356,7 +363,7 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         layout = QVBoxLayout(host)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.quickstart)
-        line_sep = QLabel()
+        line_sep = QFrame()
         line_sep.setFrameShape(QFrame.HLine)
         line_sep.setStyleSheet(f"color:{tok('panel')};")
         layout.addWidget(line_sep)
@@ -368,30 +375,25 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         self._refresh_quickstart()
         return scroll
 
-    def _refresh_quickstart(self) -> None:
-        """Recompute the four-step pipeline status from the current fields."""
-        try:
-            src = self.source_dir_edit.text().strip() or str(
-                _load_preprocess_toml().get("source_image_dir") or "image_dataset"
-            )
-            p = Path(src)
-            if not p.is_absolute():
-                p = ROOT / p
-            cache = default_lora_cache_dir()
-            self.quickstart.refresh(pipeline_status(p, cache))
-        except Exception:
-            pass
+    def _stage_defaults(self, pp_cfg: dict) -> dict[str, dict]:
+        """``{stage_id: {dest: default}}`` — the schema defaults with
+        ``preprocess.toml`` seeded on top (``stage_form.seeded_defaults``)."""
+        return {sid: seeded_defaults(self._schemas[sid], pp_cfg) for sid in STAGE_IDS}
 
     def __getattr__(self, name: str):
         # Legacy ``tab.<widget>`` access → the owning section's widget (see
         # _WIDGET_ALIASES). Only reached when normal lookup fails, and never
         # before the sections exist.
-        key = _WIDGET_ALIASES.get(name)
-        sections = self.__dict__.get("sections")
-        if key is not None and sections:
-            for section in sections:
+        alias = _WIDGET_ALIASES.get(name)
+        if alias is not None and self.__dict__.get("sections"):
+            section = self.__dict__.get(alias[0])
+            if section is not None:
+                key = alias[1]
                 if key in section.widgets:
                     return section.widgets[key]
+                knobs = getattr(section, "knob_widgets", {})
+                if key in knobs:
+                    return knobs[key]
         raise AttributeError(name)
 
     def _lazy_init(self) -> None:
@@ -439,12 +441,14 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
             finally:
                 self._loading_variant = False
         self._variant = variant
-        values = load_values(
-            self._variant_preprocess_meta(variant), self._resolved_defaults()
-        )
+        meta = self._variant_preprocess_meta(variant)
+        values = load_values(meta, self._resolved_defaults())
         self.set_values(values)
+        self.set_stage_values(self._load_stage_values(meta))
         if hasattr(self, "status_lbl"):
             self._refresh_status()
+        if self._resize_preview is not None and self._resize_preview.isVisible():
+            self._resize_preview.refresh()
         self._clear_dirty()
 
     @staticmethod
@@ -458,31 +462,58 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
             return {}
         return {k: meta[k] for k in PREPROCESS_ONLY_KEYS if k in meta}
 
+    def _load_stage_values(self, meta: dict) -> dict[str, object]:
+        """``{stage_id: values}`` for a variant: its ``[variant.stages.*]``
+        over the seeded defaults."""
+        defaults = self._stage_defaults(_load_preprocess_toml())
+        return {sid: load_stage_values(meta, sid, defaults[sid]) for sid in STAGE_IDS}
+
     # -- values (the section surface) ---------------------------------------
 
     def values(self) -> dict[str, object]:
-        """Raw widget state keyed by knob, merged across sections. Free-text
-        numerics (``caption_tag_dropout_rate`` / ``mit_text_threshold``) stay
-        as the line-edit text — validated where they're persisted;
-        ``mask_rules`` is ``None`` here and collected separately
-        (``SamMaskSection.collect_rules``) because it validates."""
+        """Raw widget state of the trainer-native knobs (``knobs.KNOBS``),
+        merged across sections. Free-text numerics (``caption_tag_dropout_rate``)
+        stay as the line-edit text — validated where they're persisted."""
         out: dict[str, object] = {}
         for section in self.sections:
-            out.update(section.values())
+            reader = getattr(section, "knob_values", None)
+            out.update(reader() if reader is not None else section.values())
         return out
 
-    _widget_values = values  # pre-Phase-3 name
+    _widget_values = values  # legacy name
+
+    def stage_values(self) -> dict[str, object]:
+        """``{stage_id: {dest: value}}`` for every stage form — what the job
+        receives and the variant keeps."""
+        out: dict[str, object] = {}
+        for sid, section in self.stage_sections.items():
+            reader = getattr(section, "stage_values", None)
+            out[sid] = reader() if reader is not None else section.values()
+        return out
 
     def set_values(self, values: dict) -> None:
-        """Push knob values into every section without tripping the dirty flag."""
+        """Push trainer-knob values into every section without tripping the
+        dirty flag."""
         self._loading_variant = True
         try:
             for section in self.sections:
-                section.set_values(values)
+                setter = getattr(section, "set_knob_values", None)
+                (setter or section.set_values)(values)
         finally:
             self._loading_variant = False
 
-    # Thin delegates kept for the tests / image_tab that call them directly.
+    def set_stage_values(self, stage_values: dict) -> None:
+        self._loading_variant = True
+        try:
+            for sid, section in self.stage_sections.items():
+                if sid not in stage_values:
+                    continue
+                setter = getattr(section, "set_stage_values", None)
+                (setter or section.set_values)(stage_values[sid])
+        finally:
+            self._loading_variant = False
+
+    # Thin delegates kept for the tests that call them directly.
     def _set_target_res_widget(self, values) -> None:
         self.image_section.set_target_res(values)
 
@@ -493,23 +524,7 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         self.resize_crop_margins_widget.set_value(value)
 
     def _resize_crop_margins(self) -> dict[str, float]:
-        return self.resize_crop_margins_widget.value()
-
-    def _set_autotag_mode(self, mode: str) -> None:
-        self.autotag_section.set_values({"caption_autotag_mode": mode})
-
-    def _autotag_mode(self) -> str:
-        return self.autotag_section.mode()
-
-    @property
-    def _rule_cards(self):
-        return self.sam_section.rule_cards
-
-    def _set_rule_cards(self, rules: list[dict]) -> None:
-        self.sam_section.set_rule_cards(rules)
-
-    def _collect_rules(self) -> list[dict] | None:
-        return self.sam_section.collect_rules()
+        return self.resize_crop_margins_widget.margins()
 
     # -- dirty / help / status ----------------------------------------------
 
@@ -582,6 +597,8 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
             ),
             t("preprocess_status_masks", masks=mask_n),
         ]
+        if anime_tools_panel.export_is_stale():
+            lines.append(t("preprocess_status_export_stale"))
         self.status_lbl.setText("  |  ".join(lines))
 
     def _open_dataset_dir(self) -> None:
@@ -593,6 +610,15 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         if not target.is_dir():
             target = ROOT
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
+
+    def _open_resize_preview(self) -> None:
+        if self._resize_preview is None:
+            from gui.tabs.preprocess.resize_preview import ResizePreviewDialog
+
+            self._resize_preview = ResizePreviewDialog(self)
+        self._resize_preview.show()
+        self._resize_preview.raise_()
+        self._resize_preview.activateWindow()
 
     @staticmethod
     def _snapshot_path(snapshot: dict[str, object], key: str, default: Path) -> Path:
@@ -698,16 +724,18 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
 
     @staticmethod
     def _resolved_defaults() -> dict:
-        """Effective per-knob defaults from the three sources the tab consults
-        (``preprocess.toml`` / ``gui_settings.json`` / ``sam_mask.yaml``)."""
-        return resolved_defaults(
-            _load_preprocess_toml(), read_gui_settings(), _load_sam_yaml()
-        )
+        """Effective per-knob defaults from the two sources the trainer knobs
+        consult (``preprocess.toml`` / ``gui_settings.json``)."""
+        return resolved_defaults(_load_preprocess_toml(), read_gui_settings())
 
     def preprocess_env(self) -> dict[str, str]:
-        """Environment values consumed by ``tasks.py preprocess`` (see
-        ``knobs.to_env`` for why geometry/filter knobs ride as env)."""
-        return to_env(self.values(), self._resolved_defaults())
+        """Environment values consumed by ``tasks.py preprocess`` / ``mask``:
+        the trainer knobs (``knobs.to_env``) plus every stage form as JSON
+        (``PREPROCESS_STAGES_JSON``), from which ``tasks.py`` builds the
+        ``anime_tools`` requests through ``build_argv``."""
+        env = to_env(self.values(), self._resolved_defaults())
+        env[STAGE_VALUES_ENV] = json.dumps(self.stage_values(), ensure_ascii=False)
+        return env
 
     def preprocess_overrides(self) -> dict[str, object]:
         """Flat config overrides that should be captured in preprocess snapshots."""
@@ -762,21 +790,35 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         self._mark_dirty()
 
     def persist_preprocess_inputs(self) -> bool:
-        """Persist cache-building inputs for ConfigTab's auto-chain/queue.
-        Excludes mask-only settings so an invalid mask threshold can't block a
-        plain cache build."""
+        """Persist cache-building inputs for ConfigTab's auto-chain/queue."""
         return self._save_variant_preprocess_meta(validate_dropout=True)
 
     # -- save ---------------------------------------------------------------
 
-    def _save_variant_preprocess_meta(
-        self,
-        *,
-        validate_dropout: bool,
-        include_mask: bool = False,
-        rules: list[dict] | None = None,
-        mit_threshold: float | None = None,
-    ) -> bool:
+    def _validate_stages(self) -> bool:
+        """Run every stage form through the package's ``build_argv`` (the
+        request's own ``__post_init__``): a bad value surfaces as a dialog
+        here, not minutes into a cache build."""
+        for sid, values in self.stage_values().items():
+            try:
+                argv_for(
+                    self._schemas[sid],
+                    values,
+                    roots=_VALIDATION_ROOTS,
+                    settings={"path_pattern": "*"},
+                    mask_root="post_image_dataset",
+                )
+            except ValueError as exc:
+                label = self._schemas[sid].get("title") or sid
+                QMessageBox.warning(
+                    self,
+                    t("error"),
+                    t("preprocess_invalid_stage", stage=label, err=str(exc)),
+                )
+                return False
+        return True
+
+    def _save_variant_preprocess_meta(self, *, validate_dropout: bool) -> bool:
         if not self._variant:
             return True
         dropout_text = self.dropout_edit.text().strip()
@@ -791,6 +833,8 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
                 dropout = float(dropout_text)
             except ValueError:
                 dropout = DEFAULT_TE_TAG_DROPOUT
+        if not self._validate_stages():
+            return False
 
         path = variant_path(self._variant)
         data = _load(path)
@@ -805,15 +849,17 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         values = self.values()
         values["path_scope"] = scope
         values["caption_tag_dropout_rate"] = float(dropout)
-        if include_mask:
-            values["mask_rules"] = rules
-            values["mit_text_threshold"] = (
-                DEFAULT_MIT_TEXT_THRESHOLD if mit_threshold is None else mit_threshold
-            )
         # Elision (pop-if-default, with the preprocess.toml-resolved comparison
-        # for the caption-master stages) is the knob table's job.
-        merge_into_meta(
-            meta, values, self._resolved_defaults(), include_mask=include_mask
+        # for the caption-master stages) is the knob table's job; the stage
+        # forms are elided against their seeded defaults by stage_form.
+        merge_into_meta(meta, values, self._resolved_defaults())
+        # Stage tables this tab no longer draws (an older GUI's ``autotag`` /
+        # ``masks_sam``) are left as they are.
+        merge_stages_into_meta(
+            meta,
+            self.stage_values(),
+            self._stage_defaults(_load_preprocess_toml()),
+            include_mask=False,
         )
 
         if meta:
@@ -830,20 +876,7 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         )
         if dropout is None:
             return False
-        mit_threshold = self._parse_float(
-            self.mit_threshold_edit.text().strip(), t("preprocess_mit_threshold")
-        )
-        if mit_threshold is None:
-            return False
-        rules = self.sam_section.collect_rules()
-        if rules is None:
-            return False
-        if not self._save_variant_preprocess_meta(
-            validate_dropout=False,
-            include_mask=True,
-            rules=rules,
-            mit_threshold=mit_threshold,
-        ):
+        if not self._save_variant_preprocess_meta(validate_dropout=False):
             return False
         self._clear_dirty()
         return True
@@ -907,54 +940,43 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
             attach=not queue,
         )
 
-    def _run_mask(self, *, queue: bool = False) -> None:
-        if not self._save_all():
-            return
-        rules = self.sam_section.collect_rules()
-        if rules is None:
-            return
-        mask_path_pattern = self.sam_section.mask_path_pattern()
-        run_sam = self.run_sam_mask_chk.isChecked()
-        run_mit = self.run_mit_mask_chk.isChecked()
-        if not (run_sam or run_mit):
-            QMessageBox.warning(self, t("error"), t("preprocess_mask_nothing_enabled"))
-            return
-        # Without the snapshot, masking falls back to the unscoped resized/ and re-masks every group each run.
-        snapshot = self.preprocess_config_snapshot()
-        # Masking reads the resized images; with none on disk the task exits
-        # with an opaque "no images to mask". Surface the real cause first.
-        resized_dir = self._snapshot_path(snapshot, "resized_image_dir", RESIZED_DIR)
-        if _count_resized(resized_dir, mask_path_pattern) == 0:
-            QMessageBox.warning(self, t("error"), t("preprocess_no_resized_to_process"))
-            return
-        self._submit(
-            label="mask",
-            argv=["tasks.py", "mask"],
-            extra_env={
-                "MIT_TEXT_THRESHOLD": self.mit_threshold_edit.text().strip(),
-                "MIT_DILATE": str(int(self.mit_dilate_spin.value())),
-                "RUN_SAM_MASK": "1" if run_sam else "0",
-                "RUN_MIT_MASK": "1" if run_mit else "0",
-                "SAM_MASK_CONFIG_JSON": json.dumps(
-                    {"rules": rules, "path_pattern": mask_path_pattern},
-                    ensure_ascii=False,
-                ),
-            },
-            config_snapshot=snapshot,
-            attach=not queue,
-        )
+    # -- quickstart / multires（我们的自定义件） ------------------------------
+
+    def _refresh_quickstart(self) -> None:
+        """Recompute the four-step pipeline status from the current fields."""
+        try:
+            src = str(self.values().get("source_image_dir") or "image_dataset")
+            p = Path(src)
+            if not p.is_absolute():
+                p = ROOT / p
+            cache = default_lora_cache_dir()
+            self.quickstart.refresh(pipeline_status(p, cache))
+        except Exception:
+            pass
 
     def _run_quickstart(self) -> None:
-        """一键补齐：确保勾选自动打标（缺字幕时）并提交完整预处理链。"""
+        """一键补齐：缺字幕时带 CAPTION_AUTOTAG=1 提交完整预处理链。
+
+        v2 把打标挪去了 anime_tools 面板，但后端 autotag 阶段仍受 env 门控
+        （env 优先于配置链），这里覆盖 GUI 固定的 CURATION_GATES_OFF 以保留
+        一键体验；autotag 设置走配置链（mode 默认 missing，只补缺失字幕）。
+        """
         try:
             status = self.quickstart._status
         except AttributeError:
             return
+        if not self._save_all():
+            return
+        env = self.preprocess_env()
         if status.get("missing_captions"):
-            self.caption_autotag_chk.setChecked(True)
-        if self._dirty:
-            self._save_preset(silent=True)
-        self._run_te()
+            env["CAPTION_AUTOTAG"] = "1"
+        self._submit(
+            label="preprocess",
+            argv=["tasks.py", "preprocess"],
+            extra_env=env,
+            config_snapshot=self.preprocess_config_snapshot(),
+            attach=True,
+        )
 
     def _multires_selection_or_warn(self):
         from library.preprocess.multires import parse_tiers
@@ -1038,7 +1060,7 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         config_snapshot: dict | None = None,
         attach: bool = True,
     ) -> None:
-        """Submit a preprocess/mask job to the daemon (spawns ``python <argv>``
+        """Submit a preprocess job to the daemon (spawns ``python <argv>``
         detached, serialized behind any running training job). Pre-launch
         validation is the caller's job. ``attach=True`` (main Run) takes over
         the log/bar and blocks Run until the job finishes; ``attach=False``
@@ -1079,7 +1101,7 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
     # -- job observer -------------------------------------------------------
 
     def _try_reattach(self) -> None:
-        """Bind to a preprocess/mask job still running when the tab first opens
+        """Bind to a preprocess job still running when the tab first opens
         (so close-mid-preprocess → reopen re-attaches). Skips a training job
         (belongs to ConfigTab) and stays idle when the daemon is down."""
         try:
@@ -1119,6 +1141,7 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
         self.log.appendPlainText(gui_daemon.format_finish_banner(job_id, state))
         self._restore_idle_ui()
         self._refresh_status()
+        self._refresh_quickstart()
 
     def _set_busy_ui(self, busy: bool) -> None:
         for btn in self._run_buttons:
@@ -1134,6 +1157,6 @@ class PreprocessingTab(DaemonJobMixin, DirtyTrackingMixin, LazyTabMixin, QWidget
 
     def cleanup_subprocess(self) -> None:
         """App-shutdown hook. Stops observing but leaves the daemon job alive —
-        it runs detached, so a cache build / mask pass survives GUI close
+        it runs detached, so a cache build survives GUI close
         (re-attached on next launch)."""
         self._job_timer.stop()

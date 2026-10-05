@@ -34,6 +34,7 @@ from anime_tools.captions.shuffle import (  # noqa: E402,F401
     NO_ARTIST_SENTINEL,
     anima_smart_shuffle_caption,
     find_anima_prefix_end,
+    is_artist_tag as _is_artist_tag,  # noqa: F401 — GUI/tests 的旧导入路径
     strip_no_artist_sentinel,
 )
 
@@ -352,8 +353,17 @@ def add_anima_training_arguments(parser: argparse.ArgumentParser):
         "--timestep_sampling",
         type=str,
         default="sigmoid",
-        choices=["sigma", "uniform", "sigmoid", "shift", "flux_shift"],
-        help="Timestep sampling method (default: sigmoid (logit normal))",
+        choices=[
+            "sigma",
+            "uniform",
+            "sigmoid",
+            "shift",
+            "flux_shift",
+            "qinglong_flux",
+        ],
+        help="Timestep sampling method (default: sigmoid (logit normal)). "
+        "qinglong_flux: triple hybrid — 79%% resolution-shifted logit-normal "
+        "+ 11%% style-friendly logSNR + 10%% low-noise logSNR2 per sample.",
     )
     parser.add_argument(
         "--sigmoid_scale",

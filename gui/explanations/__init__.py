@@ -3,6 +3,12 @@
 Per-field tooltips live in ``guides/<lang>/_fields.json`` and
 ``guides/<lang>/_preprocess_fields.json`` — one JSON file per language,
 loaded lazily on first access. Missing keys fall back to English.
+``guides/<lang>/_stage_fields.json`` is the overlay for the Preprocessing
+tab's ``anime_tools`` stage forms: keyed ``<stage_id>.<dest>`` →
+``{"label", "help", "choices"?}``, read by ``tabs/preprocess/stage_form``
+(``label_for`` / ``help_for``) with the schema's English as the fallback.
+The key scheme is the package's, so the file can seed a package-side
+translation table.
 
 Method/variant guide HTML blocks live under ``guides/<lang>/<name>.html``
 and are also loaded lazily. Shared snippets (``_apply_note``,
@@ -94,20 +100,38 @@ def preprocess_field_help(key: str) -> str | None:
     return field_help(key)
 
 
+@functools.lru_cache(maxsize=None)
+def _read_stage_fields(lang: str) -> dict[str, dict]:
+    path = _GUIDES_DIR / lang / "_stage_fields.json"
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def stage_field(key: str) -> dict | None:
+    """The overlay entry for a stage form field (``"<stage_id>.<dest>"``):
+    the current language's, with any key it lacks filled from English.
+    ``None`` when neither names it (the schema's English is used then)."""
+    lang = current_language()
+    own = _read_stage_fields(lang).get(key)
+    base = _read_stage_fields("en").get(key) if lang != "en" else None
+    if own is None and base is None:
+        return None
+    return {**(base or {}), **(own or {})}
+
+
 def preprocess_guide() -> str:
     return _guide("preprocess")
 
 
 # Methods that can't be baked into a plain DiT via scripts/toolkits/merge_to_dit.py (router is
 # layer-local / hook-only / not a weight delta) — render the "not mergeable" callout.
-_NOT_MERGEABLE = frozenset({"hydralora", "fera", "chimera", "soft_tokens"})
+_NOT_MERGEABLE = frozenset({"hydralora", "soft_tokens"})
 _KNOWN_METHODS = frozenset(
     {
         "lora",
         "tlora",
         "hydralora",
-        "fera",
-        "chimera",
         "soft_tokens",
         "turbo",
         "soup",

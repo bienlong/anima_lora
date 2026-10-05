@@ -171,6 +171,20 @@ class MainWindow(QMainWindow):
             self.tabs.widget(1)
         )
         self.tabs.addTab(self._preprocess_tab, t("tab_preprocess"))
+        # anime_tools 整理面板（v2）：打标/位置从句/蒙版等 curation 都在这里，
+        # 预处理页只做缓存。懒加载（QWebEngineView 导入+首开成本高）。
+        from gui.tabs.anime_tools_tab import AnimeToolsTab
+
+        self.tabs.addTab(
+            LazyTabHolder(
+                lambda: AnimeToolsTab(
+                    source_image_dir=lambda: self._preprocess_tab.values().get(
+                        "source_image_dir"
+                    )
+                )
+            ),
+            t("tab_anime_tools"),
+        )
         # Every tab after Config is a LazyTabHolder: built on first open, keeping
         # the launch path to Config + Preprocess only.
         self._image_tab = LazyTabHolder(
@@ -183,7 +197,7 @@ class MainWindow(QMainWindow):
             LazyTabHolder(
                 lambda: MethodsTab(
                     tb_panel=self._tb_tab.panel,
-                    flat_methods=("chimera", "soft_tokens"),
+                    flat_methods=("soft_tokens",),
                     distill_methods=("soup",),
                 )
             ),

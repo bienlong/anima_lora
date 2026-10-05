@@ -1,10 +1,10 @@
-"""Preprocessing-tab package (``docs/proposal/gui_preprocess_tab_refactor.md``).
+"""Preprocessing-tab package.
 
 Layout:
 
 - ``knobs.py``      — Qt-free knob table + load/env/overrides/elision logic
 - ``_section.py``   — ``KnobSection``: one ``QGroupBox`` form over knob rows
-- ``image_prep.py`` / ``text_caching.py`` / ``captions.py`` / ``masking.py``
+- ``image_prep.py`` / ``text_caching.py`` / ``captions.py``
                     — the section panels (domain widgets live with their section)
 - ``tab.py``        — ``PreprocessingTab``: top bar, run buttons, job observer, log
 

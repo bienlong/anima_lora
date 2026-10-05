@@ -90,5 +90,6 @@
   "use_dora": "DoRA：把适配权重分解为逐通道幅度 + 低秩方向分别训练。比普通LoRA收敛更稳，显存略增。与use_lokr同开即 DoKr（Kronecker方向+幅度）。普通DoRA保存的文件可在ComfyUI直接加载。",
   "use_lokr": "LoKr：用Kronecker积（w1×w2）替代低秩增量——单位参数表达力更强。仅限本仓库内加载使用（ComfyUI原装LoRA加载路径不支持）。不能与正交/路由类组合。",
   "lokr_factor": "LoKr 的 w2 因式分解切分。-1：取最均衡的因子（推荐）。警告：0（或很大的值）会让 w1 退化成 1×1 标量、w2 变成完整大矩阵——DoKr 开销接近全量微调（每步 ~30-100 倍 LoRA）。填越小的正整数参数越多。",
-  "rs_lora": "rs-LoRA：有效缩放 = alpha / sqrt(r)（而非 alpha / r）——高rank（>32）训练更稳。对普通LoRA / DoRA / LoKr / DoKr 都可用。sqrt(r)会折进保存的alpha里，所有kohya格式加载器都会按训练时缩放应用。"
+  "rs_lora": "rs-LoRA：有效缩放 = alpha / sqrt(r)（而非 alpha / r）——高rank（>32）训练更稳。对普通LoRA / DoRA / LoKr / DoKr 都可用。sqrt(r)会折进保存的alpha里，所有kohya格式加载器都会按训练时缩放应用。",
+  "vocab_pack": "CJK 词表包路径前缀（.safetensors/.json 一对，不含后缀）。将日文/韩文/中文的标注和提示词片段路由到 T5 侧的附加行；英文保持逐位一致。留空 = 关闭。用 `make download-vocab-pack` 获取发布的词表包；启用或更换后，对含 CJK 的标注需以 overwrite 重新运行文本嵌入预处理。"
 }

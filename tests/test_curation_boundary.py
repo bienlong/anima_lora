@@ -77,7 +77,7 @@ def _forbidden(module: str, manifest: set[str]) -> bool:
 
 def _violations(path: Path) -> list[str]:
     text = path.read_text(encoding="utf-8")
-    manifest = {str(p.relative_to(REPO_ROOT)) for p in _curation_files()}
+    manifest = {p.relative_to(REPO_ROOT).as_posix() for p in _curation_files()}
     out: list[str] = []
     for m in _IMPORT_RE.finditer(text):
         mod = m.group("from") or m.group("mod")
