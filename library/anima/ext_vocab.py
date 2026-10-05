@@ -56,6 +56,14 @@ share one row (``project/cjk_anima_scale/plan_retrain.md`` § 2c). Char for
 char, so every offset still indexes the typed text. A pack without it encodes
 bit-identically to before.
 
+Dot runs (``mapping["dots"]``, :class:`Dots`): after the fold, a run of
+``・ ･ . ． ‥ …`` is rewritten by its dot count — one ``・`` → ``.``, 2–3 dots
+→ ``…``, 4+ → ``……`` (the ``sent`` tier's ``norm_ellipsis``), so
+``はぁ・・・`` / ``はぁ...`` / ``はぁ…`` share the ``…`` row. A run of only ``.`` /
+``…`` rewrites only where it touches a routed char; elsewhere ``…`` is spelled
+``...`` (T5 reads both alike), so an EN prompt never routes for it. Not char
+for char: ``encode_aligned`` maps the offsets back onto the typed text.
+
 Pure-CPU module — no model load; consumers pass embedding tensors in.
 """
 
@@ -188,6 +196,73 @@ class Route:
 DEFAULT_QUOTES: tuple[tuple[str, str], ...] = (("「", "」"), ("『", "』"), ('"', '"'))
 
 
+@dataclass(frozen=True)
+class Dots:
+    """Encode-time dot runs (``mapping["dots"]``): a maximal run of ``run``
+    chars is rewritten by its dot count (``count``, 1 per char otherwise) —
+    one dot: ``lone`` (``・`` → ``.``; a char it lacks stays); under
+    ``long_at``: ``to`` (``…``); else ``long`` (``……``). A run made only of
+    ``anchored`` chars (``.`` / ``…``) rewrites only where it touches a routed
+    char (``はぁ...`` → ``はぁ…``); elsewhere it is spelled through ``plain``
+    (``…`` → ``...``, what T5 reads it as), so an EN prompt never routes for it.
+    """
+
+    run: str
+    count: dict
+    lone: dict
+    anchored: str
+    plain: dict
+    to: str = "…"
+    long: str = "……"
+    long_at: int = 4
+
+    @classmethod
+    def from_mapping(cls, mapping: dict | None) -> "Dots | None":
+        spec = (mapping or {}).get("dots")
+        if not spec:
+            return None
+        return cls(
+            run=spec["run"],
+            count={k: int(v) for k, v in spec.get("count", {}).items()},
+            lone=dict(spec.get("lone", {})),
+            anchored=spec.get("anchored", ""),
+            plain=dict(spec.get("plain", {})),
+            to=spec.get("to", "…"),
+            long=spec.get("long", "……"),
+            long_at=int(spec.get("long_at", 4)),
+        )
+
+    def apply(self, text: str, route: "Route") -> tuple[str, list[tuple[int, int]]]:
+        """``(text', src)``: the rewritten text and, per char of it, the
+        ``[start, end)`` of ``text`` it came from (a rewritten run's chars all
+        span the whole run)."""
+        out: list[str] = []
+        src: list[tuple[int, int]] = []
+        at = 0
+        for m in re.finditer(f"[{re.escape(self.run)}]+", text):
+            a, b = m.span()
+            run = m.group()
+            out.append(text[at:a])
+            src.extend((i, i + 1) for i in range(at, a))
+            touches = (a > 0 and route(text[a - 1])) or (
+                b < len(text) and route(text[b])
+            )
+            if not touches and all(c in self.anchored for c in run):
+                rep = "".join(self.plain.get(c, c) for c in run)
+            else:
+                n = sum(self.count.get(c, 1) for c in run)
+                if n == 1:
+                    rep = self.lone.get(run, run)
+                else:
+                    rep = self.to if n < self.long_at else self.long
+            out.append(rep)
+            src.extend((a, b) for _ in rep)
+            at = b
+        out.append(text[at:])
+        src.extend((i, i + 1) for i in range(at, len(text)))
+        return "".join(out), src
+
+
 # ---------------------------------------------------------------------------
 # Isotropic block — content-free rows regenerated from a seed
 # ---------------------------------------------------------------------------
@@ -313,6 +388,7 @@ _DIGEST_KEYS = (
     "iso",
     "glyph_route",
     "fold",
+    "dots",
 )
 
 
@@ -667,6 +743,9 @@ class HybridT5Encoder:
     # Encode fold (``mapping["fold"]``) as a ``str.translate`` table; ``None``
     # when the pack has none.
     fold: dict[int, str] | None = None
+    # Dot runs (``mapping["dots"]``), applied after the fold; ``None`` when
+    # the pack has none.
+    dots: Dots | None = None
 
     @classmethod
     def from_mapping(
@@ -723,11 +802,21 @@ class HybridT5Encoder:
             iso_offset=(iso.start if (iso := IsoSpec.from_mapping(mapping)) else None),
             glyph_split=glyph_split,
             fold=fold,
+            dots=Dots.from_mapping(mapping),
         )
 
     def folded(self, text: str) -> str:
         """``text`` under the pack's encode fold (unchanged without one)."""
         return text.translate(self.fold) if self.fold else text
+
+    def normalized(self, text: str) -> tuple[str, list[tuple[int, int]] | None]:
+        """``text`` folded, then its dot runs rewritten; the second item maps
+        each char of the result to its ``[start, end)`` in ``text`` (``None``
+        without ``dots``: the fold is char for char)."""
+        text = self.folded(text)
+        if self.dots is None:
+            return text, None
+        return self.dots.apply(text, self.route or Route.default())
 
     @property
     def quote_routing(self) -> bool:
@@ -735,8 +824,8 @@ class HybridT5Encoder:
         return bool(self.iso_offset is not None and self.route and self.route.quotes)
 
     def routes(self, text: str) -> bool:
-        """Does any char of ``text`` (folded) leave the spiece path under this pack?"""
-        return (self.route or Route.default()).any(self.folded(text))
+        """Does any char of ``text`` (normalized) leave the spiece path under this pack?"""
+        return (self.route or Route.default()).any(self.normalized(text)[0])
 
     def _encode_cjk(
         self, span: str, offset: int = 0
@@ -857,9 +946,12 @@ class HybridT5Encoder:
         composed tag-by-tag (``build_pairs.py``) knows which EN tag each JA tag
         came from, and these offsets turn that into token index sets on both
         sides. Offsets cover the real tokens only — the trailing EOS gets a
-        zero-width span at ``len(text)`` and padding gets none.
+        zero-width span at ``len(text)`` and padding gets none. Under
+        ``dots`` the offsets still index the typed ``text`` (a rewritten
+        run's tokens span the whole run).
         """
-        text = self.folded(text)
+        typed_len = len(text)
+        text, src = self.normalized(text)
         ids: list[int] = []
         offs: list[tuple[int, int]] = []
         base = 0
@@ -877,10 +969,17 @@ class HybridT5Encoder:
             offs.extend((base + a, base + b) for a, b in s_offs)
             base += len(span)
 
+        if src is not None:
+            offs = [
+                (src[a][0], src[b - 1][1])
+                if b > a
+                else ((src[a][0],) * 2 if a < len(src) else (typed_len,) * 2)
+                for a, b in offs
+            ]
         keep = max_length - 1
         ids, offs = ids[:keep], offs[:keep]
         ids.append(T5_EOS_ID)
-        offs.append((len(text), len(text)))
+        offs.append((typed_len, typed_len))
         mask = [1] * len(ids)
         pad = max_length - len(ids)
         return ids + [T5_PAD_ID] * pad, mask + [0] * pad, offs
