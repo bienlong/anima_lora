@@ -204,8 +204,14 @@ def _target(rng, p: dict):
     return rng.uniform(float(px[0]), float(px[1])) if px else None
 
 
+def _lone(pools: Pools) -> list:
+    """The rows drawn alone: ``pools.lone`` (a mark whose lone spelling misses
+    its row is left out), else every single."""
+    return pools.singles if pools.lone is None else pools.lone
+
+
 def bubble1(pools: Pools, rng: random.Random, p: dict):
-    glyph = rng.choice(pools.singles)
+    glyph = rng.choice(_lone(pools))
     target = _target(rng, p)
     if target is None:
         cands, fill, lo = sorted(pools.single_idx), float(p["fit"]), 0.0
@@ -318,7 +324,8 @@ def _sent_plan(region, text: str, cuts: list, target: float, min_glyph: int):
 def sent(pools: Pools, rng: random.Random, p: dict):
     """A dialogue line (``pools.sentences``, length uniform over
     ``lengths``) lettered as Japanese in 2–3 columns of one scene bubble at
-    ``glyph_px`` font px, on the scenes ``_sent_plan`` places it in (and
+    ``glyph_px`` font px — with mark rows, a mark drawn first and a line
+    holding it (``pools.sent_marks``) — on the scenes ``_sent_plan`` places it in (and
     ``scene_pools``'), none framed as a sign (``SENT_FRAMES_OUT``); routed
     per glyph at encode like the windows."""
     from common.render.flat import pick_font
@@ -326,8 +333,11 @@ def sent(pools: Pools, rng: random.Random, p: dict):
     from data.synth import scene_caption
 
     lo, hi = p["lengths"]
-    ns = [n for n in range(int(lo), int(hi) + 1) if pools.sentences.get(n)]
-    text = rng.choice(pools.sentences[rng.choice(ns)])
+    by = pools.sentences
+    if pools.sent_marks:  # a mark first, then a line holding it
+        by = pools.sent_marks[rng.choice(sorted(pools.sent_marks))]
+    ns = [n for n in range(int(lo), int(hi) + 1) if by.get(n)]
+    text = rng.choice(by[rng.choice(ns)])
     target = _target(rng, p)
     min_glyph = int(0.85 * target)
     cuts = _sent_cuts(pools, text)
@@ -423,11 +433,11 @@ def grid(pools: Pools, rng: random.Random, p: dict):
 
     deck = pools.decks.get("singles")
     if deck is None:
-        deck = pools.decks["singles"] = _Deck(pools.singles, rng)
+        deck = pools.decks["singles"] = _Deck(_lone(pools), rng)
     grids = [
         (g, w)
         for g, w in parse_grids(p["grids"])
-        if GRIDS[g][0] * GRIDS[g][1] <= len(pools.singles)
+        if GRIDS[g][0] * GRIDS[g][1] <= len(_lone(pools))
     ]
     assert grids, "grid: no grid the rows can fill"
     name = rng.choices([g for g, _ in grids], weights=[w for _, w in grids])[0]

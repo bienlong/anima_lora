@@ -325,7 +325,11 @@ def build() -> dict:
             b = next((k for k, (lo, hi) in BINS.items() if lo <= n <= hi), None)
             if b is None or not clean(s, freq):
                 continue
-            kind = ("interj" if is_interjection(s) else "lexical") if b == "short" else "all"
+            kind = (
+                ("interj" if is_interjection(s) else "lexical")
+                if b == "short"
+                else "all"
+            )
             cands[b][kind].append((stem, s))
     quota = {
         ("short", "interj"): PER_BIN // 2,
@@ -351,7 +355,9 @@ def build() -> dict:
             by_img[stem][pk].append(s)
     slots = [pk for pk, n in quota.items() for _ in range(n)]
     nodes = [
-        (st, k) for k in range(PER_IMAGE) for st in sorted(by_img, key=lambda st: _key(st))
+        (st, k)
+        for k in range(PER_IMAGE)
+        for st in sorted(by_img, key=lambda st: _key(st))
     ]
     owner: dict = {}  # (stem, copy) → slot index
 
@@ -390,7 +396,9 @@ def build() -> dict:
                 "prompts": {
                     mode: {
                         "prompt": pr,
-                        "caption": compose_caption([pr.rstrip(".")], [text_clause([s])]),
+                        "caption": compose_caption(
+                            [pr.rstrip(".")], [text_clause([s])]
+                        ),
                         "en_caption": re.sub(
                             r"\bjapanese text\b", "english text", pr
                         ).rstrip(".")
@@ -417,17 +425,26 @@ def build() -> dict:
     }
     RULER.mkdir(parents=True, exist_ok=True)
     (RULER / "ruler.json").write_text(
-        json.dumps({"seed": SEED, "bins": BINS, "stats": stats, "items": items},
-                   ensure_ascii=False, indent=1),
+        json.dumps(
+            {"seed": SEED, "bins": BINS, "stats": stats, "items": items},
+            ensure_ascii=False,
+            indent=1,
+        ),
         encoding="utf-8",
     )
     with (RULER / "ruler.tsv").open("w", encoding="utf-8") as f:
         f.write("i\tbin\tkind\tlen\tcov3\ttext\tstem\n")
         for m in items:
-            f.write(f"{m['i']}\t{m['bin']}\t{m['kind']}\t{m['len']}\t{m['cov3']}\t{m['text']}\t{m['stem']}\n")
+            f.write(
+                f"{m['i']}\t{m['bin']}\t{m['kind']}\t{m['len']}\t{m['cov3']}\t{m['text']}\t{m['stem']}\n"
+            )
     print(json.dumps(stats, ensure_ascii=False, indent=1))
     if missing:
-        print(f"{len(missing)} strings without an EN line in {en_file}:", *missing, sep="\n  ")
+        print(
+            f"{len(missing)} strings without an EN line in {en_file}:",
+            *missing,
+            sep="\n  ",
+        )
     return stats
 
 
@@ -444,16 +461,39 @@ def arm_dirs() -> dict:
         "kana_up": OUT / "kana_up",
         "ball_rk_bubble": OUT / "ball_rk_bubble",
         "stick_nlg_high": OUT / "stick_nlg_high",
+        **PACK_ARMS.get(PACK, {}),
     }
 
 
 FLOOR = ("en", "retrain_kana", "seed_retrain_0930")  # rendered once (criteria.md)
+# ``--pack``: the base pack a render sits on (``reseed.config.PACKS``), its own
+# arms (a run with ``pack``); ``X@<pack>`` = arm X's rows on that pack (its
+# routing), rendered beside X's on the raw pack
+PACK = ""
+PACK_ARMS = {"punct": {"punct": OUT / "punct"}}
+
+
+def base_arm(a: str) -> str:
+    return a.split("@")[0]
+
+
 EN = "en"  # the EN references: no ext row in the caption, the delta off
 STEPS, CFG, SEED_RENDER = 28, 4.0, 0  # the reads of record's sampler
 
 
+# ``--marks``: only the strings holding a punct run's mark row (``〜`` / ``～`` /
+# ``~``, a dot run, ``♡♥``, ``、。，``) — the rest encode as on the floor
+MARKS_ONLY = False
+MARK_CHARS = set("～〜~…‥♡♥、。，")
+
+
+def has_mark(t: str) -> bool:
+    return any(c in MARK_CHARS for c in t) or "・・" in t or ".." in t
+
+
 def items() -> list:
-    return json.loads((RULER / "ruler.json").read_text(encoding="utf-8"))["items"]
+    its = json.loads((RULER / "ruler.json").read_text(encoding="utf-8"))["items"]
+    return [m for m in its if has_mark(m["text"])] if MARKS_ONLY else its
 
 
 MODE = MODES[0]  # the prompt set rendered / read (``--prompts``)
@@ -480,7 +520,11 @@ def gs_rkstick() -> dict:
 
     sets, _ = row_sets()
     up = load_trained(OUT / UP)["delta"]
-    return {"ext_ids": up["ext_ids"], "raw": sets["gs_rkstick"], "row_scale": up["row_scale"]}
+    return {
+        "ext_ids": up["ext_ids"],
+        "raw": sets["gs_rkstick"],
+        "row_scale": up["row_scale"],
+    }
 
 
 # arms built from other runs' rows, not trained: name → its delta state
@@ -496,16 +540,18 @@ def tables(names) -> tuple[list, dict]:
     from common.models import load_trained
 
     deltas = {a: load_trained(d)["delta"] for a, d in arm_dirs().items()}
-    for a in names:
+    for a in map(base_arm, names):
         if a in DERIVED:
             deltas[a] = DERIVED[a]()
     ids = sorted({int(e) for d in deltas.values() for e in d["ext_ids"]})
     pos = {e: i for i, e in enumerate(ids)}
     out = {}
     for a in names:
-        d = deltas[a]
+        d = deltas[base_arm(a)]
         t = torch.zeros(len(ids), d["raw"].shape[1])
-        t[[pos[int(e)] for e in d["ext_ids"]]] = d["raw"].float() * float(d["row_scale"])
+        t[[pos[int(e)] for e in d["ext_ids"]]] = d["raw"].float() * float(
+            d["row_scale"]
+        )
         out[a] = t
     return ids, out
 
@@ -563,9 +609,9 @@ def check(r: Renderer, table) -> float:
     from PIL import Image
 
     m = json.loads(
-        (arm_dirs()["retrain_kana"] / "native_r4_plain" / "native_reads.json").read_text(
-            "utf-8"
-        )
+        (
+            arm_dirs()["retrain_kana"] / "native_r4_plain" / "native_reads.json"
+        ).read_text("utf-8")
     )[0]
     ref = Image.open(m["file"])
     fn = RULER / "_tmp" / "check_rk.png"
@@ -574,7 +620,8 @@ def check(r: Renderer, table) -> float:
     r.render(fn, m["caption"], m["seed"], ref.size)
     d = float(
         np.abs(
-            np.asarray(Image.open(fn), np.float32) - np.asarray(ref.convert("RGB"), np.float32)
+            np.asarray(Image.open(fn), np.float32)
+            - np.asarray(ref.convert("RGB"), np.float32)
         ).mean()
     )
     print(f"check retrain_kana {Path(m['file']).name}: mean |Δpx| {d:.3f}", flush=True)
@@ -625,8 +672,13 @@ def candidates(reads: list, reader: str) -> list:
     out = [norm(r.get(reader) or "") for r in reads]
     if len(boxes) > 1:
         cx = lambda r: (r["box"][0] + r["box"][2]) / 2  # noqa: E731
-        for key in (lambda r: (-cx(r), r["box"][1]), lambda r: (r["box"][1], r["box"][0])):
-            out.append("".join(norm(r.get(reader) or "") for r in sorted(boxes, key=key)))
+        for key in (
+            lambda r: (-cx(r), r["box"][1]),
+            lambda r: (r["box"][1], r["box"][0]),
+        ):
+            out.append(
+                "".join(norm(r.get(reader) or "") for r in sorted(boxes, key=key))
+            )
     return [c for c in out if c]
 
 
@@ -704,8 +756,12 @@ def read_renders(names: list) -> dict:
         if todo:
             rd = rd or Readers("cuda")
             for m in todo:
-                got[str(m["i"])] = rd.read_image(load_bgr(render_file(a, m["i"])), whole=True)
-            f.write_text(json.dumps(got, ensure_ascii=False, indent=1), encoding="utf-8")
+                got[str(m["i"])] = rd.read_image(
+                    load_bgr(render_file(a, m["i"])), whole=True
+                )
+            f.write_text(
+                json.dumps(got, ensure_ascii=False, indent=1), encoding="utf-8"
+            )
             print(f"read {a}: {len(todo)}", flush=True)
         raw[a] = got
     del rd
@@ -732,7 +788,9 @@ def read_renders(names: list) -> dict:
                 "file": str(f),
                 **score_text(m["text"], reads),
                 "en_cos": float(F.cosine_similarity(fi.mean(0), fr.mean(0), dim=0)),
-                "en_tok_out": float(F.cosine_similarity(fi[keep], fr[keep], dim=1).mean()),
+                "en_tok_out": float(
+                    F.cosine_similarity(fi[keep], fr[keep], dim=1).mean()
+                ),
                 "fw_over_en": flat_white(str(f)) - flat_white(str(ref)),
                 "reads": reads,
             }
@@ -745,7 +803,9 @@ def sign_p(g: int, lo: int) -> float:
     n = g + lo
     if not n:
         return 1.0
-    return float(f"{min(1.0, 2 * sum(comb(n, k) for k in range(min(g, lo) + 1)) / 2**n):.2g}")
+    return float(
+        f"{min(1.0, 2 * sum(comb(n, k) for k in range(min(g, lo) + 1)) / 2**n):.2g}"
+    )
 
 
 def groups(recs_a: dict) -> dict:
@@ -763,7 +823,9 @@ def tally(recs: dict) -> dict:
         out[a] = {}
         for g, ks in groups(ra).items():
             c = {"n": len(ks)} | {k: sum(ra[i][k] for i in ks) for k in BOOL}
-            c |= {k: round(sum(ra[i][k] for i in ks) / max(1, len(ks)), 4) for k in REAL}
+            c |= {
+                k: round(sum(ra[i][k] for i in ks) / max(1, len(ks)), 4) for k in REAL
+            }
             out[a][g] = c
     return out
 
@@ -838,20 +900,31 @@ def read(names: list, label: str) -> Path:
             print(f"  {a:<18} {g:<13} {c}", flush=True)
     pairs = {}
     for a in names:
-        for b in FLOOR[1:]:
+        for b in [*FLOOR[1:], *(n for n in names if "@" in n)]:
             if a != b and b in recs:
                 pairs[f"{a} vs {b}"] = pr = paired(recs[a], recs[b])
                 print(f"  {a} vs {b}: {pr['all']}", flush=True)
-    run_dir = make_run_dir("cjk_anima_reseed", label=f"ruler-{MODE}-{label}", root=HOME / "results")
+    run_dir = make_run_dir(
+        "cjk_anima_reseed", label=f"ruler-{MODE}-{label}", root=HOME / "results"
+    )
     sheets(recs, run_dir / "sheets")
     (run_dir / "renders.json").write_text(
-        json.dumps({a: list(r.values()) for a, r in recs.items()}, ensure_ascii=False, indent=1),
+        json.dumps(
+            {a: list(r.values()) for a, r in recs.items()}, ensure_ascii=False, indent=1
+        ),
         encoding="utf-8",
     )
     write_result(
         run_dir,
         script=__file__,
-        args={"arms": names, "label": label, "prompts": MODE, "unseen": UNSEEN},
+        args={
+            "arms": names,
+            "label": label,
+            "prompts": MODE,
+            "unseen": UNSEEN,
+            "pack": PACK,
+            "marks_only": MARKS_ONLY,
+        },
         label=label,
         metrics={"tally": t, "paired": pairs},
         artifacts=[str(RULER)],
@@ -860,10 +933,13 @@ def read(names: list, label: str) -> Path:
     return run_dir
 
 
-def sample(run_dir: Path, n: int, seed: int, per: int = 4, thumb: int = 384) -> Path:
-    """``n`` random strings of a read (its ``renders.json``), ``per`` a sheet:
-    a row per string, EN ref | every arm read, larger than the read's sheets
-    → ``<run_dir>/random_s<seed>/``."""
+def sample(
+    run_dir: Path, n: int, seed: int, has: str = "", per: int = 4, thumb: int = 384
+) -> Path:
+    """``n`` random strings of a read (its ``renders.json``; ``has``: only
+    those holding one of these chars), ``per`` a sheet: a row per string, EN
+    ref | every arm read, larger than the read's sheets →
+    ``<run_dir>/random_s<seed>[_<has>]/``."""
     import random
 
     from PIL import Image
@@ -873,9 +949,15 @@ def sample(run_dir: Path, n: int, seed: int, per: int = 4, thumb: int = 384) -> 
     recs = json.loads((run_dir / "renders.json").read_text(encoding="utf-8"))
     names = list(recs)
     by = {a: {r["i"]: r for r in rs} for a, rs in recs.items()}
-    its = {m["i"]: m for m in items()}
+    its = {
+        m["i"]: m
+        for m in items()
+        if all(m["i"] in b for b in by.values())
+        and (not has or set(has) & set(m["text"]))
+    }
+    n = min(n, len(its))
     pick = sorted(random.Random(seed).sample(sorted(its), n))
-    out = run_dir / f"random_s{seed}"
+    out = run_dir / (f"random_s{seed}" + (f"_{has}" if has else ""))
     out.mkdir(parents=True, exist_ok=True)
     for k in range(0, n, per):
         rows = []
@@ -889,14 +971,24 @@ def sample(run_dir: Path, n: int, seed: int, per: int = 4, thumb: int = 384) -> 
             )
             for a in names:
                 r = by[a][i]
-                mark = "✓" if r["exact"] else "≤1" if r["le1"] else "≤2" if r["le2"] else ""
+                mark = (
+                    "✓"
+                    if r["exact"]
+                    else "≤1"
+                    if r["le1"]
+                    else "≤2"
+                    if r["le2"]
+                    else ""
+                )
                 rows.append(
                     (
                         Image.open(r["file"]).convert("RGB"),
                         [f"{a} {mark}", r["best"][:24], f"cer {r['cer']:.2f}"],
                     )
                 )
-        contact_sheet(rows, out / f"random_{k // per}.png", thumb=thumb, cols=1 + len(names))
+        contact_sheet(
+            rows, out / f"random_{k // per}.png", thumb=thumb, cols=1 + len(names)
+        )
     print(f"{n} strings {pick} → {out}", flush=True)
     return out
 
@@ -911,25 +1003,40 @@ def main():
     )
     p.add_argument("--label", default="floor")
     p.add_argument("--prompts", choices=MODES, default=MODES[0])
+    p.add_argument("--pack", default="", help="render on this base pack (reseed PACKS)")
+    p.add_argument(
+        "--marks", action="store_true", help="only the strings holding a mark"
+    )
     p.add_argument("--from", dest="src", help="sample: a read's results dir")
     p.add_argument("--n", type=int, default=12, help="sample: strings drawn")
     p.add_argument("--seed", type=int, default=0, help="sample: the draw's seed")
+    p.add_argument(
+        "--has", default="", help="sample: only strings holding one of these chars"
+    )
     a = p.parse_args()
     if a.verb == "build":
         build()
         return
     if a.verb == "sample":
         bootstrap()
-        sample(Path(a.src), a.n, a.seed)
+        sample(Path(a.src), a.n, a.seed, a.has)
         return
+    global MODE, PACK, MARKS_ONLY
+    MODE, PACK, MARKS_ONLY = a.prompts, a.pack, a.marks
+    if PACK:
+        from reseed.config import PACKS
+
+        os.environ["ANIMA_VOCAB_PACK"] = PACKS[PACK]
     bootstrap()
     os.environ["ANIMA_VOCAB_GLYPH_ROUTE"] = "1"  # the runs trained routed, read routed
-    global MODE
-    MODE = a.prompts
     names = [x for x in a.arms.split(",") if x]
-    known = {EN, *arm_dirs(), *DERIVED}
+    plain = {EN, *arm_dirs(), *DERIVED}
+    known = plain | ({f"{x}@{PACK}" for x in plain - {EN}} if PACK else set())
     assert set(names) <= known, f"unknown arms {set(names) - known}"
     if a.verb in ("render", "run"):
+        # on a pack, render only its own arms: the raw pack's are on disk
+        bad = [x for x in names if PACK and "@" not in x and x not in PACK_ARMS[PACK]]
+        assert not bad, f"--pack {PACK} renders X@{PACK} or its own arms, not {bad}"
         render(names)
     if a.verb in ("read", "run"):
         # the floor arms always ride along: every read pairs against them

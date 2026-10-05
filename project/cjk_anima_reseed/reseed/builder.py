@@ -111,6 +111,7 @@ def build(run: Run, workers: int | None = None, frac: float = 1.0) -> Path:
         "n_rows": len(pools.singles),
         "seed": T.SEED,
         "seed_rows": str(run.seed_rows()),
+        "pack": os.environ.get("ANIMA_VOCAB_PACK", ""),
         "frac": frac,
         "glyph_route": True,  # the windows: train.py routes the captions per glyph
         "windows": win,

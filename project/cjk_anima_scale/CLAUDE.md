@@ -56,7 +56,7 @@ nothing here imports, paths into or configures from `../finished/cjk_renderable_
   reads of record — never clean them up; the only edits are path plumbing
   (`common/paths.py` `OUT` + `data_dir` / `arm_dir` = `--data_path` /
   `--arm_path`, no tag fallback; `common/prompts.py` `TARGET_PROMPTS`), `data/inventory.py`'s opt-in
-  `qwen_pieces(char_rows=True)` (byte-split glyphs → their `char` rows; every
+  `qwen_pieces(char_rows=True)` (byte-split glyphs → their `char` rows, and the symbol block's Qwen rows (`sym`, 10-05); every
   `cjk_scale` lookup passes it, the records ran without it),
   `common/render/scene.py`'s opt-in `render_into_scene(tategaki=True)`
   (columns top-aligned; a turned ー 〜 … placed by its ink on the column

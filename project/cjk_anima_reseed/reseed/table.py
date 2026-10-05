@@ -57,6 +57,20 @@ SENT_FILL = (0.65, 0.9)  # the share of the region the block's fit takes (0.5 le
 SENT_MIN_LETTERS = 6  # kana + kanji (the scale line's sentence floor)
 SENT_FRAMES_OUT = {"sign"}  # dialogue goes in bubbles, not on a held sign
 
+# mark rows (user, 10-05): their windows hold the seed's trained letters
+# (seed_retrain_0930 = preview4's bake); a heart is synthesised into dialogue
+# lines (Manga109 letters none) — at the end of a line, or at a phrase break
+# inside it (a ！？ / after 〜～…) at HEART_MID, doubled at HEART_DOUBLE
+MARK_CONTEXT = (
+    "models/vocab_packs/anima_cjk_vocab_pack_preview4/"
+    "anima_cjk_vocab_pack_preview4_trained.json"
+)
+HEARTS = "♡♥"
+MARK_NOT_LONE = "、。"  # never alone in a bubble
+HEART_LINES = 4000
+HEART_MID = 0.3
+HEART_DOUBLE = 0.2
+
 GRIDS = "2x2:1,3x3:1,2x3:1,3x2:1"
 LONE = "1x1:1"
 BUBBLE_FIT = (1.15, 1.7)  # a cell's bubble: its inscribed rectangle × the ink

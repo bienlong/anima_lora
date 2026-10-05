@@ -44,6 +44,7 @@ def main():
     from reseed.config import load
 
     run = load(a.run)
+    run.use_pack()
     if a.verb == "data":
         assert not (run.stick_from or run.data_from), (
             f"{run.name}: trains on {run.data}"

@@ -36,7 +36,7 @@ from types import SimpleNamespace
 import torch
 
 from .config import RunConfig
-from .paths import RAW_PACK_SHA, data_dir, run_dir
+from .paths import PUNCT_PACK_SHA, RAW_PACK_SHA, data_dir, run_dir
 from .rows import Rows
 
 # The trainer is fixed (plan.md § 2); a different trainer is a code change with
@@ -360,16 +360,18 @@ def train(
     assert attached_pack_rows(anima), "no vocab pack attached to the DiT"
     tok, _ = ensure_text_strategies(checkpoints().text_encoder, vocab_pack=None)
     pack = strategy_pack(tok)
-    # the rows and ids must be the raw pack's; its encode fold (plan_retrain
-    # § 2c) is an encode rule on top, outside this check
+    # the rows and ids must be the raw pack's (or the punct pack's: the raw
+    # pack's plus an appended row); its encode fold (plan_retrain § 2c) is an
+    # encode rule on top, outside this check
     raw_sha = (
         pack_digest(pack.table, {k: v for k, v in pack.mapping.items() if k != "fold"})
         if pack is not None
         else ""
     )
-    assert raw_sha.startswith(RAW_PACK_SHA), (
+    assert raw_sha.startswith((RAW_PACK_SHA, PUNCT_PACK_SHA)), (
         f"attached pack {getattr(pack, 'name', None)} (sha without fold "
-        f"{raw_sha[:12]}…) is not the raw pack ({RAW_PACK_SHA}…): "
+        f"{raw_sha[:12]}…) is not the raw pack ({RAW_PACK_SHA}…) or the punct "
+        f"pack ({PUNCT_PACK_SHA}…): "
         "rows are deltas over it and cold rows start at it — "
         "ANIMA_VOCAB_PACK=models/vocab_packs/anima_cjk_vocab_pack"
     )

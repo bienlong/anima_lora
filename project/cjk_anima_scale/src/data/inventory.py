@@ -99,6 +99,9 @@ def qwen_pieces(char_rows: bool = False):
     pack = VocabPack.load(resolve_pack_prefix(ck.vocab_pack))
     q = {int(k): int(v) for k, v in pack.mapping["qwen"].items()}
     if char_rows:
+        # the symbol block's Qwen rows too (``♡``, the punct pack's ``…``), as
+        # ``HybridT5Encoder`` merges them at encode
+        q.update({int(k): int(v) for k, v in (pack.mapping.get("sym") or {}).items()})
         q = GlyphRows(q)
         q.char = {
             c: int(r)

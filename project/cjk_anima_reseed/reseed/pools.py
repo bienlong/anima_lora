@@ -30,6 +30,13 @@ class Pools:
     windows: dict = field(default_factory=dict)  # glyph → its windows
     windows_len: dict = field(default_factory=dict)  # glyph → length → its windows
     sentences: dict = field(default_factory=dict)  # cells → dialogue lines
+    # with mark rows: mark → cells → the lines holding it (``sent`` draws the
+    # mark first, as bubbleN its glyph: 、。 sit in most lines)
+    sent_marks: dict = field(default_factory=dict)
+    # the rows drawn alone (bubble1 / grid): a row whose lone quoted spelling
+    # encodes to it (``…`` alone is T5's ``...``); ``None`` = every single
+    lone: list | None = None
+    synth: list = field(default_factory=list)  # synthesised dialogue lines (hearts)
     used: Counter = field(default_factory=Counter)  # scene → items drawn on it
     tier_used: Counter = field(
         default_factory=Counter
@@ -279,6 +286,113 @@ def window_pool(glyphs: set, lines, held=(), length: tuple = WINDOW_LEN) -> list
     return sorted(out)
 
 
+# a mark row trains inside words (user, 10-05: the green leaf was `〜` trained
+# lone in grid cells); `・` stays lone (the punct pack writes a lone one `.`)
+MARK_LONE_ONLY = set("・")
+
+
+def mark_singles(singles) -> list:
+    """The run's rows that are not letters, less ``MARK_LONE_ONLY``."""
+    letters = window_glyphs(singles)
+    return [g for g in singles if g not in letters and g not in MARK_LONE_ONLY]
+
+
+def context_letters() -> set:
+    """The letters a mark window may hold around its mark: seed_retrain_0930's
+    trained singles (kana, kanji, 々 — ``table.MARK_CONTEXT``), frozen at the
+    seed while the marks train."""
+    from library.env import resolve_under_home
+
+    t = json.loads(resolve_under_home(T.MARK_CONTEXT).read_text("utf-8"))
+    chars = "".join(t[k] for k in ("hiragana", "katakana", "kanji", "marks"))
+    return window_glyphs(chars)
+
+
+def held_grams(read: tuple) -> tuple:
+    """``(trigrams of the read strings, 5-grams of the dialogue ruler's)``: no
+    window or line holds one."""
+    from . import OUT
+
+    grams = set()
+    for h in read:
+        n = min(3, len(h))
+        grams |= {h[i : i + n] for i in range(len(h) - n + 1)}
+    ruler_file = OUT / "ruler" / "ruler.json"
+    ruler = (
+        [r["text"] for r in json.loads(ruler_file.read_text("utf-8"))["items"]]
+        if ruler_file.exists()
+        else []
+    )
+    return grams, {r[i : i + 5] for r in ruler for i in range(len(r) - 4)}
+
+
+def heart_lines(lines: list, hearts: str, rng: random.Random, n: int) -> list:
+    """``n`` dialogue lines with a heart (Manga109 letters none): at the end in
+    place of the line's closing ``！？。`` (``すき♡``), or at a phrase break inside
+    it at ``HEART_MID`` — in place of a ``！？`` (``あっ！だめ`` → ``あっ♡だめ``) or
+    after a ``〜～…`` (``あ〜♡``) — never inside a word; doubled at
+    ``HEART_DOUBLE``."""
+    out = []
+    for ln in rng.sample(lines, min(n, len(lines))):
+        core = ln.rstrip("！!？?。")
+        if len(core) < 2:
+            continue
+        h = rng.choice(hearts) * (2 if rng.random() < T.HEART_DOUBLE else 1)
+        bang = [(i, i + 1) for i, c in enumerate(core) if c in "！!？?"]
+        after = [(i + 1, i + 1) for i, c in enumerate(core[:-1]) if c in "〜～…"]
+        after = [(i, j) for i, j in after if core[i] not in "〜～…"]
+        mid = bang + after
+        if mid and rng.random() < T.HEART_MID:
+            i, j = rng.choice(mid)
+            out.append(core[:i] + h + core[j:])
+        else:
+            out.append(core + h)
+    return out
+
+
+def mark_window_pool(
+    letters: set, forms: dict, lines, held: tuple, length: tuple = WINDOW_LEN
+) -> list:
+    """Every substring of ``lines`` of ``length`` chars made of ``letters`` and
+    mark spellings (``forms``) holding at least one of each: letters not
+    repeated, no char three times running (``〜〜`` / ``……`` / ``♡♡`` stay),
+    none opening on ``scene.NO_HEAD`` or a small kana, none holding a
+    ``held_grams`` gram."""
+    from common.render.scene import NO_HEAD, V_SMALL
+
+    # a spelling opens no window its mark may not (`~` as `～`)
+    no_head = NO_HEAD | V_SMALL | {c for c, m in forms.items() if m in NO_HEAD}
+    grams, r5 = held
+    ok = letters | set(forms)
+    lo, hi = length
+    out = set()
+    for ln in lines:
+        run = ""
+        for c in ln + "\n":
+            if c in ok:
+                run += c
+                continue
+            for i in range(len(run)):
+                if run[i] in no_head:
+                    continue
+                for n in range(lo, hi + 1):
+                    w = run[i : i + n]
+                    if len(w) < n:
+                        break
+                    ls = [c for c in w if c in letters]
+                    if (
+                        ls
+                        and len(ls) < n
+                        and len(set(ls)) == len(ls)
+                        and not re.search(r"(.)\1\1", w)
+                        and not any(g in w for g in grams)
+                        and not any(w[k : k + 5] in r5 for k in range(n - 4))
+                    ):
+                        out.add(w)
+            run = ""
+    return sorted(out)
+
+
 def ext_encoder():
     """``ext(route, text)``: the ext rows the pack's encoder gives ``text``
     in a caption clause, routed per glyph or not."""
@@ -310,6 +424,19 @@ def ext_encoder():
             i - T5_TABLE_SIZE for i, m in zip(ids, mask) if m and i >= T5_TABLE_SIZE
         ]
 
+    rows: dict = {}
+
+    def glyph_row(c: str) -> int | None:
+        """The one row ``c`` takes inside a word, routed (between two あ: a
+        dot run rewrites only beside a routed char); ``None`` if not one."""
+        if c not in rows:
+            a = ext(True, "あ")
+            got = ext(True, f"あ{c}あ")
+            ok = len(a) == 1 and len(got) == 3 and got[0] == got[2] == a[0]
+            rows[c] = got[1] if ok else None
+        return rows[c]
+
+    ext.glyph_row = glyph_row
     return ext
 
 
@@ -335,6 +462,14 @@ def add_windows(pools: Pools, read: tuple, out: Path) -> dict:
         ids[c] = a[0]
     ok = [w for w in ws if ext(True, w) == [ids[c] for c in w]]
     pools.windows = {g: v for g in sorted(glyphs) if (v := [w for w in ok if g in w])}
+    marks = mark_singles(pools.singles)
+    pools.lone = [
+        g
+        for g in pools.singles
+        if g not in marks
+        or (g not in T.MARK_NOT_LONE and ext(True, g) == [ext.glyph_row(g)])
+    ]
+    mstats = add_mark_windows(pools, marks, lines + ds, read, ext) if marks else None
     pools.windows_len = {
         g: {k: [w for w in v if len(w) == k] for k in sorted({len(w) for w in v})}
         for g, v in pools.windows.items()
@@ -351,7 +486,9 @@ def add_windows(pools: Pools, read: tuple, out: Path) -> dict:
         "per_glyph_min": n[0] if n else 0,
         "per_glyph_median": n[len(n) // 2] if n else 0,
         "by_length": dict(sorted(Counter(map(len, ok)).items())),
+        **({"marks": mstats} if mstats else {}),
     }
+    ok += sorted({w for m in marks for w in pools.windows.get(m, ())})
     (out / "windows.json").write_text(
         json.dumps(ok, ensure_ascii=False, indent=0), encoding="utf-8"
     )
@@ -365,6 +502,51 @@ def add_windows(pools: Pools, read: tuple, out: Path) -> dict:
     return stats
 
 
+def add_mark_windows(pools: Pools, marks: list, lines: list, read: tuple, ext) -> dict:
+    """``pools.windows`` / ``windows_len`` for the mark rows: windows of the
+    dialogue lines (ellipses normalised), the training set's text and
+    ``HEART_LINES`` synthesised heart lines (``pools.synth``, when a heart is a
+    row) around the seed's letters (``context_letters``), each window routed
+    to its chars' rows and nothing else. A mark's spellings are the chars
+    whose in-word row is its row (``〜`` and ``～`` for ``～``)."""
+    rng = random.Random(T.SEED + 61)
+    norm = [t for ln in lines if (t := norm_ellipsis(ln))]
+    hearts = "".join(m for m in marks if m in T.HEARTS)
+    pools.synth = heart_lines(norm, hearts, rng, T.HEART_LINES) if hearts else []
+    letters = {c for c in context_letters() if ext.glyph_row(c) is not None}
+    by_row = {ext.glyph_row(m): m for m in marks}
+    assert None not in by_row and len(by_row) == len(marks), by_row
+    cands = {c for ln in norm + pools.synth for c in ln if c not in letters}
+    forms = {c: by_row[r] for c in sorted(cands) if (r := ext.glyph_row(c)) in by_row}
+    forms.update({m: m for m in marks})
+    ws = mark_window_pool(letters, forms, norm + pools.synth, held_grams(read))
+    ok = [w for w in ws if ext(True, w) == [ext.glyph_row(c) for c in w]]
+    for m in marks:
+        v = [w for w in ok if any(forms.get(c) == m for c in w)]
+        assert v, f"no window holds the mark {m}"
+        pools.windows[m] = v
+        pools.windows_len[m] = {
+            k: [w for w in v if len(w) == k] for k in sorted({len(w) for w in v})
+        }
+    stats = {
+        "forms": forms,
+        "letters": len(letters),
+        "synth_lines": len(pools.synth),
+        "n": len(ok),
+        "dropped_by_encoding": len(ws) - len(ok),
+        "per_mark": {m: len(pools.windows[m]) for m in marks},
+        "lone": [m for m in marks if m in pools.lone],
+    }
+    print(
+        f"mark windows: {len(ok)} ({stats['dropped_by_encoding']} dropped by the "
+        f"encoding check) on {len(letters)} context letters, per mark "
+        f"{stats['per_mark']}; {len(pools.synth)} heart lines; spellings "
+        f"{''.join(forms)}; drawn alone {''.join(stats['lone']) or '-'}",
+        flush=True,
+    )
+    return stats
+
+
 # ----------------------------------------------------------------------------
 # the dialogue lines (``sent``)
 
@@ -372,8 +554,8 @@ def add_windows(pools: Pools, read: tuple, out: Path) -> dict:
 # Manga109 spells it ・・ / ･･･ / ・・・・・・, the page draws the leader)
 _DOT_RUN = re.compile("[・･.．‥…]+")
 _DOTS = {"‥": 2, "…": 3}
-# what a line may hold off the pack's rows: the leader (T5's `...`) and the
-# marks the pack's fold sends to T5's ! / ?
+# what a line may hold off the pack's rows: the leader (T5's `...` on the raw
+# pack; its own row on the punct pack) and the marks the fold sends to T5's ! / ?
 SENT_BASE = set("…！？!?")
 
 
@@ -416,65 +598,64 @@ def sentence_ok(s: str, lengths: tuple) -> str | None:
 def add_sentences(pools: Pools, read: tuple, lengths: tuple, out: Path) -> dict:
     """``pools.sentences`` (cells → lines): the dialogue lines with their
     ellipses normalised, every char routed to its own single row (per glyph,
-    as the windows are) or one of ``SENT_BASE``; held out: a ``read`` string
-    by trigram (``window_pool``'s rule) and the dialogue ruler's 5+ glyph
-    strings by 5-gram. Writes ``sentences.json``; returns the stats."""
+    as the windows are) or one of ``SENT_BASE`` with none; held out: a
+    ``read`` string by trigram (``window_pool``'s rule) and the dialogue
+    ruler's 5+ glyph strings by 5-gram. With mark rows (``mark_singles``), the
+    synthesised heart lines (``pools.synth``) join and a line must hold a mark. Writes
+    ``sentences.json``; returns the stats."""
     from cjk_scale.config import phrase_file
-
-    from . import OUT
 
     lines = [
         ln.split("\t")[0].strip()
         for ln in Path(phrase_file()).read_text(encoding="utf-8").splitlines()
-    ]
-    grams = set()
-    for h in read:
-        n = min(3, len(h))
-        grams |= {h[i : i + n] for i in range(len(h) - n + 1)}
-    ruler_file = OUT / "ruler" / "ruler.json"
-    ruler = (
-        [r["text"] for r in json.loads(ruler_file.read_text("utf-8"))["items"]]
-        if ruler_file.exists()
-        else []
-    )
-    r5 = {r[i : i + 5] for r in ruler for i in range(len(r) - 4)}
+    ] + pools.synth
+    grams, r5 = held_grams(read)
     ext = ext_encoder()
-    single: dict = {}
-
-    def rows_of(c: str):
-        if c not in single:
-            single[c] = ext(True, c)
-        return single[c]
+    mark_of = {ext.glyph_row(m): m for m in mark_singles(pools.singles)}
+    mark_rows = set(mark_of)
 
     drop, keep = Counter(), set()
     for t in dict.fromkeys(lines):
         s = norm_ellipsis(t)
         why = "dot" if s is None else sentence_ok(s, lengths)
         if why is None:
-            ids = [rows_of(c) for c in s]
-            if any((c in SENT_BASE) != (not i) or len(i) > 1 for c, i in zip(s, ids)):
+            ids = [ext.glyph_row(c) for c in s]
+            if any(i is None and c not in SENT_BASE for c, i in zip(s, ids)):
                 why = "char"
+            elif mark_rows and not mark_rows & set(ids):
+                why = "no_mark"
             elif any(g in s for g in grams):
                 why = "read"
             elif any(s[i : i + 5] in r5 for i in range(len(s) - 4)):
                 why = "ruler"
-            elif ext(True, s) != [x for i in ids for x in i]:
+            elif ext(True, s) != [i for i in ids if i is not None]:
                 why = "route"
         if why is None:
             keep.add(s)
         else:
             drop[why] += 1
-    pools.sentences = {}
+    pools.sentences, pools.sent_marks = {}, {}
     for s in sorted(keep):
         pools.sentences.setdefault(len(s), []).append(s)
+        for m in sorted({mark_of[i] for c in s if (i := ext.glyph_row(c)) in mark_of}):
+            pools.sent_marks.setdefault(m, {}).setdefault(len(s), []).append(s)
     stats = {
         "lengths": list(lengths),
         "lines": len(lines),
         "n": len(keep),
         "by_length": {n: len(v) for n, v in sorted(pools.sentences.items())},
         "ellipsis": sum("…" in s for s in keep),
+        **(
+            {
+                "per_mark": {
+                    m: sum(map(len, v.values())) for m, v in pools.sent_marks.items()
+                }
+            }
+            if pools.sent_marks
+            else {}
+        ),
         "dropped": dict(drop),
-        "ruler_strings": len(ruler),
+        "ruler_5grams": len(r5),
     }
     (out / "sentences.json").write_text(
         json.dumps(sorted(keep), ensure_ascii=False, indent=0), encoding="utf-8"
