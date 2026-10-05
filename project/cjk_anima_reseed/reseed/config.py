@@ -35,6 +35,15 @@
                                   # without it)
     pack = "punct"                # optional: the base pack (``PACKS``) instead of the raw
                                   # pack — its routing at build, train and read
+    lines = "m109_pack"           # optional: the dialogue line file (``LINES``) the windows
+                                  # and ``sent`` lines draw from, instead of the scale
+                                  # line's ``PHRASE_FILE`` (dialogue_2_10)
+    free_residual = 0.0           # optional: the trainer's norm pull μ‖f‖² (``cjk_scale.train
+                                  # .FREE_RESIDUAL`` without it); 0 off — under AdamW it
+                                  # walks a rare warm row to the pack row (``sent_kanji``)
+    row_lr = [0.12, 1.0]          # optional: one factor per ``rows`` spec on its rows'
+                                  # step (``cjk_scale.train(row_step_scale=)``: AdamW's
+                                  # update scaled, a per-row lr); ``chars:`` specs only
 
 Its outputs land in ``output/cjk_anima_reseed/<run>/`` (``data/``,
 ``trained.pt``).
@@ -65,10 +74,17 @@ KEYS = (
     "data_from",
     "pack",
     "lr",
+    "lines",
+    "row_lr",
+    "free_residual",
 )
 # the base packs a run may sit on (``punct_pack.py``): the raw pack's rows and
 # ids plus encode rules / appended rows, so the seed rows ride on it unchanged
 PACKS = {"punct": "models/vocab_packs/anima_cjk_vocab_pack_punct"}
+# the dialogue line files a run may draw from (``~/manga109s/derived/make_*.py``):
+# ``m109_pack`` = every Manga109-s text on the pack's rows (10-05; dialogue_2_10
+# holds the old cjk_renderable charset — no 応 / 転 / 壊)
+LINES = {"m109_pack": "$MANGA109S/derived/dialogue_pack.tsv"}
 UPPER_MAX = 0.9  # tests/test_boundary.py: no band past it
 
 
@@ -92,6 +108,35 @@ class Run:
     data_from: str = ""  # a ball / plain warm run: this data dir
     pack: str = ""  # the base pack (``PACKS``); "" = the raw pack
     lr: float = 0.0  # the rows' peak lr; 0 = cjk_scale.train.LR
+    lines: str = ""  # the dialogue line file (``LINES``); "" = the scale line's
+    row_lr: tuple = ()  # one step factor per ``rows`` spec; () = all 1
+    free_residual: float | None = None  # the norm pull; None = the trainer's
+
+    def phrase_file(self) -> str:
+        """The dialogue line file: ``LINES[lines]``, else the scale line's
+        ``phrase_file()``."""
+        from cjk_scale.config import phrase_file
+
+        if not self.lines:
+            return phrase_file()
+        import os
+
+        from library.env import load_dotenv
+
+        load_dotenv()
+        p = os.path.expanduser(os.path.expandvars(LINES[self.lines]))
+        assert "$" not in p and Path(p).is_file(), f"{self.lines}: no line file {p}"
+        return p
+
+    def row_step_scale(self) -> dict | None:
+        """``{glyph: factor}`` for the rows ``row_lr`` scales (factor ≠ 1)."""
+        out = {
+            g: float(f)
+            for spec, f in zip(self.rows, self.row_lr)
+            if f != 1
+            for g in spec.split(":", 1)[1]
+        }
+        return out or None
 
     def use_pack(self) -> None:
         """Name the run's base pack (``ANIMA_VOCAB_PACK``) before anything
@@ -214,6 +259,17 @@ def load(run: str) -> Run:
     assert 0 <= lr < 1e-2, f"{path}: lr {lr}"
     pack = raw.get("pack", "")
     assert not pack or pack in PACKS, f"{path}: pack is one of {sorted(PACKS)}"
+    lines = raw.get("lines", "")
+    assert not lines or lines in LINES, f"{path}: lines is one of {sorted(LINES)}"
+    fr = raw.get("free_residual")
+    assert fr is None or 0 <= float(fr) < 1, f"{path}: free_residual {fr}"
+    row_lr = tuple(float(f) for f in raw.get("row_lr", ()))
+    if row_lr:
+        assert len(row_lr) == len(raw["rows"]), f"{path}: row_lr is one per rows spec"
+        assert all(0 < f <= 1 for f in row_lr), f"{path}: row_lr in (0, 1]"
+        assert all(r.startswith("chars:") for r in raw["rows"]), (
+            f"{path}: row_lr scales chars: specs only"
+        )
     return Run(
         name=path.stem,
         path=path,
@@ -233,4 +289,7 @@ def load(run: str) -> Run:
         data_from=data_from,
         pack=pack,
         lr=lr,
+        lines=lines,
+        row_lr=row_lr,
+        free_residual=None if fr is None else float(fr),
     )

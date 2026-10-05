@@ -57,7 +57,8 @@ def build(run: Run, workers: int | None = None, frac: float = 1.0) -> Path:
     workers = default_workers() if workers is None else max(1, int(workers))
     rng = random.Random(T.SEED)
     pools = build_pools(list(run.rows), rng)
-    win = add_windows(pools, run.read, out)
+    phrase = run.phrase_file()
+    win = add_windows(pools, run.read, out, phrase)
     table = run.table()
     plan = [
         (t, int(round(T.ITEMS_PER_ROW * len(pools.singles) * t.share * frac)))
@@ -67,7 +68,11 @@ def build(run: Run, workers: int | None = None, frac: float = 1.0) -> Path:
     sent = [t.params["lengths"] for t, _n in plan if t.recipe == "sent"]
     sents = (
         add_sentences(
-            pools, run.read, (min(a for a, _ in sent), max(b for _, b in sent)), out
+            pools,
+            run.read,
+            (min(a for a, _ in sent), max(b for _, b in sent)),
+            out,
+            phrase,
         )
         if sent
         else None
@@ -113,7 +118,8 @@ def build(run: Run, workers: int | None = None, frac: float = 1.0) -> Path:
         "seed_rows": str(run.seed_rows()),
         "pack": os.environ.get("ANIMA_VOCAB_PACK", ""),
         "frac": frac,
-        "glyph_route": True,  # the windows: train.py routes the captions per glyph
+        "glyph_route": True,
+        "lines": phrase,  # the windows: train.py routes the captions per glyph
         "windows": win,
         **({"sentences": sents} if sents else {}),
         "scenes": {

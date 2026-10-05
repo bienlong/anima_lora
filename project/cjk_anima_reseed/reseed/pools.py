@@ -440,17 +440,17 @@ def ext_encoder():
     return ext
 
 
-def add_windows(pools: Pools, read: tuple, out: Path) -> dict:
-    """``pools.windows`` (glyph → its windows) over the dialogue lines and
+def add_windows(pools: Pools, read: tuple, out: Path, phrase: str) -> dict:
+    """``pools.windows`` (glyph → its windows) over the dialogue lines (``phrase``) and
     the training set's own JA text, the read strings held out by trigram,
     every window routed to its glyphs' rows and nothing else (else dropped).
     Writes ``windows.json``; returns the stats for ``build.json``."""
-    from cjk_scale.config import dataset_ja_lines, phrase_file
+    from cjk_scale.config import dataset_ja_lines
 
     glyphs = window_glyphs(pools.singles)
     lines = [
         ln.split("\t")[0]
-        for ln in Path(phrase_file()).read_text(encoding="utf-8").splitlines()
+        for ln in Path(phrase).read_text(encoding="utf-8").splitlines()
     ]
     ds = dataset_ja_lines()
     ws = window_pool(glyphs, lines + ds, read)
@@ -595,19 +595,19 @@ def sentence_ok(s: str, lengths: tuple) -> str | None:
     return None
 
 
-def add_sentences(pools: Pools, read: tuple, lengths: tuple, out: Path) -> dict:
-    """``pools.sentences`` (cells → lines): the dialogue lines with their
+def add_sentences(
+    pools: Pools, read: tuple, lengths: tuple, out: Path, phrase: str
+) -> dict:
+    """``pools.sentences`` (cells → lines): the dialogue lines (``phrase``) with their
     ellipses normalised, every char routed to its own single row (per glyph,
     as the windows are) or one of ``SENT_BASE`` with none; held out: a
     ``read`` string by trigram (``window_pool``'s rule) and the dialogue
     ruler's 5+ glyph strings by 5-gram. With mark rows (``mark_singles``), the
     synthesised heart lines (``pools.synth``) join and a line must hold a mark. Writes
     ``sentences.json``; returns the stats."""
-    from cjk_scale.config import phrase_file
-
     lines = [
         ln.split("\t")[0].strip()
-        for ln in Path(phrase_file()).read_text(encoding="utf-8").splitlines()
+        for ln in Path(phrase).read_text(encoding="utf-8").splitlines()
     ] + pools.synth
     grams, r5 = held_grams(read)
     ext = ext_encoder()

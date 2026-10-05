@@ -248,6 +248,7 @@ def train(
     tag_drop: tuple | None = None,
     ball_on: Path | None = None,
     lr: float | None = None,
+    free_residual: float | None = None,
 ) -> Path:
     """Train the run. ``data`` / ``out`` default to the run's dirs;
     ``max_steps`` stops the loop early with the full-length schedule
@@ -278,7 +279,11 @@ def train(
     rows less their mean train (a gradient hook does not hold it: AdamW's
     per-element scaling un-centres a centred gradient); with ``cold=False``
     (``context`` = the same file) the rows start warm at that file's rows and
-    the same mean is held; ``lr`` replaces ``LR`` (the rows' peak lr).
+    the same mean is held; ``lr`` replaces ``LR`` (the rows' peak lr);
+    ``free_residual`` replaces ``FREE_RESIDUAL`` (0: no norm pull — under
+    AdamW the pull alone steps a row absent from the batch by ~lr toward 0,
+    so a warm run's rare rows go back to the pack row, ``cjk_anima_reseed``
+    ``sent_kanji``).
     ``scale.py`` passes none of them.
     A data dir built with windows (``build.json`` ``glyph_route``) is
     trained routed: ``ANIMA_VOCAB_GLYPH_ROUTE=1`` is set in-process before
@@ -387,6 +392,8 @@ def train(
         p.record["cold"] = True
     if row_cap is not None:
         p.record["row_cap"] = float(row_cap)
+    if free_residual is not None:
+        p.record.update(free_residual=float(free_residual), free_residual_override=True)
     rows = Rows(
         anima,
         device,
@@ -394,7 +401,7 @@ def train(
         pack,
         warm=None if cold else ctx,
         init_anchor=INIT_ANCHOR,
-        free_residual=FREE_RESIDUAL,
+        free_residual=FREE_RESIDUAL if free_residual is None else free_residual,
         lr=lr,
         touched=p.touched,
         frozen=p.frozen,

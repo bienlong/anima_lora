@@ -71,6 +71,8 @@ def main():
             tag_drop=run.tag_drop,
             ball_on=run.seed_rows() if run.ball_on else None,
             lr=run.lr or None,
+            row_step_scale=run.row_step_scale(),
+            free_residual=run.free_residual,
         )
 
 

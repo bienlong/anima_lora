@@ -480,6 +480,8 @@ PACK_ARMS = {
         "sent_ball_lr2": OUT / "sent_ball_lr2",
         "sent_whole": OUT / "sent_whole",
         "sent_stick": OUT / "sent_stick",
+        "sent_kanji": OUT / "sent_kanji",
+        "sent_kanji_f0": OUT / "sent_kanji_f0",
     }
 }
 
@@ -495,6 +497,7 @@ STEPS, CFG, SEED_RENDER = 28, 4.0, 0  # the reads of record's sampler
 # ``--marks``: only the strings holding a punct run's mark row (``〜`` / ``～`` /
 # ``~``, a dot run, ``♡♥``, ``、。，``) — the rest encode as on the floor
 MARKS_ONLY = False
+ONLY: set = set()  # ``--only``: these ruler indices only (a look, not a read)
 MARK_CHARS = set("～〜~…‥♡♥、。，")
 
 
@@ -504,6 +507,8 @@ def has_mark(t: str) -> bool:
 
 def items() -> list:
     its = json.loads((RULER / "ruler.json").read_text(encoding="utf-8"))["items"]
+    if ONLY:
+        its = [m for m in its if m["i"] in ONLY]
     return [m for m in its if has_mark(m["text"])] if MARKS_ONLY else its
 
 
@@ -1095,6 +1100,9 @@ def main():
     p.add_argument(
         "--marks", action="store_true", help="only the strings holding a mark"
     )
+    p.add_argument(
+        "--only", default="", help="render: these ruler indices only (comma list)"
+    )
     p.add_argument("--from", dest="src", help="sample: a read's results dir")
     p.add_argument("--n", type=int, default=12, help="sample: strings drawn")
     p.add_argument("--seed", type=int, default=0, help="sample: the draw's seed")
@@ -1109,8 +1117,10 @@ def main():
         bootstrap()
         sample(Path(a.src), a.n, a.seed, a.has)
         return
-    global MODE, PACK, MARKS_ONLY
+    global MODE, PACK, MARKS_ONLY, ONLY
     MODE, PACK, MARKS_ONLY = a.prompts, a.pack, a.marks
+    ONLY = {int(x) for x in a.only.split(",") if x}
+    assert not (ONLY and a.verb in ("read", "run")), "--only is a look: render"
     if PACK:
         from reseed.config import PACKS
 
