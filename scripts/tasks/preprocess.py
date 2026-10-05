@@ -797,7 +797,7 @@ def cmd_preprocess_vae(extra):
             "--cache_dir",
             _path("lora_cache_dir", "post_image_dataset/lora"),
             "--vae",
-            "models/vae/qwen_image_vae.safetensors",
+            _path("vae", "models/vae/qwen_image_vae.safetensors"),
             "--batch_size",
             "1",
             "--chunk_size",
@@ -827,7 +827,7 @@ def _run_demote_pass(route: str, extra) -> None:
             "--cache_dir",
             _path("lora_cache_dir", "post_image_dataset/lora"),
             "--vae",
-            "models/vae/qwen_image_vae.safetensors",
+            _path("vae", "models/vae/qwen_image_vae.safetensors"),
             "--batch_size",
             "1",
             "--chunk_size",
@@ -1058,9 +1058,12 @@ def cmd_preprocess_te(extra, caption_config: dict[str, object] | None = None):
             _path("lora_cache_dir", "post_image_dataset/lora"),
             *match_args,
             "--qwen3",
-            _QWEN3_TOKENIZER,
+            _path("qwen3", _QWEN3_TOKENIZER),
             "--dit",
-            "models/diffusion_models/anima-base-v1.0.safetensors",
+            _path(
+                "pretrained_model_name_or_path",
+                "models/diffusion_models/anima-base-v1.0.safetensors",
+            ),
             # Fallback only — ignored when a {stem}.variants.txt sidecar is
             # present; drives in-process generation otherwise.
             "--caption_shuffle_variants",

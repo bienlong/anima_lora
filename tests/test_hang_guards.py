@@ -23,6 +23,25 @@ import pytest
 # ----- 1. safe_walk cycle guard -----
 
 
+
+def _symlinks_available() -> bool:
+    """Windows needs admin/developer-mode for os.symlink (OSError 1314); the
+    cycle-guard tests are meaningless without the ability to make a link."""
+    import tempfile
+
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            target = os.path.join(td, "t")
+            open(target, "w").close()
+            os.symlink(target, os.path.join(td, "l"))
+            return True
+    except OSError:
+        return False
+
+
+_SYM_OK = _symlinks_available()
+
+
 def _make_cyclic_tree(root: str) -> None:
     os.makedirs(os.path.join(root, "a"))
     open(os.path.join(root, "top.txt"), "w").close()
@@ -31,6 +50,9 @@ def _make_cyclic_tree(root: str) -> None:
     os.symlink(os.path.join(root, "a"), os.path.join(root, "a", "self2"))  # diamond
 
 
+@pytest.mark.skipif(
+    not _SYM_OK, reason="os.symlink unavailable (Windows without admin/developer mode)"
+)
 def test_safe_walk_terminates_on_symlink_cycle(tmp_path):
     from library.io.walk import safe_walk
 

@@ -18,6 +18,8 @@ from networks.lora_anima.loading import (
     _stack_lora_ups,
 )
 from networks.lora_modules import (
+    DoKrLoRAModule,
+    DoRALoRAModule,
     HydraLoRAModule,
     LoRAModule,
     StepExpertLoRAModule,
@@ -447,6 +449,18 @@ class LoRANetwork(_NetworkMetricsMixin, torch.nn.Module):
                         self._channel_scale_hits += 1
                     else:
                         self._channel_scale_misses.append(lora_name)
+
+                # DoRA/DoKr magnitude forwarding (our addition — the v2 merge
+                # dropped it): warm-start scales + detach semantics. Without
+                # this, detach_norm silently reverts to False and DoRA/DoKr
+                # fall back to the per-step materializing path (~3x slower).
+                if effective_module_class in (DoRALoRAModule, DoKrLoRAModule):
+                    if cfg.dora_detach_norm:
+                        extra_kwargs["dora_detach_norm"] = True
+                    if cfg.dora_scales_dict:
+                        _ds = cfg.dora_scales_dict.get(lora_name)
+                        if _ds is not None:
+                            extra_kwargs["dora_scale"] = _ds
 
                 lora = effective_module_class(
                     lora_name,

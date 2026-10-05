@@ -1,4 +1,4 @@
-source_image_dir = "D:/本地整合包/ComfyUI/models/gemma-4-e4b-vision/1_新建文件夹"
+source_image_dir = "G:/参考训练器-0.14.0/studio_data/projects/7-rov/versions/v1/train/1_data"
 
 target_res = [1024, 896]
 

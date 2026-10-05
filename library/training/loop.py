@@ -96,6 +96,9 @@ class LoopState:
 
     global_step: int = 0
     profile_started: bool = False
+    # ANIMA_TORCH_PROFILE fallback (no Nsight install): the live torch.profiler
+    # handle while a profile_range is being captured.
+    torch_profiler: Any = None
     # Release-pause request poller (daemon jobs only; None outside the daemon).
     pause_watcher: Optional[PauseWatcher] = None
 
@@ -276,6 +279,10 @@ def build_loop_state(
     #   nsys profile --capture-range=cudaProfilerApi --capture-range-end=stop ...
     # so nsys only records that window.
     profile_range = trainer._parse_profile_steps(args)
+    if not profile_range:
+        # No Nsight install needed: ANIMA_TORCH_PROFILE=START,COUNT captures
+        # the same window with torch.profiler and prints a top-ops table.
+        profile_range = _parse_torch_profile_range()
 
     return LoopState(
         args=args,
@@ -517,6 +524,20 @@ def _run_step(trainer, state: LoopState, batch) -> torch.Tensor:
     return loss
 
 
+def _parse_torch_profile_range() -> Optional[tuple]:
+    """``ANIMA_TORCH_PROFILE=START,COUNT`` — the torch.profiler fallback for
+    the nsys ``PROFILE_STEPS`` seam (same window, no Nsight install)."""
+    spec = os.environ.get("ANIMA_TORCH_PROFILE")
+    if not spec:
+        return None
+    try:
+        start, count = spec.split(",", 1)
+        return (int(start), int(start) + int(count))
+    except ValueError:
+        logger.warning("bad ANIMA_TORCH_PROFILE %r (want START,COUNT)", spec)
+        return None
+
+
 def _profiler_step_begin(state: LoopState) -> None:
     if (
         state.profile_range
@@ -525,7 +546,16 @@ def _profiler_step_begin(state: LoopState) -> None:
     ):
         state.accelerator.print(f"\n[profiler] starting at step {state.global_step}")
         torch.cuda.synchronize()
-        torch.cuda.profiler.start()
+        if os.environ.get("ANIMA_TORCH_PROFILE"):
+            state.torch_profiler = torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ],
+            )
+            state.torch_profiler.start()
+        else:
+            torch.cuda.profiler.start()
         state.profile_started = True
 
     if state.profile_started:
@@ -537,11 +567,18 @@ def _profiler_step_end(state: LoopState) -> None:
         torch.cuda.nvtx.range_pop()
     if state.profile_started and state.global_step >= state.profile_range[1]:
         torch.cuda.synchronize()
-        torch.cuda.profiler.stop()
-        state.accelerator.print(f"\n[profiler] stopped at step {state.global_step}")
-        state.accelerator.print(
-            "[profiler] open the .nsys-rep with the Nsight Systems GUI\n"
-        )
+        tp = state.torch_profiler
+        if tp is not None:
+            tp.stop()
+            state.torch_profiler = None
+            state.accelerator.print(
+                tp.key_averages().table(sort_by="self_cuda_time_total", row_limit=35)
+            )
+        else:
+            torch.cuda.profiler.stop()
+            state.accelerator.print(
+                "[profiler] open the .nsys-rep with the Nsight Systems GUI\n"
+            )
         state.profile_started = False
         state.profile_range = None  # don't re-trigger
         # Hard-exit so the launcher exits and nsys finalizes the report.
@@ -612,6 +649,30 @@ def _log_step(
     state.loss_recorder.add(epoch=epoch, step=step, loss=current_loss)
     avr_loss: float = state.loss_recorder.moving_average
     logs = {"avr_loss": avr_loss}
+    # VRAM cadence metrics (our addition): allocator pressure is the #1
+    # suspect for step-time regressions on 16GB cards ("GPU util 100% but
+    # every step is slow"), and progress.jsonl / tensorboard are where a slow
+    # drift shows up. Cheap CUDA-side queries, gated on the log cadence; the
+    # full torch memory_summary breakdown rides behind ANIMA_MEM_LOG=1.
+    vram_logs: dict[str, Any] = {}
+    if should_log_step and torch.cuda.is_available():
+        mem_stats = torch.cuda.memory_stats()
+        vram_logs = {
+            "vram/allocated_gb": round(
+                mem_stats.get("allocated_bytes.all.current", 0) / 2**30, 2
+            ),
+            "vram/reserved_gb": round(
+                mem_stats.get("reserved_bytes.all.current", 0) / 2**30, 2
+            ),
+            "vram/peak_gb": round(
+                mem_stats.get("allocated_bytes.all.peak", 0) / 2**30, 2
+            ),
+        }
+        retries = int(mem_stats.get("num_alloc_retries", 0))
+        if retries:
+            vram_logs["vram/alloc_retries"] = retries
+        _log_allocator_breakdown(state.accelerator, state.global_step)
+    logs.update(vram_logs)
     _unwrapped_net = state.accelerator.unwrap_model(state.network)
     # Refresh router_H only on log cadence — get_router_entropy does a full
     # get_router_stats compute (D2H syncs) wasted on the progress-bar postfix;
@@ -659,7 +720,24 @@ def _log_step(
                 MetricContext(args=args, network=_unwrapped_net),
             )
         )
+        logs.update(vram_logs)
         trainer.step_logging(state.accelerator, logs, state.global_step, epoch + 1)
+
+
+def _log_allocator_breakdown(accelerator, global_step: int) -> None:
+    """``ANIMA_MEM_LOG=1``: full ``torch.cuda.memory_summary`` at a coarse
+    cadence (first logged step, then every 50th) — segment/block counts and
+    the allocator's own retry counter are the diagnostic for the
+    "allocation-struggle slow" step-time profile."""
+    if os.environ.get("ANIMA_MEM_LOG") != "1" or not accelerator.is_main_process:
+        return
+    if global_step > 1 and global_step % 50 != 0:
+        return
+    logger.info(
+        "CUDA memory summary @ step %s:\n%s",
+        global_step,
+        torch.cuda.memory_summary(),
+    )
 
 
 def _maybe_run_step_validation(trainer, state: LoopState, epoch: int) -> None:

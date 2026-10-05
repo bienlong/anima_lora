@@ -87,6 +87,7 @@ class LoKrModule(BaseLoRAModule):
         module_dropout=None,
         factor: int = -1,
         lokr_shapes: Optional[Dict[str, Dict]] = None,
+        channel_scale=None,  # 接受但忽略——Kronecker 无 lora_down 可吸收（与 dokr.py 同）
     ):
         if org_module.__class__.__name__ != "Linear":
             raise ValueError(

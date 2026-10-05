@@ -275,6 +275,12 @@ def _unused_pid() -> int:
             os.kill(pid, 0)
         except ProcessLookupError:
             return pid
+        except OSError as e:
+            # Windows: no POSIX ESRCH for signal-0 probes — a free pid
+            # surfaces as ERROR_INVALID_PARAMETER (winerror 87).
+            if getattr(e, "winerror", None) == 87:
+                return pid
+            continue
         except Exception:
             continue
     raise RuntimeError("no free pid found")

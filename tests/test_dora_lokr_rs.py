@@ -23,6 +23,7 @@ import torch
 
 from networks import NETWORK_REGISTRY, resolve_network_spec
 from networks.lora_modules.dokr import DoKrLoRAModule
+from networks.lora_modules.lokr import LoKrModule
 from networks.lora_modules.dora import DoRALoRAModule
 from networks.lora_modules.lokr import LoKrModule, factorization, make_kron
 from networks.lora_modules.lora import defuse_standard_qkv
@@ -325,6 +326,21 @@ def test_dokr_gradients_reach_factors_and_magnitude():
         assert p.grad is not None and p.grad.abs().sum() > 0
     assert module.dora_scale.grad is not None
     assert module.dora_scale.grad.abs().sum() > 0
+
+
+def test_kron_modules_accept_and_ignore_channel_scale():
+    """channel_scaling_alpha>0 时工厂给每个模块带 channel_scale kwarg；Kronecker
+    家族没有 lora_down 可吸收，必须显式接受并忽略（回归：纯 LoKr 曾直接
+    TypeError，1727f0a 只修了 DoKr 漏了 LoKr）。"""
+    scale = torch.ones(256)
+    org = torch.nn.Linear(256, 512, bias=False)
+    dokr = DoKrLoRAModule("t_dokr", org, 1.0, 4, 16, channel_scale=scale)
+    _wire(dokr, org)
+    assert dokr(torch.randn(2, 256)).shape == (2, 512)
+    org2 = torch.nn.Linear(256, 512, bias=False)
+    lokr = LoKrModule("t_lokr", org2, 1.0, 4, 16, channel_scale=scale)
+    _wire(lokr, org2)
+    assert lokr(torch.randn(2, 256)).shape == (2, 512)
 
 
 def test_dokr_rejects_conv2d():

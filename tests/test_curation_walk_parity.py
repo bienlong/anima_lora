@@ -47,6 +47,28 @@ def test_walk_images_collision_parity(tmp_path: Path):
         _dataset.walk_images(root, recursive=True)
 
 
+
+def _symlinks_available() -> bool:
+    """Windows needs admin/developer-mode for os.symlink (OSError 1314); the
+    cycle-guard tests are meaningless without the ability to make a link."""
+    import tempfile
+
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            target = os.path.join(td, "t")
+            open(target, "w").close()
+            os.symlink(target, os.path.join(td, "l"))
+            return True
+    except OSError:
+        return False
+
+
+_SYM_OK = _symlinks_available()
+
+
+@pytest.mark.skipif(
+    not _SYM_OK, reason="os.symlink unavailable (Windows without admin/developer mode)"
+)
 def test_safe_walk_parity(tmp_path: Path):
     root = _tree(tmp_path)
     os.symlink(root / "a", root / "b" / "back")  # cycle-ish link

@@ -135,8 +135,15 @@ def test_rows_land_where_the_loaders_look():
 
 
 def test_anima_rows_land_on_the_base_config_defaults():
-    """``configs/base.toml`` points training at these three exact paths."""
+    """``configs/base.toml`` points training at these three exact paths.
+
+    Rows whose configured value is an absolute path (a user pointing base.toml
+    at weights outside the repo, e.g. a ComfyUI install) are skipped: the
+    catalog still lands in models/, so the invariant only holds for
+    repo-relative configs."""
     import tomllib
+    from pathlib import Path
+
     from library.env import anima_home
 
     cfg = tomllib.loads((anima_home() / "configs" / "base.toml").read_text("utf-8"))
@@ -147,6 +154,8 @@ def test_anima_rows_land_on_the_base_config_defaults():
         "anima_vae": cfg["vae"],
     }
     for row_id, rel in configured.items():
+        if Path(rel).is_absolute():
+            continue
         row = rows[row_id]
         landed = row.dest / row.files[0].rsplit("/", 1)[-1]
         assert landed == anima_home() / rel, row_id

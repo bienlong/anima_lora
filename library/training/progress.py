@@ -299,6 +299,12 @@ def _pid_alive(pid: Optional[int]) -> Optional[bool]:
         return False
     except PermissionError:  # exists, owned by someone else
         return True
+    except OSError as e:
+        if getattr(e, "winerror", None) == 87:
+            # Windows has no POSIX ESRCH for signal-0 probes: a vanished pid
+            # surfaces as ERROR_INVALID_PARAMETER, not ProcessLookupError.
+            return False
+        return None
     except Exception:
         return None
     return True

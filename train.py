@@ -3467,6 +3467,17 @@ if __name__ == "__main__":
     verify_command_line_training_args(args)
     args = read_config_from_file(args, parser)
 
+    # Explicit CLI --max_train_steps means "exactly this many steps": without
+    # this, the epoch→step conversion in _setup_optimizer_and_dataloader
+    # unconditionally overwrites it whenever the merged TOML carries
+    # max_train_epochs (train.py ~2594), so a benchmark run asking for 40
+    # steps silently trains 968.
+    if any(
+        a == "--max_train_steps" or a.startswith("--max_train_steps=")
+        for a in sys.argv[1:]
+    ):
+        args.max_train_epochs = None
+
     if args.attn_mode == "sdpa":
         args.attn_mode = "torch"  # backward compatibility
 
