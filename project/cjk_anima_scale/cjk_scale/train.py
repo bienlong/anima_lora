@@ -247,6 +247,7 @@ def train(
     band: tuple | None = None,
     tag_drop: tuple | None = None,
     ball_on: Path | None = None,
+    lr: float | None = None,
 ) -> Path:
     """Train the run. ``data`` / ``out`` default to the run's dirs;
     ``max_steps`` stops the loop early with the full-length schedule
@@ -277,7 +278,8 @@ def train(
     rows less their mean train (a gradient hook does not hold it: AdamW's
     per-element scaling un-centres a centred gradient); with ``cold=False``
     (``context`` = the same file) the rows start warm at that file's rows and
-    the same mean is held. ``scale.py`` passes none of them.
+    the same mean is held; ``lr`` replaces ``LR`` (the rows' peak lr).
+    ``scale.py`` passes none of them.
     A data dir built with windows (``build.json`` ``glyph_route``) is
     trained routed: ``ANIMA_VOCAB_GLYPH_ROUTE=1`` is set in-process before
     the TE cache (whose key carries it)."""
@@ -347,6 +349,9 @@ def train(
             lr_warmup=p.warmup,
             steps_override=True,
         )
+    lr = lr or LR
+    if lr != LR:
+        p.record.update(lr_rows=lr, lr_override=True)
     print(
         f"rows: {len(p.idx)} ({len(vocabs)} vocabs) — {len(p.touched)} touched "
         f"by the captions, {len(p.idx - p.touched)} with no draw; {len(p.frozen)} "
@@ -390,7 +395,7 @@ def train(
         warm=None if cold else ctx,
         init_anchor=INIT_ANCHOR,
         free_residual=FREE_RESIDUAL,
-        lr=LR,
+        lr=lr,
         touched=p.touched,
         frozen=p.frozen,
         context=ctx,
@@ -460,7 +465,7 @@ def train(
     )
     print(
         f"train {rc.name}: σ per item in {p.bands}, {rows.n_rows} rows, {steps} steps "
-        f"({spr}/row) × batch {BATCH}, lr {LR:g} {LR_DECAY} warmup {warmup} "
+        f"({spr}/row) × batch {BATCH}, lr {lr:g} {LR_DECAY} warmup {warmup} "
         f"({WARMUP_RATIO:g}), μ {INIT_ANCHOR:g}, box_share {BOX_SHARE} → cap "
         f"{BOX_SHARE_CAP} at {BOX_SHARE_GLYPHS} glyphs (log), grid_box {int(GRID_BOX)}, "
         + ("cold (pack rows)" if cold else f"warm {ctx}")

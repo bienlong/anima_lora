@@ -26,7 +26,10 @@ Read per render, paired on the same prompt × seed against the floor:
   string) per string;
 - **page** — what the base draws for the same prompt with an EN string of
   the same length (`product_criteria.md` Axis 2): EN-ref cos outside the text
-  box, and the sheet by eye for the two failure shapes, **paste** (a flat
+  box (`en_tok_out`), the whole page scored as `anime_tools.grouping` scores a
+  near-twin pair (10-05: the CLS cosine `en_cls`, the 7×7 grid match
+  `en_match` — the one that separates; an unrelated page sits at CLS 0.95,
+  match 0.02), and the sheet by eye for the two failure shapes, **paste** (a flat
   white box or block with the text, the scene overridden) and **wipe** (the
   scene's bubble with the base's guess in it), and a third, **banner** (the
   text out of the bubble as a title line).

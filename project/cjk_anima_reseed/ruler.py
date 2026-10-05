@@ -472,7 +472,13 @@ FLOOR = ("en", "retrain_kana", "seed_retrain_0930")  # rendered once (criteria.m
 # arms (a run with ``pack``); ``X@<pack>`` = arm X's rows on that pack (its
 # routing), rendered beside X's on the raw pack
 PACK = ""
-PACK_ARMS = {"punct": {"punct": OUT / "punct", "sent_ball": OUT / "sent_ball"}}
+PACK_ARMS = {
+    "punct": {
+        "punct": OUT / "punct",
+        "sent_ball": OUT / "sent_ball",
+        "sent_ball_lr2": OUT / "sent_ball_lr2",
+    }
+}
 
 
 def base_arm(a: str) -> str:
@@ -661,7 +667,7 @@ def render(names: list) -> None:
 
 UNSEEN = 0.15  # cov3 at or below: the string's trigrams the arms barely trained on
 BOOL = ("official", "exact", "contained", "le1", "le2", "dup")
-REAL = ("cer", "en_cos", "en_tok_out", "fw_over_en")
+REAL = ("cer", "en_cls", "en_match", "en_tok_out", "fw_over_en")
 
 
 def candidates(reads: list, reader: str) -> list:
@@ -737,6 +743,46 @@ def outside_mask(pe, n: int, hw, boxes):
     return keep.flatten()
 
 
+class AtSim:
+    """EN-ref similarity as ``anime_tools.grouping`` scores a near-twin pair
+    (user, 10-05): the page stretched to PE-Spatial's 512² bucket, the CLS
+    cosine (``en_cls``) and the dense grid match — mutual NN + ratio test over
+    G×G pooled cells, the inlier fraction (``en_match``) — at the package's
+    defaults."""
+
+    def __init__(self, device="cuda"):
+        from anime_tools.grouping import groups
+        from anime_tools.grouping.embedder import pe_spatial_embedder
+
+        self.emb = pe_spatial_embedder(device)
+        self.g = groups.DEFAULT_GRID
+        self.cell_min = groups.DEFAULT_CELL_MATCH_MIN
+        self.ratio = groups.DEFAULT_RATIO
+        self._memo: dict = {}
+
+    def feats(self, path: Path):
+        import torch
+        from anime_tools.grouping.features import _load_512
+        from anime_tools.grouping.matching import pool_cells_batch
+
+        if path not in self._memo:
+            cls, g16 = self.emb(_load_512(path)[None])
+            cells = pool_cells_batch(
+                torch.from_numpy(g16.astype("float32")).to(self.emb.device), self.g
+            )
+            self._memo[path] = (torch.from_numpy(cls[0]), cells)
+        return self._memo[path]
+
+    def __call__(self, f: Path, ref: Path) -> dict:
+        from anime_tools.grouping.matching import match_fracs
+
+        (ca, ga), (cb, gb) = self.feats(f), self.feats(ref)
+        return {
+            "en_cls": float(ca @ cb),
+            "en_match": float(match_fracs(ga, gb, self.cell_min, self.ratio)[0]),
+        }
+
+
 def read_renders(names: list) -> dict:
     """``{arm: {i: record}}``; the reads are cached in ``<arm>/reads.json``,
     the page scores recomputed (cheap) every time."""
@@ -769,6 +815,7 @@ def read_renders(names: list) -> dict:
     del rd
     torch.cuda.empty_cache()
     pe = EnRef("cuda", mode_dir() / EN, {})
+    at = AtSim("cuda")
     recs: dict = {}
     for a in names:
         recs[a] = {}
@@ -789,7 +836,7 @@ def read_renders(names: list) -> dict:
                 "text": m["text"],
                 "file": str(f),
                 **score_text(m["text"], reads),
-                "en_cos": float(F.cosine_similarity(fi.mean(0), fr.mean(0), dim=0)),
+                **at(f, ref),
                 "en_tok_out": float(
                     F.cosine_similarity(fi[keep], fr[keep], dim=1).mean()
                 ),

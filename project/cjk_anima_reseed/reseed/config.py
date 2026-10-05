@@ -27,7 +27,10 @@
     warm = true                   # optional, ball runs: the rows warm at ``ball_on``'s
                                   # rows (not cold at their mean), that mean held
     data_from = "run1002_grid_small/data"  # optional, ball runs: a scale-line data dir
-                                  # (under ``output/cjk_anima_scale``) instead of a build
+                                  # (under ``output/cjk_anima_scale``) instead of a build;
+                                  # a bare name (no ``/``) = that reseed run's ``data/``
+    lr = 2e-4                     # optional: the rows' peak lr (``cjk_scale.train.LR``
+                                  # without it)
     pack = "punct"                # optional: the base pack (``PACKS``) instead of the raw
                                   # pack — its routing at build, train and read
 
@@ -59,6 +62,7 @@ KEYS = (
     "warm",
     "data_from",
     "pack",
+    "lr",
 )
 # the base packs a run may sit on (``punct_pack.py``): the raw pack's rows and
 # ids plus encode rules / appended rows, so the seed rows ride on it unchanged
@@ -85,6 +89,7 @@ class Run:
     warm: bool = False  # a ball run: the rows warm at ball_on's, not cold at its mean
     data_from: str = ""  # a ball run: this scale-line data dir
     pack: str = ""  # the base pack (``PACKS``); "" = the raw pack
+    lr: float = 0.0  # the rows' peak lr; 0 = cjk_scale.train.LR
 
     def use_pack(self) -> None:
         """Name the run's base pack (``ANIMA_VOCAB_PACK``) before anything
@@ -128,6 +133,8 @@ class Run:
         if self.data_from:
             from cjk_scale import paths
 
+            if "/" not in self.data_from:  # a reseed run's build
+                return OUT / self.data_from / "data"
             return paths.OUT / self.data_from
         return (OUT / self.stick_from if self.stick_from else self.dir) / "data"
 
@@ -200,6 +207,8 @@ def load(run: str) -> Run:
     warm = bool(raw.get("warm", False))
     if warm:
         assert ball_on, f"{path}: warm is a ball run's"
+    lr = float(raw.get("lr", 0.0))
+    assert 0 <= lr < 1e-2, f"{path}: lr {lr}"
     pack = raw.get("pack", "")
     assert not pack or pack in PACKS, f"{path}: pack is one of {sorted(PACKS)}"
     return Run(
@@ -220,4 +229,5 @@ def load(run: str) -> Run:
         warm=warm,
         data_from=data_from,
         pack=pack,
+        lr=lr,
     )

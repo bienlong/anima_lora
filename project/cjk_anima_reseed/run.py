@@ -70,6 +70,7 @@ def main():
             band=run.band,
             tag_drop=run.tag_drop,
             ball_on=run.seed_rows() if run.ball_on else None,
+            lr=run.lr or None,
         )
 
 
