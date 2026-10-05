@@ -860,9 +860,50 @@ def read(names: list, label: str) -> Path:
     return run_dir
 
 
+def sample(run_dir: Path, n: int, seed: int, per: int = 4, thumb: int = 384) -> Path:
+    """``n`` random strings of a read (its ``renders.json``), ``per`` a sheet:
+    a row per string, EN ref | every arm read, larger than the read's sheets
+    → ``<run_dir>/random_s<seed>/``."""
+    import random
+
+    from PIL import Image
+
+    from common.readers import contact_sheet
+
+    recs = json.loads((run_dir / "renders.json").read_text(encoding="utf-8"))
+    names = list(recs)
+    by = {a: {r["i"]: r for r in rs} for a, rs in recs.items()}
+    its = {m["i"]: m for m in items()}
+    pick = sorted(random.Random(seed).sample(sorted(its), n))
+    out = run_dir / f"random_s{seed}"
+    out.mkdir(parents=True, exist_ok=True)
+    for k in range(0, n, per):
+        rows = []
+        for i in pick[k : k + per]:
+            m = its[i]
+            rows.append(
+                (
+                    Image.open(render_file(EN, i)).convert("RGB"),
+                    [f"r{i:02d} {m['bin']} {m['text']}", f"EN {m['en']}"],
+                )
+            )
+            for a in names:
+                r = by[a][i]
+                mark = "✓" if r["exact"] else "≤1" if r["le1"] else "≤2" if r["le2"] else ""
+                rows.append(
+                    (
+                        Image.open(r["file"]).convert("RGB"),
+                        [f"{a} {mark}", r["best"][:24], f"cer {r['cer']:.2f}"],
+                    )
+                )
+        contact_sheet(rows, out / f"random_{k // per}.png", thumb=thumb, cols=1 + len(names))
+    print(f"{n} strings {pick} → {out}", flush=True)
+    return out
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("verb", choices=["build", "render", "read", "run"])
+    p.add_argument("verb", choices=["build", "render", "read", "run", "sample"])
     p.add_argument(
         "--arms",
         default=",".join(FLOOR),
@@ -870,9 +911,16 @@ def main():
     )
     p.add_argument("--label", default="floor")
     p.add_argument("--prompts", choices=MODES, default=MODES[0])
+    p.add_argument("--from", dest="src", help="sample: a read's results dir")
+    p.add_argument("--n", type=int, default=12, help="sample: strings drawn")
+    p.add_argument("--seed", type=int, default=0, help="sample: the draw's seed")
     a = p.parse_args()
     if a.verb == "build":
         build()
+        return
+    if a.verb == "sample":
+        bootstrap()
+        sample(Path(a.src), a.n, a.seed)
         return
     bootstrap()
     os.environ["ANIMA_VOCAB_GLYPH_ROUTE"] = "1"  # the runs trained routed, read routed
