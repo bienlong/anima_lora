@@ -115,6 +115,13 @@ def _make_dynamic_seq_forward(compiled_inner, bands):
     ``ConstraintViolationError``. Re-marking here keeps fwd/bwd in agreement
     (mirrors the EasyControl fix in networks/methods/easycontrol.py). ``x`` is
     fake-5D ``(B,1,seq,1,D)``: seq is dim 2, each RoPE table rides dim 0.
+
+    GOTCHA (GH #107): under SDPA (``attn_mode="torch"`` — forced on ROCm) the
+    marks are soft (``maybe_mark_dynamic``, no range). Inductor's
+    ``sdpa_constraint`` guards the backward's ``[B, H, seq]`` logsumexp stride on
+    ``seq % 8``, which no strict range over free-fit token counts satisfies.
+    Soft marks let dynamo keep that guard: at most one extra graph per residue
+    class, inside the ``2n + 8`` recompile budget.
     """
     from library.datasets.buckets import band_for_seq
 
@@ -130,11 +137,18 @@ def _make_dynamic_seq_forward(compiled_inner, bands):
     ):
         band = band_for_seq(bands, x_B_T_H_W_D.shape[2])
         if band is not None:
-            lo, hi = band
-            torch._dynamo.mark_dynamic(x_B_T_H_W_D, 2, min=lo, max=hi)
-            if rope_cos_sin is not None:
-                torch._dynamo.mark_dynamic(rope_cos_sin[0], 0, min=lo, max=hi)
-                torch._dynamo.mark_dynamic(rope_cos_sin[1], 0, min=lo, max=hi)
+            attn_mode = attn_params.attn_mode if attn_params is not None else None
+            if attn_mode in (None, "torch"):
+                torch._dynamo.maybe_mark_dynamic(x_B_T_H_W_D, 2)
+                if rope_cos_sin is not None:
+                    torch._dynamo.maybe_mark_dynamic(rope_cos_sin[0], 0)
+                    torch._dynamo.maybe_mark_dynamic(rope_cos_sin[1], 0)
+            else:
+                lo, hi = band
+                torch._dynamo.mark_dynamic(x_B_T_H_W_D, 2, min=lo, max=hi)
+                if rope_cos_sin is not None:
+                    torch._dynamo.mark_dynamic(rope_cos_sin[0], 0, min=lo, max=hi)
+                    torch._dynamo.mark_dynamic(rope_cos_sin[1], 0, min=lo, max=hi)
         else:
             seq = int(x_B_T_H_W_D.shape[2])
             if seq not in warned_oob:
