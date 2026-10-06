@@ -24,6 +24,13 @@ Read per render, paired on the same prompt × seed against the floor:
 - **text** — the readers' exact / contained / ≤ 1 / ≤ 2 edits and `dup` (a
   doubled glyph or a read longer than the string: the slot count against the
   string) per string;
+- **glyphs** (10-06, `ruler.py` `score_page`) — the string's letters among
+  everything the page letters (`g_p`), the string's letters drawn (`g_r`),
+  and their **F1, the headline text score** (user, 10-06: what counts is an
+  arm that letters less junk and gets the string's glyphs right — exact /
+  ≤ 2 edits sit at 0–1 on mid / long for every arm and miss both); with the
+  kanji / kana recall, the letters drawn and the on-string share of the text
+  area beside it;
 - **page** — what the base draws for the same prompt with an EN string of
   the same length (`product_criteria.md` Axis 2): EN-ref cos outside the text
   box (`en_tok_out`), the whole page scored as `anime_tools.grouping` scores a

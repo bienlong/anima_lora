@@ -105,6 +105,9 @@ Closer, not whole: 田中さま → 田中ささま (preview51 十甲さ兎ま);
 
 ## 5. What the page draws (`score_page`)
 
+`g_f1` is the headline text score from here on (user, 10-06: less junk
+lettered and the string's glyphs right; `criteria.md`).
+
 From the user (10-06): precision / recall over what is drawn, not exact /
 ≤ 2 edits. Every text box read (both readers, averaged); kana, ー and kanji as
 a bag (order and box free): `g_p` = the string's letters among all drawn,
