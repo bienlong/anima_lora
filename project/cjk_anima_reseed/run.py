@@ -1,14 +1,16 @@
 #!/usr/bin/env python
 """reseed front door: ``run.py <run> data | train | read``.
 
-    .venv/bin/python project/cjk_anima_reseed/run.py kana data              # CPU
-    .venv/bin/python project/cjk_anima_reseed/run.py kana data --frac 0.02  # a look at the sizes
-    make daemon-run ARGS="project/cjk_anima_reseed/run.py kana train"
-    make daemon-run ARGS="project/cjk_anima_reseed/run.py kana read"
+    .venv/bin/python project/cjk_anima_reseed/run.py <run> data              # CPU
+    .venv/bin/python project/cjk_anima_reseed/run.py <run> data --frac 0.02  # a look at the sizes
+    make daemon-run ARGS="project/cjk_anima_reseed/run.py <run> train"
+    make daemon-run ARGS="project/cjk_anima_reseed/run.py <run> read"
 
+``<run>`` is ``configs/<run>.toml`` or a path to one (``_archive/configs/``).
 ``data`` → ``output/cjk_anima_reseed/<run>/data``; ``train`` →
 ``…/<run>/trained.pt`` (the whole merged rows, ``cjk_scale.train``: the
-run's rows cold, every other row frozen at its ``seed``). ``read`` (GPU) is
+run's rows trained cold or warm as its config says, every other row frozen
+at the run's context rows). ``read`` (GPU) is
 the scale line's ``experiments/grid_lone`` ``read_plain`` on the kana run's
 13 words + 14 singles: the run paired against every reseed run read
 before it and ``READ_AGAINST`` (renders cached in their dirs; the run's land in ``…/<run>/native_r4_plain/``) →

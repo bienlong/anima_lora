@@ -224,9 +224,8 @@ def encode_captions(captions, device, cache_dir=None):
     max-padded as before, but the pad positions come out 0 (right-padded, set
     by ``encode_tokens``), so the file keeps only the longest caption's width
     (b3's 64 k captions: ≤ 118 of 512 positions, 67 GB → 16 GB) and an entry
-    pads back to ``qwen3_max_length`` with zeros on read — bit-exact. (Encoding
-    each batch at its own length is not: 7 / 41 b3 captions moved, CPU,
-    2026-09-29.) A cache written before this (width 512) is read and resumed
+    pads back to ``qwen3_max_length`` with zeros on read. (Encoding each batch
+    at its own length moved 7 / 41 b3 captions, CPU, 2026-09-29.) A cache written before this (width 512) is read and resumed
     as it is.
     ``cache_dir``: keep the files there (``meta.json`` holds the key and the
     number of finished captions; an interrupted encode resumes, a finished one

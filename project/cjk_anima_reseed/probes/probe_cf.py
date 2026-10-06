@@ -13,8 +13,8 @@ at ``--rows`` and the gradient is read.
   glyph once in the line), ``--per_row`` items each; every item re-lettered
   on its own scene with its own columns / fill / font px as a pair through
   ``render_into_scene(ref_text=…)`` — A′ = the line, B = the line with the
-  target glyph replaced (same fit, font, positions; asserted
-  pixel-identical outside the union box). B alternates per draw: ``swap``
+  target glyph replaced (same fit, font, positions; asserted to differ only
+  inside the union box). B alternates per draw: ``swap``
   (another glyph of the target's family) and ``dup`` (the neighbour glyph
   repeated — the repeat mode) → ``output/cjk_anima_reseed/probe_cf/<label>/``
   ``pairs.jsonl`` + PNGs.

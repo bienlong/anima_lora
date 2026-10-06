@@ -12,7 +12,7 @@ or hurts the reading.
 
 `trained.pt` `delta` is an **offset**, not the row: offset = `raw ×
 row_scale`, and **the row the model sees = pack row + offset** (checked
-exactly against `anima_cjk_vocab_pack_preview51.safetensors`). The pack row
+against `anima_cjk_vocab_pack_preview51.safetensors`). The pack row
 is `anima_cjk_vocab_pack_punct` `ext_embed` — Qwen rows mapped by
 procrustes-mix or a contextual char init (`preview51.json` `stats`). Every
 "stick / spike" in the reports before this file is read on the offset.

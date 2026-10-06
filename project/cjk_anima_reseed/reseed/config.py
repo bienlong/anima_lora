@@ -1,6 +1,11 @@
 """A reseed run is one file, ``configs/<run>.toml``::
 
-    rows = ["chars:あい…"]       # the rows trained cold (data.vocabs specs, single glyphs)
+    rows = ["chars:あい…"]       # the rows trained (data.vocabs specs, single glyphs);
+                                 # a mark row (not a letter, not ``・``) trains in mark
+                                 # windows around seed_retrain_0930's letters and in
+                                 # ``sent`` lines holding it (hearts synthesised into
+                                 # the lines), and is drawn alone only if its lone
+                                 # spelling encodes to its row
     read = ["こんにちは", …]      # held out of the windows by trigram
     seed = "0921"                # the rows every other row rides frozen at: "0921" (the
                                  # old seed, the kana run's) or "0930" (seed_retrain_0930)
@@ -31,8 +36,8 @@
     data_from = "run1002_grid_small/data"  # optional, ball / plain warm runs: a scale-line data dir
                                   # (under ``output/cjk_anima_scale``) instead of a build;
                                   # a bare name (no ``/``) = that reseed run's ``data/``
-    lr = 2e-4                     # optional: the rows' peak lr (``cjk_scale.train.LR``
-                                  # without it)
+    lr = 2e-4                     # optional: the rows' peak lr (``cjk_scale.train.LR``,
+                                  # 1e-3, without it)
     pack = "punct"                # optional: the base pack (``PACKS``) instead of the raw
                                   # pack — its routing at build, train and read
     lines = "m109_pack"           # optional: the dialogue line file (``LINES``) the windows

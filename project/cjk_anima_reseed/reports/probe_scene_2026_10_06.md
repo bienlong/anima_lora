@@ -48,7 +48,7 @@ three-way term 0.73–0.88.
 - **The signal share reproduces** `probe_geom`'s per-draw ρ ≈ 0.025 on a
   third, independent design.
 
-## Is it the box weighting? (user, 10-06)
+## Box-share against plain MSE (user, 10-06)
 
 The scene's pixels sit outside the box, and the box-share loss gives the
 box s = 0.50 at these lines against an area share of 0.04 — the scene

@@ -1,11 +1,8 @@
-"""reseed — the JA vocab pack's rows re-seeded cold: the data build.
+"""reseed — the reseed line's run configs and data build.
 
 One table (``table.TABLE``): every tier carries its own glyph px, σ band
-and share; the builder draws each tier once and stamps its band — no band
-gate, no group, no rebuild pass. Built 2026-10-03 from
-``cjk_anima_scale/experiments/reseed_anchor --variant fit`` (the
-``grid_small`` → ``grid_lone`` → ``grid_44`` → ``reseed_recap`` chain
-flattened), without its ！ / ？ marks and EN cells.
+and share; the builder draws each tier once and stamps its band. Where the
+table came from and what it leaves out of the scale builder: ``README.md``.
 
 Shared with ``../cjk_anima_scale`` and read-only from here: its ``src/``
 (renderers, scene pools, fonts, inventory) and ``cjk_scale.{paths, config,

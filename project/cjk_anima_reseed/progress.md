@@ -1,9 +1,8 @@
 # progress — where the reseed line stands (2026-10-06)
 
-The line's record in one place: how rows are trained, what data, what an arm
-is judged on, and how far the best arm is from what ships (preview51). Every
-number is from a dated report (`reports/`, `_archive/reports/`) or a ruler
-result (`results/`); nothing here is a new read.
+How rows are trained, the data, what an arm is judged on, and the best arm
+against what ships (preview51). Every number is from a dated report
+(`reports/`, `_archive/reports/`) or a ruler result (`results/`).
 
 **Now.** `sent_kanji_f0` — preview51's kana and kanji rows warm, every row
 free, lr 2e-4, the norm pull off, 70 % dialogue lines — is the line's best
@@ -87,27 +86,16 @@ tiers are off (share 0) since the banner era.
 
 ## 3. What an arm is judged on
 
-`criteria.md` in full. In short:
-
-- **The ruler** (`ruler.py`, `reports/ruler_2026_10_05.md`): 96 strings of
-  the training set's own bubble dialogue, 32 each short (2–4 glyphs) / mid
-  (5–9) / long (10–20); each on its own image's caption, rating
-  `sensitive`, explicit tags out, child-tagged sources out; one render per
-  string (seed 0, 28 steps, cfg 4); each string has a hand-written EN
-  reference rendered on the same prompt. Read paired per string; a
-  direction is called by the sign over strings, not a total.
-- **Text, headline: glyph F1** (`g_f1`, 10-06, `score_page`). Every text box
-  read by both readers; kana, ー and kanji as a bag. `g_p` = the string's
-  letters among all letters drawn (junk lowers it), `g_r` = the string's
-  letters drawn, F1 of the two; with `g_r_kanji` / `g_r_kana`, `drawn`
-  (letters on the page) and `a_p` (on-string share of the text area).
-  Exact / ≤ 2 edits / cer stay in the table; past a word they sit at 0–1 for
-  every arm and separate nothing.
-- **Page: `en_match`** (10-05): the page against its EN reference as
-  `anime_tools.grouping` scores a near-twin pair — PE-Spatial 7×7 grid
-  match, inlier fraction (an unrelated page sits at 0.02; the CLS cosine
-  saturates at 0.95+). `en_tok_out` (token cos outside the text boxes) beside
-  it. By eye: paste / wipe / banner.
+`criteria.md` (the ruler as built: `reports/ruler_2026_10_05.md`). In short:
+96 strings of the training set's bubble dialogue, 32 each short (2–4 glyphs)
+/ mid (5–9) / long (10–20), one render each against a hand-written EN
+reference on the same prompt, read paired per string (a direction by the
+sign over strings). Text headline: glyph F1 (`g_f1`, `ruler.py`
+`score_page`: `g_p` the string's letters among all drawn, `g_r` the string's
+letters drawn; `drawn` letters on the page, `a_p` the on-string share of the
+text area); exact / ≤ 2 edits / cer stay in the tables but sit at 0–1 past a
+word for every arm. Page: `en_match` (an unrelated page sits at 0.02),
+`en_tok_out` beside it; by eye: paste / wipe / banner.
 
 ## 4. Progress against preview51
 

@@ -1,13 +1,7 @@
 # sent_kanji_f0 — sent_kanji with the norm pull off (user, 10-06): sent_kanji
 # walked its rare kanji rows to the pack row (FREE_RESIDUAL under AdamW, rare
-# rows end at 0.07 of their length); same data dir, rows, row_lr, lr, seed.
-#
-# sent_kanji — sent_whole with the kanji (user, 10-05): preview51's 163 kana rows
-# and its 1 185 kanji rows warm (seed_fixed_1005_stick080), every row free, lr 2e-4,
-# sent_whole's table; the lines from every Manga109-s text on the pack's rows
-# (lines = "m109_pack": dialogue_2_10 held no 応 / 転 / 壊). The kana step × 0.12
-# (row_lr): 1 348 × 40 steps against sent_whole's 163 × 40, so the kana rows'
-# summed lr matches sent_whole's.
+# rows end at 0.07 of their length); same data dir, rows, row_lr, lr, seed
+# (configs/sent_kanji.toml).
 rows = [
     "chars:ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろわをんゔ",
     "chars:ァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロワヲンヴー",

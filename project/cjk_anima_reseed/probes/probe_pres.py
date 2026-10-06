@@ -203,7 +203,7 @@ def grad(run_name: str, rows_path: str, batches: int, label: str) -> None:
         target = noise.float() - latents.float()
         # grad mode on (a no_grad forward guards its own graphs): the EN
         # caption holds no ext id, so ExtDelta stays out and nothing here
-        # needs grad — detach is the stop-gradient, at no cost
+        # needs grad — detach is the stop-gradient
         with torch.autocast("cuda", dtype=torch.bfloat16):
             teach = (
                 dit_forward(anima, noisy, ts, cache, [en_of[i] for i in idx], device)

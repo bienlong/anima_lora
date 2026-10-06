@@ -32,10 +32,13 @@ seed_retrain_0930) is rendered once and every later arm reads against it.
 ``read`` scores every render (readers cached per arm) — text: official
 (both readers exact), exact (either), contained, ≤ 1 / ≤ 2 edits, CER, dup
 (a doubled glyph the string lacks, or a read longer than it), a bubble's
-boxes also joined in column and line order; page: EN-ref cos pooled and
-token-wise outside every text box of both images, flat-white share over the
-EN ref's — and pairs each arm against the floor arms per bin and on the
-unseen strings → ``results/<ts>-ruler-<label>/`` (+ sheets). ``run`` = both.
+boxes also joined in column and line order; glyphs (``score_page``):
+``g_p`` / ``g_r`` / ``g_f1`` and the rest; page: ``en_cls`` / ``en_match``
+(``AtSim``), EN-ref token cos outside every text box of both images
+(``en_tok_out``), flat-white share over the EN ref's — and pairs each arm
+against the floor arms per bin and on the unseen strings →
+``results/<ts>-ruler-<label>/`` (+ sheets). ``run`` = both. ``sample``
+draws random strings of a read into larger sheets.
 """
 
 from __future__ import annotations
@@ -580,7 +583,31 @@ def rand_turn() -> dict:
     return {"ext_ids": base["ext_ids"], "raw": raw, "row_scale": scale}
 
 
+def rows_pt(path: Path) -> dict:
+    """A probe's ``rows.pt`` (``probes/probe_pres_train.py``: the live rows'
+    ``start`` / ``raw`` at its ``row_scale``) on preview51's rows
+    (``seed_fixed_1005_stick080``, the probe's start): those rows replaced, the
+    rest as stick080 has them."""
+    import torch
+    from cjk_scale.paths import OUT as SCALE_OUT
+    from common.models import load_trained
+
+    base = load_trained(SCALE_OUT / "seed_fixed_1005_stick080")["delta"]
+    R = torch.load(path, map_location="cpu", weights_only=False)
+    scale, rs = float(base["row_scale"]), float(R["row_scale"])
+    at = {int(e): i for i, e in enumerate(base["ext_ids"])}
+    raw = base["raw"].float().clone()
+    for j, e in enumerate(R["ext_ids"]):
+        s = R["start"][j].float() * rs
+        assert torch.allclose(raw[at[e]] * scale, s, atol=1e-3 * float(s.norm())), (
+            f"{path}: row {e}'s start is not stick080's"
+        )
+        raw[at[e]] = R["raw"][j].float() * rs / scale
+    return {"ext_ids": base["ext_ids"], "raw": raw, "row_scale": scale}
+
+
 # arms built from other runs' rows, not trained: name → its delta state
+# (``--rows_pt name=path`` adds a probe's rows.pt)
 DERIVED = {"gs_rkstick": gs_rkstick, "rand_turn": rand_turn}
 
 
@@ -1210,6 +1237,11 @@ def main():
     p.add_argument(
         "--only", default="", help="render: these ruler indices only (comma list)"
     )
+    p.add_argument(
+        "--rows_pt",
+        default="",
+        help="name=path,…: a probe's rows.pt on stick080's rows as arm `name`",
+    )
     p.add_argument("--from", dest="src", help="sample: a read's results dir")
     p.add_argument("--n", type=int, default=12, help="sample: strings drawn")
     p.add_argument("--seed", type=int, default=0, help="sample: the draw's seed")
@@ -1234,6 +1266,12 @@ def main():
         os.environ["ANIMA_VOCAB_PACK"] = PACKS[PACK]
     bootstrap()
     os.environ["ANIMA_VOCAB_GLYPH_ROUTE"] = "1"  # the runs trained routed, read routed
+    for spec in filter(None, a.rows_pt.split(",")):
+        k, v = spec.split("=", 1)
+        assert k not in DERIVED and k not in arm_dirs(), f"arm {k} exists"
+        DERIVED[k] = lambda v=v: rows_pt(
+            REPO / v if not Path(v).is_absolute() else Path(v)
+        )
     names = [x for x in a.arms.split(",") if x]
     plain = {EN, *arm_dirs(), *DERIVED}
     known = plain | ({f"{x}@{PACK}" for x in plain - {EN}} if PACK else set())

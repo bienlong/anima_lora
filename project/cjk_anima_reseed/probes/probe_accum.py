@@ -8,7 +8,7 @@ has summed N draws beat stepping on every draw? Under AdamW, N draws summed
 into one step at lr × √N move a row by the same signal and the same noise
 as the N steps at lr, in expectation and to first order — so the pair isolates
 the one thing that can differ: the noise walk moving the row, and the later
-draws then read at a moved row (drift). A null closes the lever.
+draws then read at a moved row (drift).
 
 - ``select`` (CPU): ``--rows`` kanji of f0's at mid frequency (items holding
   the glyph in ``--band``, evenly spaced by count), the f0 data dir's items
@@ -38,9 +38,6 @@ draws then read at a moved row (drift). A null closes the lever.
   start, accum − plain; the items holding the row), the sign over rows, the
   rows' displacement and its cos with f0's (f0's move sums ~360 draws per
   kanji: mostly signal) → ``…/<label>/read.json``.
-
-Not read: the render (glyph F1 — a loss change is not a render verdict), the
-1 348-row run's interference, warmup / cosine.
 
     .venv/bin/python project/cjk_anima_reseed/probes/probe_accum.py select --label a16
     make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probes/probe_accum.py run --label a16"

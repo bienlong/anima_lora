@@ -43,7 +43,7 @@ dynamic-seq compile) → `output/cjk_anima_reseed/probe_pres/s080/`
   (in-box 0.15 / 0.04; chance 1 / N ≈ 0.007 / 0.003). Its cos with the
   family stick −0.13 – −0.18: a step shrinks the stick (the sign the × 0.8
   read had), but 2–3 % of the common direction's energy is on it.
-- **The thing the user saw, teacher-forced.** L_pres per item (JA against
+- **Longer lines and higher σ move the page more.** L_pres per item (JA against
   EN outside the box) by σ and length: 7+ glyphs over one glyph ×1.6 at
   σ 0.5–0.7, ×2.0–2.2 at 0.8–0.95; and ~10× from σ 0.5 to 0.95 at every
   length.
@@ -92,9 +92,36 @@ canvas: wipe tail gone, reader hits halved,
 `../finished/cjk_renderable_anima/reports/synth_pair_2026_09_17.md`) is the
 text cost to watch.
 
+## Trained: 16 hiragana, λ 5 (10-06)
+
+`probes/probe_pres_train.py`, label `h16`: 16 hiragana of f0's
+(ごみろつきをじやりそさおらこるよ, 151–999 draws each) live at
+`seed_fixed_1005_stick080`, every other row frozen; plain AdamW lr 2e-4,
+1 500 × 4, and `p5` = the same batches plus 5 · L_pres at σ ~ U(0.8, 0.95)
+(own generator). Held out: 400 items, teacher-forced.
+
+| p5 − plain | σ 0.8 | 0.9 | 0.95 | item band |
+|---|---|---|---|---|
+| L_pres | −20 % (16/16 rows) | −27 % (16/16) | −31 % (16/16) | — |
+| in-box | +0.0001 (n.s.) | +0.0010 (z 3.2) | +0.0014 (z 3.1) | +0.0015 (z 9; 1/16 rows lower) |
+
+Plain leaves L_pres where start had it (σ 0.8–0.95 within ±0.00006) and
+takes the in-box term down 0.0093; p5 gives back 16 % of that. Δ(p5 − plain)
+is 31 % one vector shared by the 16 rows, cos +0.68 with § 1's common pres
+step and −0.09 with the stick; p5's move keeps cos 0.80 with plain's.
+
+Renders: `ruler.py --rows_pt` (`h16_plain@punct`, `h16_p5@punct`), the 56 of
+96 ruler strings holding a live kana (the other 40 render the same pixels in
+both arms), sheet EN | p5 | plain →
+`output/cjk_anima_reseed/probe_pres_train/h16/sheet_changed.png`. User's
+read of the sheet (19 of the 56 rendered at the time): **p5 keeps the page
+closer to the EN render than plain.**
+The cached start renders (`seed_fixed_1005_stick080@punct`, 10-05) are not
+comparable: the render path's retrain_kana check drifted 0.0 → 5.8 mean
+|Δpx| since, and start vs plain differs on strings with no live row.
+
 ## Open
 
-- A micro arm: f0's recipe plus L_pres at σ 0.8–0.95, two or three λ, read
-  on the ruler by length bin (`en_match`, `en_tok_out`, `g_f1`).
+- More λ (2, 10) and the band without 0.95, read on the 56 strings.
 - How much of the gap is the rows': the same read with the rows at the
   punct pack's raw rows (no training) as the student.

@@ -1,8 +1,8 @@
-My read: reseed has reached diminishing returns from changing bands and embedding geometry. The next useful experiments should change how glyphs receive supervision and how whole strings are represented. The evidence does not yet prove that a static embedding pack has reached its ceiling.
+Reseed has reached diminishing returns from changing bands and embedding geometry. The next useful experiments should change how glyphs receive supervision and how whole strings are represented. The evidence does not yet prove that a static embedding pack has reached its ceiling.
 
-I reviewed the reseed reports, relevant predecessor experiments, trainer and renderer code, and the latest saved ruler results. These conclusions concern Japanese text rendering; they don’t establish anything comparable for KO/ZH.
+These conclusions concern Japanese text rendering only, not KO/ZH.
 
-The latest dialogue ruler is the decisive result:
+The dialogue ruler (10-05, sensitive prompts):
 
  Table                Exact / 96 ↑    CER ↓
 ━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━  ━━━━━━━
@@ -18,7 +18,7 @@ The latest dialogue ruler is the decisive result:
 
 Every arm gets zero long strings within two edits. The banner-grid improvements therefore haven’t solved the intended task. Also, the two floor tables share their kana rows: the stronger floor’s advantage comes from its kanji changes. Latest dialogue findings (project/cjk_anima_reseed/reports/ruler_2026_10_05.md:178)
 
-The experiments establish several useful constraints:
+Constraints from the experiments:
 
 Band choice matters, but further tuning has weak prospects. Gradient-derived bands tied the existing bands; larger glyphs didn’t close the gap; raising upper edges helped banners but not dialogue.
 
@@ -26,11 +26,9 @@ Mean/residual decomposition is useful diagnostically, but doesn’t cleanly sepa
 
 Lower training loss and more positional variance are insufficient. The tag-drop experiment loses words at essentially unchanged loss; shrinking Δ restores positional information while destroying rendering. Neither result establishes that sequence control itself is solved.
 
-Here are the directions I would prioritize.
+Directions, in priority order:
 
 1. Give each glyph occurrence its own training credit.
-
-This is my strongest pack-compatible method suggestion.
 
 Your gradient probe found that changing glyph k in a word affects other rows almost as much as its own row. Meanwhile, the actual loss weights the whole text region, or the union of grid cells; it doesn’t assign individual glyph regions to their matching tokens. Gradient evidence (project/cjk_anima_reseed/reports/grad_identity_2026_10_02.md:123), loss implementation (project/cjk_anima_scale/cjk_scale/loss.py:74)
 
@@ -48,7 +46,7 @@ Retain ordinary whole-word FM batches to teach composition and count.
 
 Repeated characters need occurrence-level gradient gating, rather than merely unfreezing their shared table row.
 
-This explicitly changes which row receives which error. Another increase in whole-box weighting cannot do that. It also produces an ordinary static table at export.
+This changes which row receives which error, and still exports an ordinary static table.
 
 First diagnostic: repeat the own-versus-neighbor gradient probe on trained rows. The existing result is at a cold start. If trained rows already exhibit strong specificity, this hypothesis becomes less compelling.
 
@@ -58,7 +56,7 @@ There is a substantial remaining data mismatch. I checked the generated records:
 
 I would introduce natural 5–9 and 10–20 glyph phrases, one/two-column versions, and per-glyph boxes. Keep glyph size and its established band controlled; don’t move tiny text into high σ simply because the string is longer.
 
-Crucially, balance the combinations:
+Balance the combinations:
 
 The same phrase across different scenes and bubble shapes.
 Different phrases in the same scene and bubble.
@@ -84,8 +82,6 @@ Works on vertical text after appropriate crop handling.
 
 Keep an independent reader for evaluation. AnyText provides a concrete precedent for OCR-feature supervision through predicted-clean images. Its results don’t establish that the loss will have enough leverage through Anima’s frozen model and rows alone. AnyText, text perceptual loss
 
-This differs from simply repeating ΔFM sibling subtraction, whose previous results were weak.
-
 4. If static rows still plateau, add a small quote-scoped sequence adapter.
 
 My preferred architectural escalation would freeze the successful glyph rows and add a small residual module over the quoted string’s adapter outputs. Give it character identity, position within the quote, string length, and neighboring characters.
@@ -96,7 +92,7 @@ Test whether this correction improves omissions, repetitions and word placement 
 
 This would require a runtime component; it cannot generally be baked into one static vector per glyph. I would pursue it only after the cheaper pack-compatible tests.
 
-Before comparing new arms, I would fix two evaluation details:
+Two evaluation fixes before comparing new arms:
 
 “Unseen” currently mislabels every two-glyph string. cov3() returns None, which scoring converts to zero. Three of the four such ruler strings occur inside training text. Use bigram/exact-string coverage for these, and reserve source dialogue before future builds. Coverage code (project/cjk_anima_reseed/ruler.py:193)
 
@@ -104,6 +100,4 @@ Add correct text inside the intended bubble as a metric. Current scoring can rew
 
 I would also run the cheap two-row tilde rollback as a diagnostic, since the latest report already identifies those rows and their training imbalance.
 
-My first investment would be the trained-row credit probe, followed by the small 2×2 data/gradient experiment. I would deprioritize further stick scaling, band sweeps, and unconstrained warm polishing until one of those tests identifies a new source of improvement.
-
-No files changed or training jobs launched.
+Order: the trained-row credit probe, then the 2×2 data/gradient experiment. Further stick scaling, band sweeps and unconstrained warm polishing wait until one of those finds a new source of improvement.
