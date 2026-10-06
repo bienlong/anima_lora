@@ -528,8 +528,10 @@ def read(label: str, s080: str) -> None:
         i: json.loads(ln)["text"] for i, ln in enumerate(lines.splitlines()) if i in hs
     }
     ev0 = json.loads((root / "eval_start.json").read_text(encoding="utf-8"))
-    arms = sorted(
-        d.name for d in root.iterdir() if d.is_dir() and (d / "eval.json").exists()
+    arms = sorted(  # an arm: eval.json + rows.pt (the label's data/ has an eval.json)
+        d.name
+        for d in root.iterdir()
+        if (d / "eval.json").exists() and (d / "rows.pt").exists()
     )
     assert "plain" in arms, f"no plain arm under {root}"
     E = {a: json.loads((root / a / "eval.json").read_text()) for a in arms}

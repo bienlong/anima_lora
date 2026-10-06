@@ -120,8 +120,54 @@ The cached start renders (`seed_fixed_1005_stick080@punct`, 10-05) are not
 comparable: the render path's retrain_kana check drifted 0.0 → 5.8 mean
 |Δpx| since, and start vs plain differs on strings with no live row.
 
+## Trained: 32 hiragana, λ 10 (10-07)
+
+Label `h32`: h16's 16 + the 16 most frequent hiragana of the build
+(いなんのたかてしだはでにうとあが; `select --keep h16 --top 16`), 125–1 565
+draws each; λ 10, else h16's recipe. Its own data build (`data --n_items
+7500`: f0's table at 7 500 of 134 800 items; the probe reads 5 677 batch
+items + 400 held); f0's data dir is gone (deleted 10-06). The 32 reach 84 of
+the 96 ruler strings, median 0.46 of a string's glyphs live (h16: 56 / 0.17).
+
+| p10 − plain | σ 0.8 | 0.9 | 0.95 | item band |
+|---|---|---|---|---|
+| L_pres | −45 % (32/32 rows) | −53 % (32/32) | −57 % (32/32) | — |
+| in-box | +0.0024 (z 3.8) | +0.0034 (z 3.9) | +0.0069 (z 6.5) | +0.0027 (z 10; 0/32 rows lower) |
+
+Plain takes the in-box term down 0.0127; p10 gives back 22 % (h16 p5: 16 %).
+Δ(p10 − plain) is 29 % one shared vector, cos −0.11 with the stick; p10's
+move keeps cos 0.62 with plain's. (`probe_pres/s080` is gone: no cos with
+§ 1's common step.)
+
+Renders: `ruler.py run` on the four arms (`h16_plain` / `h16_p5` / `h32_plain`
+/ `h32_p10`, all `@punct`) →
+`results/20261007-0030-ruler-sensitive-pres_h16_h32/`; sheets EN | p10 |
+plain on the 84 strings → `…/probe_pres_train/h32/sheet_h32_{0..5}.png`.
+Paired on the strings holding a live row (mean Δ, arm better / worse, sign p):
+
+| arm − plain | h32 p10 (84) | h16 p5 (56) |
+|---|---|---|
+| `en_tok_out` | +0.039, 62/22, p 1e-5 | +0.026, 37/19, p 0.02 |
+| `en_match` | +0.097, 59/19, p 6e-6 | +0.065, 28/16, p 0.1 |
+| `iou_en` | +0.070, 59/23, p 9e-5 | +0.018, n.s. |
+| `text_area` | −0.025, 21/63, p 5e-6 | −0.014, p 0.003 |
+| `cer` (lower better) | +0.062, 36/18 worse, p 0.02 | +0.006, n.s. |
+| `le2` | 13 → 5 (lost 8, gained 0) | 3 → 3 |
+| `g_r_kana` | −0.041, n.s. | −0.086, p 0.001 |
+
+- **λ 10 on 32 rows doubles h16's page move**, in the probe (L_pres −45 to
+  −57 % against −20 to −31 %) and in the renders (`en_tok_out`, `en_match`).
+- **Not less text alone.** On the 30 strings whose text area did not shrink,
+  `en_tok_out` still gains +0.037 (23/7, p 0.005); across the 84 its gain is
+  uncorrelated with the text-area change (r 0.006). `en_match`'s gain sits
+  mostly where the text shrank (+0.12 against +0.05).
+- **The text pays now.** h16 p5 left CER and `le2` where plain had them;
+  h32 p10 loses 8 of plain's 13 `le2` strings and CER +0.06. The in-box cost
+  triples from σ 0.8 to 0.95, where L_pres pulls against the text (§ 1).
+
 ## Open
 
-- More λ (2, 10) and the band without 0.95, read on the 56 strings.
+- λ 10 with the band capped at 0.9 (the in-box cost is σ 0.95's), on h32's
+  data and rows; λ 2.
 - How much of the gap is the rows': the same read with the rows at the
   punct pack's raw rows (no training) as the student.
