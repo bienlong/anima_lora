@@ -18,9 +18,9 @@ hiragana rows cold, every other row at the 0921 seed), on tiers drawn here.
   is in ``PROBE`` as the anchor: the 10-02 read put its f half point at 0.75
   and ‖I‖'s low half at 0.55.
 
-    .venv/bin/python project/cjk_anima_reseed/probe_grad.py data
-    .venv/bin/python project/cjk_anima_reseed/probe_grad.py grad --dry_run   # CPU: the renders
-    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probe_grad.py grad"
+    .venv/bin/python project/cjk_anima_reseed/probes/probe_grad.py data
+    .venv/bin/python project/cjk_anima_reseed/probes/probe_grad.py grad --dry_run   # CPU: the renders
+    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probes/probe_grad.py grad"
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the reseed project
 from reseed import bootstrap  # noqa: E402
 
 bootstrap()

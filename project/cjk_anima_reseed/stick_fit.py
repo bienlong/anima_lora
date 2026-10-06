@@ -39,6 +39,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "probes"))
 import probe_split as PS  # noqa: E402  (bootstraps the scale line)
 
 from reseed import HOME, OUT  # noqa: E402

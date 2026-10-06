@@ -26,9 +26,9 @@ gradient is read.
   the start rows, so it says which way the first steps go, not where the
   run ends.
 
-    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probe_geom.py grad --label s080"
-    .venv/bin/python project/cjk_anima_reseed/probe_geom.py read --label s080
-    .venv/bin/python project/cjk_anima_reseed/probe_geom.py tiers --label s080
+    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probes/probe_geom.py grad --label s080"
+    .venv/bin/python project/cjk_anima_reseed/probes/probe_geom.py read --label s080
+    .venv/bin/python project/cjk_anima_reseed/probes/probe_geom.py tiers --label s080
 
 ``tiers`` (CPU): the draws split by the item that holds the glyph — σ, tier,
 and bubbleN against sent per row → ``…/<label>/tiers.json``.
@@ -41,7 +41,7 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the reseed project
 from reseed import bootstrap  # noqa: E402
 
 bootstrap()

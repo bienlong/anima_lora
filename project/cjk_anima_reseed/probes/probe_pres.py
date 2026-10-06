@@ -32,8 +32,8 @@ No training: the rows sit still and the gradient is read.
   mean ‖row‖² of the rows' mean gradients); all of it by σ; per item
   L_pres by σ × glyph count → ``…/<label>/read.json``.
 
-    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probe_pres.py grad --label s080"
-    .venv/bin/python project/cjk_anima_reseed/probe_pres.py read --label s080
+    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probes/probe_pres.py grad --label s080"
+    .venv/bin/python project/cjk_anima_reseed/probes/probe_pres.py read --label s080
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the reseed project
 from reseed import bootstrap  # noqa: E402
 
 bootstrap()

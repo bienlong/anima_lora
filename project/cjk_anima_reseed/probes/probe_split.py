@@ -53,7 +53,7 @@ recipe but the upper edges), so their rows are swapped at render.
   p00–p03 at seed 0, x̂0 decoded at ``TRAJ_SIGMAS`` and read: when the
   read's length passes the word's, and when a doubled glyph appears.
 
-    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probe_split.py --label s075"
+    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probes/probe_split.py --label s075"
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ import re
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the reseed project
 from reseed import bootstrap  # noqa: E402
 
 bootstrap()

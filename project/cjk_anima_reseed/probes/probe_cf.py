@@ -30,9 +30,9 @@ at ``--rows`` and the gradient is read.
   two losses' mean directions against each other and against the move f0
   made → ``read.json``.
 
-    .venv/bin/python project/cjk_anima_reseed/probe_cf.py pairs --label cf57
-    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probe_cf.py grad --label cf57"
-    .venv/bin/python project/cjk_anima_reseed/probe_cf.py read --label cf57
+    .venv/bin/python project/cjk_anima_reseed/probes/probe_cf.py pairs --label cf57
+    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probes/probe_cf.py grad --label cf57"
+    .venv/bin/python project/cjk_anima_reseed/probes/probe_cf.py read --label cf57
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ import random
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the reseed project
 from reseed import bootstrap  # noqa: E402
 
 bootstrap()

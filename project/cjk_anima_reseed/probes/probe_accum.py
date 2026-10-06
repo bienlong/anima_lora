@@ -42,10 +42,10 @@ draws then read at a moved row (drift). A null closes the lever.
 Not read: the render (glyph F1 — a loss change is not a render verdict), the
 1 348-row run's interference, warmup / cosine.
 
-    .venv/bin/python project/cjk_anima_reseed/probe_accum.py select --label a16
-    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probe_accum.py run --label a16"
-    .venv/bin/python project/cjk_anima_reseed/probe_accum.py read --label a16
-    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probe_accum.py look --label a16m"
+    .venv/bin/python project/cjk_anima_reseed/probes/probe_accum.py select --label a16
+    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probes/probe_accum.py run --label a16"
+    .venv/bin/python project/cjk_anima_reseed/probes/probe_accum.py read --label a16
+    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probes/probe_accum.py look --label a16m"
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ import sys
 import zlib
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the reseed project
 from reseed import bootstrap  # noqa: E402
 
 bootstrap()

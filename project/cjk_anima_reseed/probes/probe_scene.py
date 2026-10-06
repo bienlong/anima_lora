@@ -27,9 +27,9 @@ fits there. Held fixed: one canvas shape (so noise draw k is the same σ_k,
   in-box term, the out-box term, plain MSE rebuilt from the two by area →
   ``read.json``.
 
-    .venv/bin/python project/cjk_anima_reseed/probe_scene.py render --label sc1
-    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probe_scene.py grad --label sc1"
-    .venv/bin/python project/cjk_anima_reseed/probe_scene.py read --label sc1
+    .venv/bin/python project/cjk_anima_reseed/probes/probe_scene.py render --label sc1
+    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probes/probe_scene.py grad --label sc1"
+    .venv/bin/python project/cjk_anima_reseed/probes/probe_scene.py read --label sc1
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ import random
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the reseed project
 from reseed import bootstrap  # noqa: E402
 
 bootstrap()
