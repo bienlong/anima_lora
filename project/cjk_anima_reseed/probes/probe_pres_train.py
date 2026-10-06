@@ -19,11 +19,15 @@ Hiragana rows (a kana row sits in most lines; ``probe_pres``'s common
 direction was twice the kanji's, 0.24 vs 0.12). The eval reads σ 0.95 apart:
 there the term pulled against the in-box term (kana −0.03, kanji −0.12).
 
+- ``data`` (CPU): the run's table (its ``data_from``'s rows, shares, lines,
+  pack) at ``--n_items`` → ``…/<label>/data``; ``select`` / ``run`` / ``read``
+  read a label's own build when it has one, else the run's data dir.
 - ``select`` (CPU): ``--rows`` hiragana of f0's (small kana out) at items
   holding the glyph in ``--band``, evenly spaced by count; every item holding
   one; the multi-glyph texts split train / held out (``--hold``), the held
   items cut to ``--n_held`` by a text hash; the ``--steps`` batches in the
-  trainer's order → ``…/<label>/select.json``.
+  trainer's order → ``…/<label>/select.json``. ``--keep <label> --top n``
+  picks that label's rows and the ``n`` most frequent hiragana besides.
 - ``run --arm <name> --lam λ`` (GPU, one arm a job): f0's data dir and start
   rows (``seed_fixed_1005_stick080``), only the picked rows live, every
   other row frozen there; plain AdamW (the trainer's betas, wd 0, constant
@@ -49,6 +53,13 @@ there the term pulled against the in-box term (kana −0.03, kanji −0.12).
     make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probes/probe_pres_train.py run --label h16 --arm plain"
     make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probes/probe_pres_train.py run --label h16 --arm p5 --lam 5"
     .venv/bin/python project/cjk_anima_reseed/probes/probe_pres_train.py read --label h16
+
+h32 (10-06): h16's rows + the 16 most frequent, on its own 7 500-item build::
+
+    .venv/bin/python project/cjk_anima_reseed/probes/probe_pres_train.py data --label h32 --n_items 7500
+    .venv/bin/python project/cjk_anima_reseed/probes/probe_pres_train.py select --label h32 --keep h16 --top 16
+    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probes/probe_pres_train.py run --label h32 --arm plain"
+    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probes/probe_pres_train.py run --label h32 --arm p10 --lam 10"
 
 Renders: the ruler, the arms' rows.pt on stick080's rows (``--rows_pt``)::
 
@@ -87,6 +98,34 @@ def _h(s: str) -> int:
     return zlib.crc32(s.encode())
 
 
+def _data_dir(run, label: str) -> Path:
+    """The label's own build (``data``) when it has one, else the run's."""
+    own = PROBE / label / "data"
+    return own if (own / "train.jsonl").exists() else run.data
+
+
+def build_data(run_name: str, label: str, n_items: int, workers) -> Path:
+    """The run's table at ``n_items`` (its data run's rows, shares, lines and
+    pack: f0's ``data_from``) → ``…/<label>/data``."""
+    from dataclasses import replace
+
+    from reseed import table as TB
+    from reseed.builder import build
+    from reseed.config import load
+
+    run = load(run_name)
+    src = load(run.data_from) if run.data_from else run
+    assert "/" not in (run.data_from or ""), "a reseed run's build"
+    assert all(r.startswith("chars:") for r in src.rows), src.rows
+    n_rows = len({c for r in src.rows for c in r[len("chars:") :]})
+    full = sum(TB.ITEMS_PER_ROW * n_rows * t.share for t in src.table())
+    src.use_pack()
+    b = replace(src, name=f"{PROBE.name}/{label}")
+    assert b.data == PROBE / label / "data", b.data
+    print(f"{src.name}'s table: {full:.0f} items in full → {n_items}", flush=True)
+    return build(b, workers, n_items / full)
+
+
 def select(
     run_name: str,
     label: str,
@@ -95,6 +134,8 @@ def select(
     hold: float,
     n_held: int,
     steps: int,
+    keep: str = "",
+    top: int = 0,
 ) -> dict:
     from types import SimpleNamespace
 
@@ -103,9 +144,10 @@ def select(
     from reseed.config import load
 
     run = load(run_name)
+    data = _data_dir(run, label)
     recs = [
         json.loads(ln)
-        for ln in (run.data / "train.jsonl").read_text(encoding="utf-8").splitlines()
+        for ln in (data / "train.jsonl").read_text(encoding="utf-8").splitlines()
         if ln
     ]
     count: dict = {}
@@ -114,11 +156,20 @@ def select(
             if _hira(c) and c not in SMALL:
                 count[c] = count.get(c, 0) + 1
     lo, hi = band
-    elig = sorted((n, c) for c, n in count.items() if lo <= n <= hi)
-    assert len(elig) >= n_rows, f"{len(elig)} hiragana in {band}, want {n_rows}"
-    step = len(elig) / n_rows
-    picked = [elig[int(k * step)][1] for k in range(n_rows)]
     c2r = _char_rows()
+    if keep:  # another label's rows + the ``top`` most frequent hiragana besides
+        picked = json.loads((PROBE / keep / "select.json").read_text("utf-8"))["chars"]
+        rest = sorted(
+            ((n, c) for c, n in count.items() if c not in picked and c in c2r),
+            reverse=True,
+        )
+        assert len(rest) >= top, f"{len(rest)} hiragana besides {keep}'s, want {top}"
+        picked = picked + [c for _n, c in rest[:top]]
+    else:
+        elig = sorted((n, c) for c, n in count.items() if lo <= n <= hi)
+        assert len(elig) >= n_rows, f"{len(elig)} hiragana in {band}, want {n_rows}"
+        step = len(elig) / n_rows
+        picked = [elig[int(k * step)][1] for k in range(n_rows)]
     assert all(c in c2r for c in picked), [c for c in picked if c not in c2r]
     on = set(picked)
     items = [i for i, r in enumerate(recs) if on & set(r["text"])]
@@ -150,6 +201,7 @@ def select(
     draws = {c: sum(c in recs[i]["text"] for i in drawn) for c in picked}
     sel = {
         "run": run_name,
+        "data": str(data),
         "chars": picked,
         "rows": [int(c2r[c]) for c in picked],
         "items_per_char": {c: count[c] for c in picked},
@@ -165,7 +217,7 @@ def select(
     out.mkdir(parents=True, exist_ok=True)
     (out / "select.json").write_text(json.dumps(sel, ensure_ascii=False))
     print(
-        f"{n_rows} hiragana ({''.join(picked)}), items {lo}–{hi} each in {run_name}'s data\n"
+        f"{len(picked)} hiragana ({''.join(picked)}) in {data}\n"
         f"items holding one: {len(items)} → train {len(train)}, held out "
         f"{len(held_all)} → {len(held)} kept ({len({recs[i]['text'] for i in held})} texts)\n"
         f"{steps} batches: {len(set(drawn))} items; draws per row: "
@@ -217,7 +269,7 @@ def run(
     run_ = load(sel["run"])
     run_.use_pack()
     start = REPO / STICK080
-    data = run_.data
+    data = Path(sel.get("data") or run_.data)
     recs_all, _ev, vocabs = T.load_items(data)
     order = sel["batches"]
     held = sel["held"]
@@ -468,7 +520,9 @@ def read(label: str, s080: str) -> None:
     sel = json.loads((root / "select.json").read_text(encoding="utf-8"))
     from reseed.config import load
 
-    lines = (load(sel["run"]).data / "train.jsonl").read_text(encoding="utf-8")
+    lines = (Path(sel.get("data") or load(sel["run"]).data) / "train.jsonl").read_text(
+        encoding="utf-8"
+    )
     hs = set(sel["held"])
     text = {
         i: json.loads(ln)["text"] for i, ln in enumerate(lines.splitlines()) if i in hs
@@ -602,11 +656,15 @@ def read(label: str, s080: str) -> None:
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("verb", choices=["select", "run", "read"])
+    p.add_argument("verb", choices=["data", "select", "run", "read"])
     p.add_argument("--run", default="sent_kanji_f0")
     p.add_argument("--label", default="h16")
     p.add_argument("--rows", type=int, default=16)
     p.add_argument("--band", default="2000,14000", help="items per hiragana, lo,hi")
+    p.add_argument("--keep", default="", help="select: this label's rows, plus --top")
+    p.add_argument("--top", type=int, default=0, help="select: most frequent besides")
+    p.add_argument("--n_items", type=int, default=7500, help="data: the build's size")
+    p.add_argument("--workers", type=int, default=None)
     p.add_argument("--hold", type=float, default=0.15)
     p.add_argument("--n_held", type=int, default=400)
     p.add_argument("--steps", type=int, default=1500)
@@ -617,9 +675,13 @@ def main():
     p.add_argument("--evals", type=int, default=2)
     p.add_argument("--s080", default="s080", help="probe_pres label for the read")
     a = p.parse_args()
-    if a.verb == "select":
+    if a.verb == "data":
+        build_data(a.run, a.label, a.n_items, a.workers)
+    elif a.verb == "select":
         lo, hi = (int(x) for x in a.band.split(","))
-        select(a.run, a.label, a.rows, (lo, hi), a.hold, a.n_held, a.steps)
+        select(
+            a.run, a.label, a.rows, (lo, hi), a.hold, a.n_held, a.steps, a.keep, a.top
+        )
     elif a.verb == "run":
         pb = tuple(float(x) for x in a.pres_band.split(","))
         run(a.label, a.arm, a.lam, pb, a.lr, a.evals)

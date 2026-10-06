@@ -440,7 +440,35 @@ def ext_encoder():
     return ext
 
 
-def add_windows(pools: Pools, read: tuple, out: Path, phrase: str) -> dict:
+# fork-inherited (set before the pool forks; never pickled)
+_EXT: dict = {}
+
+
+def _routed_chunk(texts: list) -> list:
+    return [_EXT["ext"](True, t) for t in texts]
+
+
+def routed(ext, texts: list, workers: int = 1) -> list:
+    """``ext(True, t)`` for every ``t``, in order, forked over ``workers``
+    processes (the encoding check: ~0.16 ms a window, 1.3 M windows on
+    sent_kanji's 1 348 rows)."""
+    import multiprocessing as mp
+
+    if workers <= 1 or len(texts) < 20_000:
+        return [ext(True, t) for t in texts]
+    _EXT["ext"] = ext
+    k = -(-len(texts) // (workers * 8))
+    chunks = [texts[i : i + k] for i in range(0, len(texts), k)]
+    try:
+        with mp.get_context("fork").Pool(workers) as pool:
+            return [r for part in pool.map(_routed_chunk, chunks) for r in part]
+    finally:
+        _EXT.clear()
+
+
+def add_windows(
+    pools: Pools, read: tuple, out: Path, phrase: str, workers: int = 1
+) -> dict:
     """``pools.windows`` (glyph → its windows) over the dialogue lines (``phrase``) and
     the training set's own JA text, the read strings held out by trigram,
     every window routed to its glyphs' rows and nothing else (else dropped).
@@ -460,7 +488,8 @@ def add_windows(pools: Pools, read: tuple, out: Path, phrase: str) -> dict:
         a, b = ext(False, c), ext(True, c)
         assert len(a) == 1 and a == b, (c, a, b)
         ids[c] = a[0]
-    ok = [w for w in ws if ext(True, w) == [ids[c] for c in w]]
+    got = routed(ext, ws, workers)
+    ok = [w for w, g in zip(ws, got) if g == [ids[c] for c in w]]
     pools.windows = {g: v for g in sorted(glyphs) if (v := [w for w in ok if g in w])}
     marks = mark_singles(pools.singles)
     pools.lone = [
@@ -469,7 +498,11 @@ def add_windows(pools: Pools, read: tuple, out: Path, phrase: str) -> dict:
         if g not in marks
         or (g not in T.MARK_NOT_LONE and ext(True, g) == [ext.glyph_row(g)])
     ]
-    mstats = add_mark_windows(pools, marks, lines + ds, read, ext) if marks else None
+    mstats = (
+        add_mark_windows(pools, marks, lines + ds, read, ext, workers)
+        if marks
+        else None
+    )
     pools.windows_len = {
         g: {k: [w for w in v if len(w) == k] for k in sorted({len(w) for w in v})}
         for g, v in pools.windows.items()
@@ -502,7 +535,9 @@ def add_windows(pools: Pools, read: tuple, out: Path, phrase: str) -> dict:
     return stats
 
 
-def add_mark_windows(pools: Pools, marks: list, lines: list, read: tuple, ext) -> dict:
+def add_mark_windows(
+    pools: Pools, marks: list, lines: list, read: tuple, ext, workers: int = 1
+) -> dict:
     """``pools.windows`` / ``windows_len`` for the mark rows: windows of the
     dialogue lines (ellipses normalised), the training set's text and
     ``HEART_LINES`` synthesised heart lines (``pools.synth``, when a heart is a
@@ -520,7 +555,8 @@ def add_mark_windows(pools: Pools, marks: list, lines: list, read: tuple, ext) -
     forms = {c: by_row[r] for c in sorted(cands) if (r := ext.glyph_row(c)) in by_row}
     forms.update({m: m for m in marks})
     ws = mark_window_pool(letters, forms, norm + pools.synth, held_grams(read))
-    ok = [w for w in ws if ext(True, w) == [ext.glyph_row(c) for c in w]]
+    got = routed(ext, ws, workers)
+    ok = [w for w, g in zip(ws, got) if g == [ext.glyph_row(c) for c in w]]
     for m in marks:
         v = [w for w in ok if any(forms.get(c) == m for c in w)]
         assert v, f"no window holds the mark {m}"

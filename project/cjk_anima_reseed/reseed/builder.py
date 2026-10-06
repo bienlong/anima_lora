@@ -58,7 +58,7 @@ def build(run: Run, workers: int | None = None, frac: float = 1.0) -> Path:
     rng = random.Random(T.SEED)
     pools = build_pools(list(run.rows), rng)
     phrase = run.phrase_file()
-    win = add_windows(pools, run.read, out, phrase)
+    win = add_windows(pools, run.read, out, phrase, workers)
     table = run.table()
     plan = [
         (t, int(round(T.ITEMS_PER_ROW * len(pools.singles) * t.share * frac)))
@@ -89,7 +89,7 @@ def build(run: Run, workers: int | None = None, frac: float = 1.0) -> Path:
         got, report[t.name] = _build_tier(t, n, pools, rng, out, len(recs), workers)
         recs += got
     assert recs, "nothing drawn"
-    _ink_stats(recs)
+    _ink_stats(recs, workers)
     (out / "train.jsonl").write_text(
         "\n".join(json.dumps(r, ensure_ascii=False) for r in recs) + "\n",
         encoding="utf-8",

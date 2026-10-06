@@ -39,6 +39,7 @@ from .inventory import (
 )
 from .vocabs import SMALL_PER, Inventory, parse_vocabs
 
+
 class ShapePool:
     """``--shapes`` canvas draws on their own rng stream (an unset ``--shapes``
     draws nothing and every render is 512²)."""
@@ -57,30 +58,45 @@ class ShapePool:
         return (W, H)
 
 
-def _ink_stats(recs) -> dict:
+def _ink_of(job) -> tuple:
+    """One boxed record's (glyphs, ink px in its boxes, box area px²)."""
+    from PIL import Image
+
+    from common.render.ink import box_area, glyph_count, ink_pixels
+
+    file, boxes, vocabs = job
+    glyphs = max(1, sum(glyph_count(u) for u in vocabs))
+    with Image.open(file) as im:
+        g = im.convert("L")
+        ink = sum(ink_pixels(g, b) for b in boxes)
+    return glyphs, ink, sum(box_area(b) for b in boxes)
+
+
+def _ink_stats(recs, workers: int = 1) -> dict:
     """plan_band § 3: every boxed record gets ``glyphs`` / ``ink`` (ink px
     inside its box(es)) / ``box_area`` (px²), and the build prints, per
     kind, the median (p10–p90) glyph px — √(box area / glyphs) — and ink per
     glyph in latent cells² (ink px / 64 / glyphs). An arm runs only if the
     median px lands in its cell's target ± 20 %. Returns ``{kind: (px, ink)}``
-    medians for tests."""
+    medians for tests. ``workers`` > 1 reads the images over a fork pool."""
+    import multiprocessing as mp
     import statistics as st
 
-    from PIL import Image
-
-    from common.render.ink import box_area, glyph_count, ink_pixels
-
-    px_by, ink_by = {}, {}
+    boxed, jobs = [], []
     for r in recs:
         boxes = r.get("boxes") or ([r["box"]] if r.get("box") else None)
         if not boxes:
             continue
         vocabs = r.get("units") or [r["text"]]  # the on-disk record key stays
-        glyphs = max(1, sum(glyph_count(u) for u in vocabs))
-        with Image.open(r["file"]) as im:
-            g = im.convert("L")
-            ink = sum(ink_pixels(g, b) for b in boxes)
-        area = sum(box_area(b) for b in boxes)
+        boxed.append(r)
+        jobs.append((r["file"], boxes, vocabs))
+    if workers > 1 and len(jobs) >= 1000:
+        with mp.get_context("fork").Pool(workers) as pool:
+            got = pool.map(_ink_of, jobs, chunksize=64)
+    else:
+        got = [_ink_of(j) for j in jobs]
+    px_by, ink_by = {}, {}
+    for r, (glyphs, ink, area) in zip(boxed, got):
         r["glyphs"], r["ink"], r["box_area"] = glyphs, ink, area
         px_by.setdefault(r["kind"], []).append((area / glyphs) ** 0.5)
         ink_by.setdefault(r["kind"], []).append(ink / 64 / glyphs)
