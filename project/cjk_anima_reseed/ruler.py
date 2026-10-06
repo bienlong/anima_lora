@@ -711,7 +711,21 @@ def render(names: list) -> None:
 
 UNSEEN = 0.15  # cov3 at or below: the string's trigrams the arms barely trained on
 BOOL = ("official", "exact", "contained", "le1", "le2", "dup")
-REAL = ("cer", "en_cls", "en_match", "en_tok_out", "fw_over_en")
+# the page scores (user, 10-06: what is drawn, not only whether the string
+# reads whole) — ``score_page``; a real is ``None`` where it has no meaning
+# (kanji recall on a kana-only string) and is left out of a mean / a pair
+PAGE = (
+    "g_p",
+    "g_r",
+    "g_f1",
+    "g_r_kanji",
+    "g_r_kana",
+    "drawn",
+    "a_p",
+    "text_area",
+    "iou_en",
+)
+REAL = ("cer", *PAGE, "en_cls", "en_match", "en_tok_out", "fw_over_en")
 
 
 def candidates(reads: list, reader: str) -> list:
@@ -752,6 +766,91 @@ def score_text(text: str, reads: list) -> dict:
         "le2": len(t) > 2 and d <= 2,
         "cer": min(1.0, d / max(1, len(t))),
         "dup": bool(best) and (bool(doubled(best) - doubled(t)) or len(best) > len(t)),
+    }
+
+
+LETTER_RE = re.compile(r"[ぁ-ゟァ-ヺー一-鿿]")  # kana, ー, kanji (NFKC)
+KANJI = re.compile(r"[一-鿿]")
+READERS = ("sfx", "vl")
+ON_SHARE = 0.5  # a box is on the target: this share of its letters are the target's
+
+
+def letters(s: str | None) -> list:
+    import unicodedata
+
+    return [c for c in unicodedata.normalize("NFKC", s or "") if LETTER_RE.match(c)]
+
+
+def box_mask(boxes: list, hw: tuple):
+    import numpy as np
+
+    H, W = hw
+    m = np.zeros((H, W), dtype=bool)
+    for b in boxes:
+        x0, y0, x1, y1 = (int(round(v)) for v in b)
+        m[max(0, y0) : min(H, y1), max(0, x0) : min(W, x1)] = True
+    return m
+
+
+def score_page(text: str, reads: list, en_reads: list) -> dict:
+    """What the page draws against the string (user, 10-06), every text box
+    read, each reader on its own and the two averaged:
+
+    - glyphs (kana, ー, kanji; a bag — order and box free): ``g_p`` = the
+      string's letters among all letters drawn (low: much text that is not
+      the string), ``g_r`` = the string's letters drawn, ``g_f1``;
+      ``g_r_kanji`` / ``g_r_kana`` the recall over its kanji / kana only;
+      ``drawn`` = letters drawn;
+    - regions: a box is on the string when ``ON_SHARE`` of its letters are
+      the string's (and it holds two of them, one for a one-letter string);
+      ``a_p`` = the on boxes' area over all text area, ``text_area`` = text
+      area over the page, ``iou_en`` = the text area's IoU with the EN ref's
+      (its layout — the EN page letters its other bubbles too, so not the
+      string's place)."""
+    from collections import Counter
+
+    whole = next(r for r in reads if r.get("whole"))
+    hw = (int(whole["box"][3]), int(whole["box"][2]))
+    boxes = [r for r in reads if not r.get("whole")]
+    G = Counter(letters(text))
+    nG = sum(G.values())
+    gk = Counter({c: n for c, n in G.items() if KANJI.match(c)})
+    ga = G - gk
+    text_m = box_mask([r["box"] for r in boxes], hw)
+    en_m = box_mask([r["box"] for r in en_reads if not r.get("whole")], hw)
+    t_area = int(text_m.sum())
+    per = []
+    for rd in READERS:
+        D, on = Counter(), []
+        for r in boxes:
+            b = Counter(letters(r.get(rd)))
+            D += b
+            hit, nb = sum((b & G).values()), sum(b.values())
+            if nb and hit >= max(min(2, nG), ON_SHARE * nb):
+                on.append(r["box"])
+        hit, nD = sum((D & G).values()), sum(D.values())
+        pr = hit / nD if nD else 0.0
+        rc = hit / nG if nG else 0.0
+        on_area = int((box_mask(on, hw) & text_m).sum())
+        per.append(
+            {
+                "g_p": pr,
+                "g_r": rc,
+                "g_f1": 2 * pr * rc / (pr + rc) if pr + rc else 0.0,
+                "g_r_kanji": sum((D & gk).values()) / sum(gk.values()) if gk else None,
+                "g_r_kana": sum((D & ga).values()) / sum(ga.values()) if ga else None,
+                "drawn": nD,
+                "a_p": on_area / t_area if t_area else 0.0,
+            }
+        )
+    out = {
+        k: None if per[0][k] is None else sum(x[k] for x in per) / len(per)
+        for k in per[0]
+    }
+    union = int((text_m | en_m).sum())
+    return out | {
+        "text_area": t_area / (hw[0] * hw[1]),
+        "iou_en": int((text_m & en_m).sum()) / union if union else 0.0,
     }
 
 
@@ -880,6 +979,7 @@ def read_renders(names: list) -> dict:
                 "text": m["text"],
                 "file": str(f),
                 **score_text(m["text"], reads),
+                **score_page(m["text"], reads, en_reads),
                 **at(f, ref),
                 "en_tok_out": float(
                     F.cosine_similarity(fi[keep], fr[keep], dim=1).mean()
@@ -916,9 +1016,9 @@ def tally(recs: dict) -> dict:
         out[a] = {}
         for g, ks in groups(ra).items():
             c = {"n": len(ks)} | {k: sum(ra[i][k] for i in ks) for k in BOOL}
-            c |= {
-                k: round(sum(ra[i][k] for i in ks) / max(1, len(ks)), 4) for k in REAL
-            }
+            for k in REAL:
+                xs = [ra[i][k] for i in ks if ra[i][k] is not None]
+                c[k] = round(sum(xs) / len(xs), 4) if xs else None
             out[a][g] = c
     return out
 
@@ -934,7 +1034,11 @@ def paired(ra: dict, rb: dict) -> dict:
             ls = sum(rb[i][k] and not ra[i][k] for i in ks)
             c[k] = [gn, ls, sign_p(gn, ls)]
         for k in REAL:
-            dif = [ra[i][k] - rb[i][k] for i in ks]
+            dif = [
+                ra[i][k] - rb[i][k]
+                for i in ks
+                if ra[i][k] is not None and rb[i][k] is not None
+            ]
             up, dn = sum(x > 1e-9 for x in dif), sum(x < -1e-9 for x in dif)
             c[k] = [round(sum(dif) / max(1, len(dif)), 4), up, dn, sign_p(up, dn)]
         out[g] = c
@@ -972,7 +1076,8 @@ def sheets(recs: dict, out: Path, per: int = 8) -> None:
                                 f"{a} {mark}",
                                 f"{r['best'][:22]}",
                                 f"cer {r['cer']:.2f} tok {r['en_tok_out']:.3f}",
-                                f"fw+ {r['fw_over_en']:+.2f}",
+                                f"P {r['g_p']:.2f} R {r['g_r']:.2f} "
+                                f"F1 {r['g_f1']:.2f} on {r['a_p']:.2f}",
                             ],
                         )
                     )
@@ -992,8 +1097,9 @@ def read(names: list, label: str) -> Path:
         for g, c in gs.items():
             print(f"  {a:<18} {g:<13} {c}", flush=True)
     pairs = {}
-    for a in names:
-        for b in [*FLOOR[1:], *(n for n in names if "@" in n)]:
+    for k, a in enumerate(names):
+        # every arm against the floor and every arm named before it
+        for b in dict.fromkeys([*FLOOR[1:], *names[:k]]):
             if a != b and b in recs:
                 pairs[f"{a} vs {b}"] = pr = paired(recs[a], recs[b])
                 print(f"  {a} vs {b}: {pr['all']}", flush=True)

@@ -103,12 +103,44 @@ Closer, not whole: 田中さま → 田中ささま (preview51 十甲さ兎ま);
 おっさん → 変わてさん. preview51's 8 short exact: f0 keeps はい… only
 (sent_whole はい ほー んー フー さわって).
 
+## 5. What the page draws (`score_page`)
+
+From the user (10-06): precision / recall over what is drawn, not exact /
+≤ 2 edits. Every text box read (both readers, averaged); kana, ー and kanji as
+a bag (order and box free): `g_p` = the string's letters among all drawn,
+`g_r` = the string's letters drawn, `g_f1`, `g_r_kanji` / `g_r_kana`,
+`drawn` = letters drawn. Regions: a box is on the string at half its letters
+the string's; `a_p` = the on boxes' share of the text area; `iou_en` = the
+text area's IoU with the EN ref's (layout only: the EN page letters its other
+bubbles too). Re-read, no render → `results/20261006-1502-ruler-sensitive-glyph_f1/`.
+
+| arm | g_p | g_r | g_f1 | g_r_kanji | drawn | a_p | en_match |
+|---|---|---|---|---|---|---|---|
+| preview51 | 0.170 | 0.635 | 0.241 | 0.193 | 45.6 | 0.227 | 0.436 |
+| sent_whole | 0.193 | 0.647 | 0.260 | 0.167 | 39.8 | 0.266 | 0.437 |
+| sent_kanji_f0 | 0.202 | 0.670 | 0.271 | 0.336 | 37.3 | 0.318 | 0.436 |
+
+Paired, f0 vs preview51 (mean Δ, better / worse, p): g_p +0.032 (63 / 31,
+0.0013), g_f1 +0.030 (60 / 34, 0.0095), g_r_kanji +0.143 (19 / 6, 0.015),
+drawn −8.3 (0.011), a_p +0.091 (44 / 26, 0.041); g_r +0.035 (0.91),
+en_match −0.001 (0.66). By bin: long g_p +0.082 (26 / 6, 0.0005), drawn
+−19.9 (4 / 26, 6e-5), g_r −0.016 (0.2); mid g_r +0.123 (20 / 8, 0.036),
+g_r_kanji 7 / 0 (0.016), a_p +0.129 (0.011); short nothing (drawn +2.2,
+0.061).
+
+- **Fewer letters, more of them right — the dialogue data's.** sent_whole
+  vs preview51 shows the long-page part too (g_p +0.072, 0.02; drawn −17.5,
+  2e-5) and loses short F1 (−0.018, 0.029). The long pages that "letter less"
+  (`sent_ball_2026_10_05.md` § 7) letter less of what is not the string.
+- **The kanji add kanji recall**: f0 vs sent_whole g_r_kanji +0.169 (18 / 6,
+  0.023), the rest tied (g_f1 +0.011, 0.059).
+- The bag credits a common kana read in junk text, alike for every arm.
+
 ## Open
 
 - The short kana loss: f0's kana rows moved less than sent_whole's (0.990
   vs 0.981), so not their turn alone — the kana stick grew (119.4 → 121.3,
   sent_whole's shrank) and the kanji moved under the same lines. A run with
   the kana held at preview51 and the kanji free splits it.
-- exact / ≤ 2 edits barely move on mid / long for any arm; a score that
-  counts the right glyphs drawn and the wrong ones (page-level precision /
-  recall) reads this arm's gain where exact cannot (user, 10-06).
+- Recall on long does not move for any arm (g_r 0.56–0.59): the pages
+  letter less junk, not more of the string.
