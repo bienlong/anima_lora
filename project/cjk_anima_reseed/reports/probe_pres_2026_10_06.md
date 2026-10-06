@@ -165,9 +165,58 @@ Paired on the strings holding a live row (mean Δ, arm better / worse, sign p):
   h32 p10 loses 8 of plain's 13 `le2` strings and CER +0.06. The in-box cost
   triples from σ 0.8 to 0.95, where L_pres pulls against the text (§ 1).
 
+## h32, band capped at 0.9 (10-07)
+
+Arm `p10c09`: `p10` with L_pres's σ ~ U(0.8, 0.9) (`--pres_band 0.8,0.9`),
+else the same rows, build, batches and λ 10. The held-out eval still reads
+σ 0.95. Paired on the same items and draws:
+
+| Δ | p10 − plain | p10c09 − plain | p10c09 − p10 |
+|---|---|---|---|
+| L_pres σ 0.8 | −45 % | −44 % | +3 % (z 3.3) |
+| L_pres σ 0.9 | −53 % | −51 % | +4 % (z 3.3) |
+| L_pres σ 0.95 | −57 % | −54 % | +7 % (z 5.8) |
+| in-box σ 0.8 | +0.0024 | +0.0020 | −0.0004 (z 2.5) |
+| in-box σ 0.9 | +0.0034 | +0.0023 | −0.0011 (z 6.3) |
+| in-box σ 0.95 | +0.0069 | +0.0051 | −0.0018 (z 6.8) |
+| in-box, item band | +0.0027 (z 10) | +0.0026 (z 10) | −0.0001 (n.s.) |
+
+The cap keeps ~95 % of p10's L_pres drop, σ 0.95 included (32/32 rows lower
+than plain at every σ), and takes 18–33 % off the high-σ in-box cost; σ 0.95
+still costs +0.0051, 2.6× σ 0.8, untrained there. The in-box term at the
+item's own band does not move: both give back 21–22 % of plain's gain.
+Geometry as p10's (common share 0.28, cos −0.11 with the stick, 0.64 with
+plain's move).
+
+Renders: `ruler.py run` on `h32_plain` / `h32_p10` / `h32_p10c09` (`@punct`,
+the first two from cache) → `results/20261007-0126-ruler-sensitive-pres_h32_c09/`;
+sheets EN | p10c09 | p10 | plain on the 84 live strings →
+`…/probe_pres_train/h32/sheet_c09_{0..5}.png`. Paired on the 84 (the 12
+others render the same pixels in every arm; means scaled 96/84, which
+reproduces § h32's p10 figures):
+
+| arm − plain | p10 | p10c09 | p10c09 − p10 |
+|---|---|---|---|
+| `en_tok_out` | +0.039, 62/22, p 1e-5 | +0.028, 63/33, p 0.003 | −0.011, p 0.05 |
+| `en_match` | +0.097, 59/19, p 6e-6 | +0.077, 59/28, p 0.001 | −0.020, n.s. |
+| `iou_en` | +0.070, 59/23, p 9e-5 | +0.070, 68/23, p 2e-6 | 0, n.s. |
+| `text_area` | −0.025, p 5e-6 | −0.027, p 2e-8 | n.s. |
+| `cer` (lower better) | +0.062, p 0.02 | −0.008, 30/29, n.s. | −0.070, p 0.12 |
+| `le2` | 13 → 5 (lost 8) | 15 → 15 (5 / 5) | 8 / 0, p 0.008 |
+| `g_r_kana` | −0.041, n.s. | −0.044, n.s. | n.s. |
+
+Totals on the 96 (plain / p10 / p10c09): `official` 4 / 5 / 9, `exact`
+6 / 7 / 10, `le2` 15 / 7 / 15, `dup` 30 / 21 / 18.
+
+- **The text cost was σ 0.95's.** Capped, CER and `le2` sit at plain's; p10
+  lost 8 `le2` strings to plain, p10c09 none to p10.
+- **The page holds**: `iou_en` all of p10's gain, `en_match` ~80 %,
+  `en_tok_out` ~70 %.
+- The probe's band in-box term did not separate the arms; its σ 0.9–0.95
+  in-box term did, and the renders follow that one.
+
 ## Open
 
-- λ 10 with the band capped at 0.9 (the in-box cost is σ 0.95's), on h32's
-  data and rows; λ 2.
+- λ 2.
 - How much of the gap is the rows': the same read with the rows at the
   punct pack's raw rows (no training) as the student.

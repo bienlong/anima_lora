@@ -60,6 +60,7 @@ h32 (10-06): h16's rows + the 16 most frequent, on its own 7 500-item build::
     .venv/bin/python project/cjk_anima_reseed/probes/probe_pres_train.py select --label h32 --keep h16 --top 16
     make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probes/probe_pres_train.py run --label h32 --arm plain"
     make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probes/probe_pres_train.py run --label h32 --arm p10 --lam 10"
+    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probes/probe_pres_train.py run --label h32 --arm p10c09 --lam 10 --pres_band 0.8,0.9"
 
 Renders: the ruler, the arms' rows.pt on stick080's rows (``--rows_pt``)::
 
