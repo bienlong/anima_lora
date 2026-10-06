@@ -1,6 +1,6 @@
 # sent_plan — the kana rows trained on dialogue lines, at the shipped stick (2026-10-05)
 
-Run: `configs/sent_ball.toml`. Judged on the dialogue ruler (`criteria.md`).
+Run: `_archive/configs/sent_ball.toml`. Judged on the dialogue ruler (`criteria.md`).
 
 **Read (10-05)**: `reports/sent_ball_2026_10_05.md` — worse than preview51
 (short exact 8 → 2), mid / long unmoved; the spikes turned to cos 0.77 at

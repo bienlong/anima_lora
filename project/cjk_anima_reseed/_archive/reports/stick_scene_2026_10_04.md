@@ -153,7 +153,7 @@ and renders as `stick_full`; geometry again does not call the render.
 
 - `../cjk_anima_scale/cjk_scale/train.py`: `band` (every kept item's σ band
   replaced at train; experiments only).
-- `reseed/config.py`: `band` (stick runs); `configs/stick_nolonegrid.toml`,
-  `configs/stick_nlg_high.toml`.
+- `reseed/config.py`: `band` (stick runs); `_archive/configs/stick_nolonegrid.toml`,
+  `_archive/configs/stick_nlg_high.toml`.
 - `stick_fit.py`: both runs in `STICK_RUNS`, sheets under
   `output/cjk_anima_reseed/<label>/sheets/`, move cos per pair.

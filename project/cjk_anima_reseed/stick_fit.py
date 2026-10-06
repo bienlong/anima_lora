@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """stick_fit — the stick runs' rows and renders, and the sticks around them (CPU).
 
-The stick runs (``configs/stick_*.toml``, ``stick_from = "kana_up"``) train
+The stick runs (``_archive/configs/stick_*.toml``, ``stick_from = "kana_up"``) train
 kana_up's 166 rows' shared mean only: every row takes the sum of the rows'
 gradients, so AdamW moves them by one vector and the rows less their mean
 (the spikes) stay kana_up's (``cjk_scale.train(stick_only=True)``). Legs:
@@ -9,14 +9,14 @@ gradients, so AdamW moves them by one vector and the rows less their mean
 - ``geo``: the kana sticks (166 rows) — the stick runs against kana_up,
   kana_mix, retrain_kana: length, cos, the move and its direction; the
   hiragana sticks (81 rows) of the cold band arms (``grid_small`` /
-  ``grid_lone``, ``reports/grid_small_lone_2026_10_02.md``).
+  ``grid_lone``, ``_archive/reports/grid_small_lone_2026_10_02.md``).
 - ``kanji``: the retrain's kanji family (b1–b4, each cold over the run
   before it) as a burr — stick, spikes, energy, nearest T5 — and the
   batches' sticks against each other, the kana stick and the 0921 seed's.
 - ``ball``: the 81 hiragana rows of every cold arm as stick + ball against
   retrain_kana's; the ball / stick swap arms of ``probe_split`` (``gs_*``,
   ``rk_gsstick``, ``h0_*``) read and EN-ref cos'd against ``rk_self`` on the
-  hiragana keys (``reports/ball_2026_10_04.md``).
+  hiragana keys (``_archive/reports/ball_2026_10_04.md``).
 - ``ball_sheets``: per prompt, the hiragana words / singles as EN ref |
   ``rk_self`` | ``gs_rkstick`` | ``gs_self`` → ``output/cjk_anima_reseed/<label>/sheets/``.
 - ``scene``: probe_split's scene numbers (EN-ref cos out, flat white) on
@@ -241,7 +241,7 @@ BALL_GEO = {
 def ball(T: Tables) -> dict:
     """The hiragana rows (81) of every cold arm as stick + ball against
     retrain_kana's, and the swap arms' reads and EN-ref cos against ``rk_self``
-    on the hiragana keys (``reports/ball_2026_10_04.md``)."""
+    on the hiragana keys (``_archive/reports/ball_2026_10_04.md``)."""
     import torch
     from scipy.stats import wilcoxon
 

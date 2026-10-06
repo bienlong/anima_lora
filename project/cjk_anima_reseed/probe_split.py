@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """probe_split — kana_up's +0.1 split by where it acts and by what it shares (2026-10-04)
 
-The question (user, 10-04, after ``reports/kana_up_2026_10_04.md``): the
+The question (user, 10-04, after ``_archive/reports/kana_up_2026_10_04.md``): the
 upper edges + 0.1 bought text and cost the scene; dup and the "fill the blank
 / white canvas" look stay. Which side of σ carries each, and is it the rows'
 shared direction or their per-row part? No training: ``kana_up`` and

@@ -5,7 +5,7 @@ The question (user, 10-03): a grid tier above ``grid_44`` — at what band?
 ``retrain_kana``'s large tier (``b0709``, σ 0.7–0.9, grid singles at a median
 91 px) is what wrote the glyph alone on a blank page at eval, so its band is
 not taken on trust. This reads it off the gradient the way
-``reports/grad_bands_2026_10_03.md`` set the table's bands: the scale line's
+``_archive/reports/grad_bands_2026_10_03.md`` set the table's bands: the scale line's
 ``experiments/grad_identity`` pass 2 (row u, the true caption, the image
 re-drawn with slot k's glyph swapped) at the same initial point (the 82
 hiragana rows cold, every other row at the 0921 seed), on tiers drawn here.

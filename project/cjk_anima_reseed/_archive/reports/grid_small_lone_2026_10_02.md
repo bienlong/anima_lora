@@ -1,6 +1,6 @@
 # grid_small / grid_lone — hiragana cold on small glyphs only (2026-10-02)
 
-`../../cjk_anima_scale/experiments/grid_small` (`r0`, `b7593`) and
+`../../../cjk_anima_scale/experiments/grid_small` (`r0`, `b7593`) and
 `experiments/grid_lone` (`r0`, `recap`).
 The question, from `motivation2.md` verdict 4: can the hiragana rows be
 seeded cold with **no glyph above ≈ 40 px**, the kana run's large lone tier
@@ -66,7 +66,7 @@ tiers' names since the evening of 10-02, by form and median glyph px:
 `scene_single_small` → `bubble1_32`, `b0305` `scene_window` →
 `bubbleN_18`; `retrain_kana`'s `b0709` → `bubble1_52` (`scene_single`),
 `grid_82` (grids), `lone_190` (flat 1×1). Table:
-`../../cjk_anima_scale/README.md` § Item pools.
+`../../../cjk_anima_scale/README.md` § Item pools.
 
 `grid_small` (8 100 items, `run1002_grid_small/data`; `b7593` is the same
 records with every band replaced):

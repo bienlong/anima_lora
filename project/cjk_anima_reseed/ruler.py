@@ -461,7 +461,7 @@ def arm_dirs() -> dict:
         "kana_up": OUT / "kana_up",
         "ball_rk_bubble": OUT / "ball_rk_bubble",
         "stick_nlg_high": OUT / "stick_nlg_high",
-        # preview51's rows (sent_plan.md's floor), read on the punct pack
+        # preview51's rows (_archive/sent_plan.md's floor), read on the punct pack
         "seed_fixed_1005_stick080": SCALE_OUT / "seed_fixed_1005_stick080",
         **PACK_ARMS.get(PACK, {}),
     }
@@ -527,7 +527,7 @@ def render_file(arm: str, i: int) -> Path:
 
 
 def gs_rkstick() -> dict:
-    """``probe_split``'s ``gs_rkstick`` (``reports/ball_2026_10_04.md``):
+    """``probe_split``'s ``gs_rkstick`` (``_archive/reports/ball_2026_10_04.md``):
     retrain_kana's table, its 81 hiragana rows = grid_small r0's less their
     mean plus retrain_kana's mean — the banner grid's best words. Built by
     ``probe_split.row_sets`` in kana_up's row units, as a delta state."""

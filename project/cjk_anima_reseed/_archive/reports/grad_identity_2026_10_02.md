@@ -1,7 +1,7 @@
 # grad_identity — the band law read on the training gradient, no training (2026-10-02)
 
-`../../cjk_anima_scale/experiments/grad_identity` (full report:
-`../../cjk_anima_scale/reports/grad_identity_2026_10_02.md`). The question,
+`../../../cjk_anima_scale/experiments/grad_identity` (full report:
+`../../../cjk_anima_scale/reports/grad_identity_2026_10_02.md`). The question,
 from the evening of 10-02: the band law's **upper** edge is confirmed by
 same-items two-band training pairs (`grid_small r0` vs `b7593`, `band_c2_kanji`,
 the reband arms), but its **lower** edge and its peak were only ever read on
@@ -186,7 +186,7 @@ over the window's other rows (their own glyphs unchanged), 60 items a tier:
   (`grad_bands_2026_10_03.md`): bands set from this read tie the law's; no
   lower edge loses.
 
-Code: `../../cjk_anima_scale/experiments/grad_identity/run_exp.py`
+Code: `../../../cjk_anima_scale/experiments/grad_identity/run_exp.py`
 (`--dry_run`, `--items`, `--sigmas`, `--wrong`, `--captions`, `--render`,
 `--render_tiers`, `--window_items`, `--analyze <dir>`); results under its
 `results/` (`20261002-1954-r1`, `20261002-2036-render`,

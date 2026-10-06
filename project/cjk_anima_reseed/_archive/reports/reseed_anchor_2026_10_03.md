@@ -1,6 +1,6 @@
 # reseed_anchor — the columns lettered as Japanese, the base's text beside the rows (2026-10-03)
 
-`../../cjk_anima_scale/experiments/reseed_anchor` on `reseed_recap`'s arm
+`../../../cjk_anima_scale/experiments/reseed_anchor` on `reseed_recap`'s arm
 (the 81 hiragana + 85 katakana rows cold on the old seed, 135 / row =
 22 410 steps, 16 600 items, plain grid captions, the `hp` bands). Two
 questions from the user (10-03):

@@ -23,8 +23,8 @@ trains at another band only through a `reband` / `recap` leg's
 per-band data mix being gone (10-02, evening); it is not. Whether the
 binding leaves the builder and the trainer is open (§ Open).
 
-Code: `../../cjk_anima_scale/cjk_scale/{builder,recipes,conflict}.py`. The
-live table is `../../cjk_anima_scale/README.md` § Item pools.
+Code: `../../../cjk_anima_scale/cjk_scale/{builder,recipes,conflict}.py`. The
+live table is `../../../cjk_anima_scale/README.md` § Item pools.
 
 ## The name
 
@@ -165,7 +165,7 @@ ones; every arm at 0.75–0.93 read 0 (`kana_reband`, `grid_small b7593`,
 
 ## `grid_44`
 
-`../../cjk_anima_scale/experiments/grid_44` (user, 10-02): `grid_lone` with
+`../../../cjk_anima_scale/experiments/grid_44` (user, 10-02): `grid_lone` with
 a 44 px pair. Half of `grid_29` goes to `grid_44`; the lone share is split
 evenly over three sizes.
 
@@ -191,7 +191,7 @@ evenly over three sizes.
 The "σ as built" column is the table's per-px default; no arm has trained
 at it. The one arm trained is `grid_44_cold_hira_recap_b7593` (job
 `20261002-180924-362d76`, 56.2 min; result
-`../../cjk_anima_scale/experiments/grid_44/results/20261002-1809-recap_b7593`):
+`../../../cjk_anima_scale/experiments/grid_44/results/20261002-1809-recap_b7593`):
 this build, the plain captions on the 4 920 grid and lone items, **every
 item at σ 0.75–0.93**, 60 steps / row.
 

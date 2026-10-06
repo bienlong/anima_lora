@@ -1,9 +1,9 @@
 # grad_bands — the bands read off the gradient, trained (2026-10-03)
 
-`../../cjk_anima_scale/experiments/grid_lone` (`recap_h0`, `recap_hp`) on
+`../../../cjk_anima_scale/experiments/grid_lone` (`recap_h0`, `recap_hp`) on
 `experiments/grad_identity`'s pass 2
 (`grad_identity_2026_10_02.md`; the bubble tiers:
-`../../cjk_anima_scale/reports/grad_identity_2026_10_02.md` § 5). The
+`../../../cjk_anima_scale/reports/grad_identity_2026_10_02.md` § 5). The
 question, from the night of 10-02: the step-0 gradient gives, per tier, the σ
 where a cold row's gradient stops depending on the glyph drawn. Do bands set
 from that read train better than the law's per-px bands, on the same items?
@@ -192,6 +192,6 @@ draws under the peak are draws the rows did not get — the gradient read's
 - A σ density rather than an edge: draws weighted to the ‖I‖ peak inside
   the law's band. Unbuilt.
 
-Code: `../../cjk_anima_scale/experiments/grid_lone/run_exp.py` (`--legs
+Code: `../../../cjk_anima_scale/experiments/grid_lone/run_exp.py` (`--legs
 reband train read read_plain --tag recap_h0 | recap_hp`; the bands are
 `BANDS`).

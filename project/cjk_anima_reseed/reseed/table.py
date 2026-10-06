@@ -13,7 +13,7 @@ The values are ``reseed_anchor fit``'s (``run1003_reseed_anchor_fit``):
   ``bubbleN_18`` fitted to their bubble (``fit``).
 - **band**: ``reseed_recap``'s ``hp`` — upper edge at the gradient's
   identity half point, lower edge at half its peak
-  (``reports/grad_bands_2026_10_03.md``).
+  (``_archive/reports/grad_bands_2026_10_03.md``).
 - **share**: ``reseed_recap``'s; Σ 1.5 → 100 items per row.
 
 ``px_keep`` is the ink px an item must land in (else re-drawn): the band
@@ -161,7 +161,7 @@ TABLE = (
         },
     ),
     # opt-in (share 0: a run's `shares` turns it on): the band read off the
-    # gradient at 65 px (`reports/grid_64_2026_10_03.md`: f's half point 0.82,
+    # gradient at 65 px (`_archive/reports/grid_64_2026_10_03.md`: f's half point 0.82,
     # ‖I‖'s low half 0.63); last, so a run without it draws what it drew
     _grid("grid_64", 0.0, (0.65, 0.8), [66, 92], px_keep=(56, None)),
     # opt-in: a Manga109 dialogue line lettered in 2–3 columns (user, 10-05)
