@@ -132,3 +132,55 @@ def save_network_weights(
         save_file(state_dict, file, metadata)
     else:
         torch.save(state_dict, file)
+
+
+def export_comfyui_sidecar(
+    lora_file: str,
+    dit_path: Optional[str] = None,
+) -> Optional[str]:
+    """Training-end convenience: write a ComfyUI-native twin of a freshly
+    saved LoKr / DoKr checkpoint, so no manual export step is needed.
+
+    Fires only when the saved file contains ``lokr_w1`` modules — plain
+    LoRA / DoRA saves are already ComfyUI-native after the standard qkv
+    defuse + adaln relayout. ``dit_path`` supplies the base-model weights
+    the rescale needs; when omitted it falls back to
+    ``configs/base.toml``'s ``pretrained_model_name_or_path``. Set
+    ``ANIMA_COMFYUI_EXPORT=0`` to disable.
+
+    Returns the sidecar path, or ``None`` when skipped or failed. Every
+    failure mode is logged and swallowed — the native artifact is already
+    on disk and training is over; this must never raise.
+    """
+    import os
+
+    if os.environ.get("ANIMA_COMFYUI_EXPORT", "").strip().lower() in ("0", "false", "off"):
+        return None
+
+    sidecar = os.path.splitext(lora_file)[0] + "_comfyui.safetensors"
+    try:
+        from safetensors import safe_open
+
+        reader = safe_open(lora_file, framework="pt", device="cpu")
+        if not any(k.endswith(".lokr_w1") for k in reader.keys()):
+            logger.info("comfyui sidecar: file has no lokr_w1 modules, skipping")
+            return None
+
+        if not dit_path or not os.path.exists(dit_path):
+            from scripts.export_comfyui_lora import default_dit_path
+
+            dit_path = default_dit_path()
+
+        from scripts.export_comfyui_lora import convert
+
+        stats = convert(lora_file, dit_path, sidecar)
+        logger.info(
+            f"comfyui sidecar written: {sidecar} "
+            f"({stats['tensors']} keys / {stats['modules']} modules, "
+            f"median err {stats['median_err']:.5f}, worst {stats['worst_err']:.4f}, "
+            f"over-2%: {stats['over_2pct']})"
+        )
+        return sidecar
+    except Exception as exc:  # noqa: BLE001 — must never break the training end
+        logger.warning(f"comfyui sidecar export failed (native file unaffected): {exc}")
+        return None

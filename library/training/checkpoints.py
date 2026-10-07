@@ -480,3 +480,11 @@ class CheckpointSaver:
         ckpt_name = get_last_ckpt_name(args, "." + args.save_model_as)
         self.save(ckpt_name, network, global_step, num_train_epochs)
         logger.info("model saved.")
+        # LoKr/DoKr files still need the fused-qkv split + DoRA rescale to load
+        # in ComfyUI — write the converted twin automatically (no-op otherwise).
+        from networks.lora_save import export_comfyui_sidecar
+
+        export_comfyui_sidecar(
+            os.path.join(args.output_dir, ckpt_name),
+            getattr(args, "pretrained_model_name_or_path", None),
+        )
