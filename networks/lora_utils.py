@@ -71,6 +71,34 @@ def has_comfy_adaln_keys(weights_sd: Dict[str, torch.Tensor]) -> bool:
     return any(_ADALN_COMFY_KEY_RE.match(k) for k in weights_sd)
 
 
+def comfy_diffusion_stem(lora_name: str) -> str:
+    """In-repo LoRA module name → ComfyUI anima DiT parameter path.
+
+    ``lora_unet_blocks_0_self_attn_qkv_proj`` → ``blocks.0.self_attn.qkv_proj``,
+    ``lora_unet_blocks_0_adaln_modulation_mlp_2`` → ``blocks.0.adaln_modulation_mlp.2``
+    (input may be pre- or post- adaln relayout; the adaln rule accepts the comfy
+    spelling). Rule set validated against every LoRA-able parameter of the
+    anima base DiT — see scripts/export_comfyui_lora.py for the standalone copy.
+    """
+    stem = lora_name[len("lora_unet_") :] if lora_name.startswith("lora_unet_") else lora_name
+    stem = re.sub(r"blocks_(\d+)_", r"blocks.\1.", stem)
+    stem = re.sub(r"(adaln_modulation_[a-z_]+?)_(\d+)$", r"\1.\2", stem)
+    stem = re.sub(r"(self_attn|cross_attn)_", r"\1.", stem)
+    stem = re.sub(r"mlp_layer(\d+)$", r"mlp.layer\1", stem)
+    return stem
+
+
+def diffusion_model_key(lora_key: str) -> str:
+    """``{lora_name}.lokr_w1`` → ``diffusion_model.{stem}.lokr_w1``."""
+    name, sep, rest = lora_key.partition(".")
+    return f"diffusion_model.{comfy_diffusion_stem(name)}{sep}{rest}"
+
+
+def has_native_diffusion_keys(weights_sd: Dict[str, torch.Tensor]) -> bool:
+    """True if the file is already in the native ``diffusion_model.*`` layout."""
+    return any(k.startswith("diffusion_model.") for k in weights_sd)
+
+
 def filter_lora_state_dict(
     weights_sd: Dict[str, torch.Tensor],
     include_pattern: Optional[str] = None,

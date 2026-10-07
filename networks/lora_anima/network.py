@@ -1101,6 +1101,18 @@ class LoRANetwork(_NetworkMetricsMixin, torch.nn.Module):
         else:
             weights_sd = torch.load(file, map_location="cpu")
 
+        # Native ComfyUI-layout files (what this trainer now writes) re-fuse
+        # into the runtime fused layout first — inverse of the save-side
+        # emission, including the per-component DoRA un-rescale.
+        from networks.lora_utils import has_native_diffusion_keys
+
+        if has_native_diffusion_keys(weights_sd):
+            from networks.lora_save import reassemble_comfyui_native_sd
+
+            weights_sd = reassemble_comfyui_native_sd(
+                weights_sd, self.unet_loras + self.text_encoder_loras
+            )
+
         # GOTCHA: save_network_weights relays adaln keys to the ComfyUI layout
         # (adaln_up_{br} → adaln_modulation_{br}_2); a resume/init load must
         # rename them back or every adaln module lands in missing_keys and
@@ -1539,12 +1551,21 @@ class LoRANetwork(_NetworkMetricsMixin, torch.nn.Module):
         for prefix in getattr(self, "_training_only_prefixes", ()):
             for key in [k for k in state_dict if k.startswith(prefix)]:
                 del state_dict[key]
+        # Org weights unlock the native ComfyUI emission (exact LoKr split +
+        # DoRA rescale) — the main save is then native with no post-conversion.
+        base_weights = {}
+        for lora in self.unet_loras + self.text_encoder_loras:
+            if isinstance(getattr(lora, "dora_scale", None), torch.nn.Parameter):
+                base_weights[lora.lora_name] = (
+                    lora.org_module_ref[0].weight.detach().to("cpu")
+                )
         lora_save.save_network_weights(
             state_dict,
             file=file,
             dtype=dtype,
             metadata=metadata,
             save_variant=spec.save_variant,
+            base_weights=base_weights or None,
         )
 
     def backup_weights(self):

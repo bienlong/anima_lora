@@ -368,6 +368,19 @@ def create_network_from_weights(
     # Strip torch.compile '_orig_mod_' from old checkpoint keys
     weights_sd = LoRANetwork._strip_orig_mod_keys(weights_sd)
 
+    # Native ComfyUI-layout files carry diffusion_model.* keys and fused-qkv
+    # components; re-fusing needs the live modules' org weights, which do not
+    # exist yet at sniff time — warm-start from these must go through a
+    # legacy-layout file or a training-state checkpoint.
+    from networks.lora_utils import has_native_diffusion_keys
+
+    if has_native_diffusion_keys(weights_sd):
+        raise RuntimeError(
+            "该文件是原生 ComfyUI 布局（diffusion_model.* 键），warm-start/推理嗅探"
+            "暂不支持直接读取：请用训练状态断点续训，或用旧格式（lora_unet_*）的"
+            "LoKr 文件做 warm-start。"
+        )
+
     # ComfyUI-native adaln LoRAs carry keys in the comfy layout
     # (adaln_modulation_{br}_2); rename to runtime names (adaln_up_{br}) so
     # create_modules attaches them. Presence-gated. See adaln.md.
