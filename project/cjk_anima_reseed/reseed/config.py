@@ -49,6 +49,9 @@
     row_lr = [0.12, 1.0]          # optional: one factor per ``rows`` spec on its rows'
                                   # step (``cjk_scale.train(row_step_scale=)``: AdamW's
                                   # update scaled, a per-row lr); ``chars:`` specs only
+    pres = { lam = 10, band = [0.8, 0.9], every = 2 }  # optional: λ · L_pres on every
+                                  # ``every``-th step at σ ~ U(band) (``cjk_scale.train
+                                  # (pres=)``, probes/probe_pres_train.py)
 
 Its outputs land in ``output/cjk_anima_reseed/<run>/`` (``data/``,
 ``trained.pt``).
@@ -82,6 +85,7 @@ KEYS = (
     "lines",
     "row_lr",
     "free_residual",
+    "pres",
 )
 # the base packs a run may sit on (``punct_pack.py``): the raw pack's rows and
 # ids plus encode rules / appended rows, so the seed rows ride on it unchanged
@@ -116,6 +120,7 @@ class Run:
     lines: str = ""  # the dialogue line file (``LINES``); "" = the scale line's
     row_lr: tuple = ()  # one step factor per ``rows`` spec; () = all 1
     free_residual: float | None = None  # the norm pull; None = the trainer's
+    pres: tuple | None = None  # (λ, σ_lo, σ_hi, every): L_pres on; None = off
 
     def phrase_file(self) -> str:
         """The dialogue line file: ``LINES[lines]``, else the scale line's
@@ -275,6 +280,15 @@ def load(run: str) -> Run:
         assert all(r.startswith("chars:") for r in raw["rows"]), (
             f"{path}: row_lr scales chars: specs only"
         )
+    pres = raw.get("pres")
+    if pres is not None:
+        assert set(pres) == {"lam", "band", "every"}, (
+            f"{path}: pres {{lam, band, every}}"
+        )
+        lo_p, hi_p = pres["band"]
+        assert pres["lam"] > 0 and 0 <= lo_p < hi_p <= UPPER_MAX, f"{path}: pres {pres}"
+        assert int(pres["every"]) >= 1, f"{path}: pres every {pres['every']}"
+        pres = (float(pres["lam"]), float(lo_p), float(hi_p), int(pres["every"]))
     return Run(
         name=path.stem,
         path=path,
@@ -297,4 +311,5 @@ def load(run: str) -> Run:
         lines=lines,
         row_lr=row_lr,
         free_residual=None if fr is None else float(fr),
+        pres=pres,
     )

@@ -53,50 +53,9 @@ from reseed import OUT  # noqa: E402
 PROBE = OUT / "probe_pres"
 STICK080 = "output/cjk_anima_scale/seed_fixed_1005_stick080/trained.pt"
 SIGMAS = (0.5, 0.6, 0.7, 0.8, 0.9, 0.95)
-DIL = 2  # latent cells of slack around the text box
-
-# EN lines for the teacher's caption, by the JA string's glyph count
-EN_LINES = {
-    "one": ["Oh", "No", "Hi", "Eh", "Ah", "Hm"],
-    "word": ["Wait!", "No way", "Got it", "Really?", "Thanks", "Sorry", "Let's go"],
-    "line": [
-        "Where should I go?",
-        "I told you already!",
-        "That's not fair at all",
-        "You came back for me?",
-        "What was that just now?",
-        "Leave me alone, okay?",
-    ],
-}
-
-
-def _len_bin(n: int) -> str:
-    return "one" if n <= 1 else ("word" if n <= 6 else "line")
-
-
-def en_caption(rec: dict, k: int) -> str:
-    """The item's caption with its JA string swapped for an EN line of its
-    length bin (picked by the item's index) and the language named EN."""
-    from cjk_scale.loss import glyph_count
-
-    pool = EN_LINES[_len_bin(glyph_count(rec["text"]))]
-    q = f'"{rec["text"]}"'
-    cap = rec["caption"]
-    assert q in cap, (rec["text"], cap)
-    cap = cap.replace(q, f'"{pool[k % len(pool)]}"')
-    return cap.replace("Japanese text", "English text").replace(
-        "japanese text", "english text"
-    )
-
-
-def out_mask(shape, recs, device, grid_box):
-    """``(B, 1, h, w)``: 1 outside each item's text box dilated by ``DIL``."""
-    import torch.nn.functional as F
-    from cjk_scale.loss import box_mask
-
-    m = box_mask(shape, recs, device, grid_box)
-    m = F.max_pool2d(m, 2 * DIL + 1, stride=1, padding=DIL)
-    return 1.0 - m
+# the term's pieces live with the trainer's loss (cjk_scale.train(pres=))
+from cjk_scale.loss import _len_bin, en_caption, out_mask  # noqa: E402, F401
+from cjk_scale.loss import PRES_DIL as DIL  # noqa: E402
 
 
 def grad(run_name: str, rows_path: str, batches: int, label: str) -> None:

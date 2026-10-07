@@ -100,3 +100,63 @@ def box_share_fm_loss(
     s = torch.where(n_in > 0, s, torch.zeros_like(s))  # no box: plain mean
     s = torch.where(n_out > 0, s, torch.ones_like(s))
     return (s * mean_in + (1.0 - s) * mean_out).mean()
+
+
+# ---- the page-preservation term (cjk_anima_reseed probe_pres / probe_pres_train)
+#
+#     L_pres = mean_out (v_θ(x_σ, c_JA; rows) − sg[v_base(x_σ, c_EN)])²
+#
+# the teacher is the same frozen DiT at the same x_σ under the caption with its
+# JA string swapped for an EN line; the EN caption holds no ext id, so the
+# teacher never sees a row. ``mean_out`` averages the cells outside the item's
+# text box dilated by ``PRES_DIL`` latent cells.
+
+PRES_DIL = 2  # latent cells of slack around the text box
+# EN lines for the teacher's caption, by the JA string's glyph count
+EN_LINES = {
+    "one": ["Oh", "No", "Hi", "Eh", "Ah", "Hm"],
+    "word": ["Wait!", "No way", "Got it", "Really?", "Thanks", "Sorry", "Let's go"],
+    "line": [
+        "Where should I go?",
+        "I told you already!",
+        "That's not fair at all",
+        "You came back for me?",
+        "What was that just now?",
+        "Leave me alone, okay?",
+    ],
+}
+
+
+def _len_bin(n: int) -> str:
+    return "one" if n <= 1 else ("word" if n <= 6 else "line")
+
+
+def en_caption(rec: dict, k: int) -> str:
+    """The item's caption with its JA string swapped for an EN line of its
+    length bin (picked by ``k``, the item's index in its data dir) and the
+    language named EN."""
+    pool = EN_LINES[_len_bin(glyph_count(rec["text"]))]
+    q = f'"{rec["text"]}"'
+    cap = rec["caption"]
+    assert q in cap, (rec["text"], cap)
+    cap = cap.replace(q, f'"{pool[k % len(pool)]}"')
+    return cap.replace("Japanese text", "English text").replace(
+        "japanese text", "english text"
+    )
+
+
+def out_mask(shape, recs, device, grid_box: bool = False):
+    """``(B, 1, h, w)``: 1 outside each item's text box dilated by ``PRES_DIL``."""
+    import torch.nn.functional as F
+
+    m = box_mask(shape, recs, device, grid_box)
+    m = F.max_pool2d(m, 2 * PRES_DIL + 1, stride=1, padding=PRES_DIL)
+    return 1.0 - m
+
+
+def pres_loss(pred, teach, recs, grid_box: bool = False):
+    """L_pres per item ``(B,)``: the student's squared gap to the (detached)
+    teacher, averaged over the cells outside the dilated text box."""
+    mo = out_mask(pred.shape, recs, pred.device, grid_box)
+    per_cell = ((pred.float() - teach.float()) ** 2).mean(dim=1, keepdim=True)
+    return (per_cell * mo).sum(dim=(1, 2, 3)) / mo.sum(dim=(1, 2, 3)).clamp(min=1)

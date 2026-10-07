@@ -60,6 +60,7 @@ FREE_RESIDUAL = (
 SEED = 0
 COMPILE = True
 SAVE_EVERY = 5000
+PRES_SEED = 7_000  # the pres pass's generator, apart from the data term's draws
 GEN_STEPS, GEN_CFG = 28, 4.0  # the generation settings the stage helpers want
 
 
@@ -249,6 +250,7 @@ def train(
     ball_on: Path | None = None,
     lr: float | None = None,
     free_residual: float | None = None,
+    pres: tuple | None = None,
 ) -> Path:
     """Train the run. ``data`` / ``out`` default to the run's dirs;
     ``max_steps`` stops the loop early with the full-length schedule
@@ -283,7 +285,14 @@ def train(
     ``free_residual`` replaces ``FREE_RESIDUAL`` (0: no norm pull — under
     AdamW the pull alone steps a row absent from the batch by ~lr toward 0,
     so a warm run's rare rows go back to the pack row, ``cjk_anima_reseed``
-    ``sent_kanji``).
+    ``sent_kanji``);
+    ``pres`` = (λ, σ_lo, σ_hi, every) adds λ · L_pres (``loss.pres_loss``,
+    ``cjk_anima_reseed`` probe_pres_train) on every ``every``-th step's scene
+    batch: the student under the item's caption against the same DiT under
+    its EN caption (``loss.en_caption``, detached), at one shared x_σ with
+    σ ~ U(σ_lo, σ_hi), outside the dilated text box. The pass draws σ and ε
+    from its own generator, so the data term's draws stay the run's without
+    it; the EN captions are TE-cached in ``out/te_en``.
     ``scale.py`` passes none of them.
     A data dir built with windows (``build.json`` ``glyph_route``) is
     trained routed: ``ANIMA_VOCAB_GLYPH_ROUTE=1`` is set in-process before
@@ -339,8 +348,39 @@ def train(
         out,
         te_cache=(out if tag_drop else data) / "te_cache",
     )
+    en_of = None
+    if pres:
+        from common.models import encode_captions, ext_ids_of
+
+        from .loss import en_caption
+
+        lam_p, lo_p, hi_p, every_p = (
+            float(pres[0]),
+            float(pres[1]),
+            float(pres[2]),
+            int(pres[3]),
+        )
+        assert lam_p > 0 and 0 <= lo_p < hi_p < 1 and every_p >= 1, f"pres {pres}"
+        en_of = {
+            i: en_caption(r, keep[i]) for i, r in enumerate(recs) if r["src"] == "scene"
+        }
+        en_cache = encode_captions(list(en_of.values()), device, out / "te_en")
+        # a prompt's own marks may route to a frozen row (``~`` in a series
+        # tag → the 〜 row, on both captions alike); a trained row may not
+        en_ext = ext_ids_of(en_cache)
+        cache = {**cache, **en_cache}
+        print(
+            f"pres: λ {lam_p:g} · L_pres at σ {lo_p:g}–{hi_p:g} every {every_p} "
+            f"step(s); {len(en_cache)} EN captions for {len(en_of)} scene items",
+            flush=True,
+        )
     ctx = Path(context) if context else rc.context_rows()
     p = plan(rc, data, recs, vocabs, touched, ctx)
+    if pres:
+        hit = en_ext & set(p.idx)
+        assert not hit, f"pres: EN captions hold trained rows {sorted(hit)[:10]}"
+        if en_ext:
+            print(f"pres: EN captions hold frozen rows {sorted(en_ext)}", flush=True)
     if route:
         p.record["glyph_route"] = True
     cold = p.cold if cold is None else cold
@@ -415,6 +455,16 @@ def train(
         p.record["band_override"] = [float(b) for b in band]
     if tag_drop:
         p.record["tag_drop"] = [tag, p_drop]
+    if pres:
+        from .loss import PRES_DIL
+
+        p.record["pres"] = {
+            "lam": lam_p,
+            "band": [lo_p, hi_p],
+            "every": every_p,
+            "dil": PRES_DIL,
+            "seed": PRES_SEED,
+        }
     stick0 = None
     if stick_only:
         live = ~rows.frozen_mask
@@ -521,6 +571,11 @@ def train(
         )
     batcher = Batcher(ns, recs, lat)
     split = BoxSplit()
+    if pres:
+        from .loss import pres_loss
+
+        pgen = torch.Generator(device=device).manual_seed(PRES_SEED)
+        pres_acc = [0.0, 0]  # Σ L_pres, passes since the last log
     log: list = []
     last = min(steps, max_steps or steps)
     t0 = time.time()
@@ -549,6 +604,29 @@ def train(
             split.add(pred, target, brecs, ts)
         opt.zero_grad(set_to_none=True)
         loss.backward()
+        if pres and is_scene and step % every_p == 0:
+            # a second graph after the first is freed: the same peak memory
+            del pred
+            s = lo_p + (hi_p - lo_p) * torch.rand(
+                len(idx), generator=pgen, device=device
+            )
+            sv = s.view(-1, *([1] * (latents.dim() - 1)))
+            eps = torch.randn(
+                latents.shape, generator=pgen, device=device, dtype=torch.float32
+            )
+            x_s = ((1.0 - sv) * latents.float() + sv * eps).to(torch.bfloat16)
+            # grad mode on (a no_grad forward guards its own compiled graphs):
+            # detach is the stop-gradient; the EN caption holds no ext id
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                teach = dit_forward(
+                    anima, x_s, s, cache, [en_of[i] for i in idx], device
+                ).detach()
+                pred_p = dit_forward(anima, x_s, s, cache, caps, device)
+            l_pres = pres_loss(pred_p, teach, brecs, GRID_BOX).mean()
+            (lam_p * l_pres).backward()
+            pres_acc[0] += float(l_pres.detach())
+            pres_acc[1] += 1
+            del teach, pred_p
         if step_scale is not None:
             before = rows.delta.raw.detach().clone()
         opt.step()
@@ -564,6 +642,10 @@ def train(
         if step % 25 == 0 or step == 1:
             rec = rows.log_record(step, loss_fm, loss, t0, split.pop())
             rec["lr"] = opt.param_groups[0]["lr"]
+            if pres:
+                rec["pres"] = pres_acc[0] / pres_acc[1] if pres_acc[1] else None
+                rec["pres_n"] = pres_acc[1]
+                pres_acc[:] = [0.0, 0]
             if stick0 is not None:
                 st = rows.delta.raw.detach()[live].mean(0) * rows.row_scale
                 rec["stick"] = float(st.norm())

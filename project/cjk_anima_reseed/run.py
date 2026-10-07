@@ -5,6 +5,8 @@
     .venv/bin/python project/cjk_anima_reseed/run.py <run> data --frac 0.02  # a look at the sizes
     make daemon-run ARGS="project/cjk_anima_reseed/run.py <run> train"
     make daemon-run ARGS="project/cjk_anima_reseed/run.py <run> read"
+    # a smoke: another data dir / out dir, a short schedule, an early stop
+    make daemon-run ARGS="project/cjk_anima_reseed/run.py <run> train --data <dir> --out <dir> --steps_per_row 1 --max_steps 400"
 
 ``<run>`` is ``configs/<run>.toml`` or a path to one (``_archive/configs/``).
 ``data`` → ``output/cjk_anima_reseed/<run>/data``; ``train`` →
@@ -42,6 +44,12 @@ def main():
     p.add_argument("verb", choices=["data", "train", "read"])
     p.add_argument("--workers", type=int, default=None)
     p.add_argument("--frac", type=float, default=1.0, help="data: share of every tier")
+    p.add_argument("--data", default=None, help="train: this data dir (a smoke)")
+    p.add_argument("--out", default=None, help="train: this out dir (a smoke)")
+    p.add_argument(
+        "--steps_per_row", type=int, default=None, help="train: the config's replaced"
+    )
+    p.add_argument("--max_steps", type=int, default=None, help="train: stop here")
     a = p.parse_args()
     from reseed.config import load
 
@@ -62,10 +70,11 @@ def main():
 
         T.train(
             run.scale_config(),
-            data=run.data,
-            out=run.dir,
+            data=Path(a.data) if a.data else run.data,
+            out=Path(a.out) if a.out else run.dir,
+            max_steps=a.max_steps,
             cold=not (run.stick_from or run.warm or run.rows_from),
-            steps_per_row=run.steps_per_row,
+            steps_per_row=a.steps_per_row or run.steps_per_row,
             context=run.seed_rows(),
             drop_tiers=run.drop_tiers,
             stick_only=bool(run.stick_from),
@@ -75,6 +84,7 @@ def main():
             lr=run.lr or None,
             row_step_scale=run.row_step_scale(),
             free_residual=run.free_residual,
+            pres=run.pres,
         )
 
 
