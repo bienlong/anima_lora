@@ -1,4 +1,4 @@
-source_image_dir = "G:/参考训练器-0.14.0/studio_data/projects/7-rov/versions/v1/train/1_data"
+source_image_dir = ""
 
 target_res = [1024, 896]
 
