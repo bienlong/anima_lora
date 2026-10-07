@@ -43,3 +43,16 @@ GPU 每步 2.31s 构成：`aten::mm` 68%（cutlass bf16 GEMM，inductor 选择�
 | DoKr detach factor=0（用户现行） | 2.31 | 4.2 / 11.8 / 12.4 GB |
 | DoKr detach factor=-1 | 2.30 | 4.2 / 11.8 / 12.5 GB |
 | LoRA（对照） | 1.80 | 4.7 / 12.4 / 12.7 GB |
+
+## 小显存适配实测（2026-10-06，gradient_checkpointing=true）
+
+梯度检查点与 torch.compile 协同正常（harness 在 compile 前启用，无 CheckpointError）。
+峰值含 σ-demote 路由的全部形状族；真实 12G/8G 卡的速度按算力另算（数字仅适用同卡）。
+
+| 配置 | s/步（稳态） | 峰值 | 12G 卡 | 8G 卡 |
+|---|---|---|---|---|
+| DoKr detach，无 ckpt | 1.55 | 13.7 GB | ✗ 溢出 | ✗ |
+| DoKr detach + **gradient_checkpointing** | **~2.8** | **5.4 GB** | ✓ 余量 6G | ✓ 余量 ~2G |
+
+结论：12G/8G 卡跑 DoKr = 开 `gradient_checkpointing = true`（或 CLI `--gradient_checkpointing`），代价 +75% 步时。
+进一步余量杠杆（未动）：`blocks_to_swap`（块交换进 CPU）、`activation_memory_budget`（compile 分区预算，0.99=关）。
