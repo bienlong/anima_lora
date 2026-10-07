@@ -1,7 +1,7 @@
 # idea3 — the twin difference: glyph identity as a subspace (2026-10-07)
 
 From the review of idea2 (10-07), after its probe 0
-(`reports/probe_jl_2026_10_07.md`). Nothing below has been run; no code.
+(`reports/probe_jl_2026_10_07.md`). Run 10-08 — `probes/probe_twin.py`, see the end.
 
 Probe 0's M_in splits the region, not the glyph: in the training bands
 60–90 % of a row's in-box sensitivity does not depend on which glyph is
@@ -43,3 +43,12 @@ off it (out). Two fits on disjoint items.
 clears 2 × the trace ratio (the identity part has no directions of its
 own), or own and cross overlap as much as own with own (identity is the
 window's, not the row's).
+
+**Ran 10-08 — stopped** (`reports/probe_twin_2026_10_08.md`; 400 twins,
+100 per family per fit, rows at f0's start): all three rules at both
+weightings. M_D's own in-box A / B overlap 0.25–0.27 at k 16 (pair), flat
+from 10 to 100 twins; cross-fit λ / r 0.96–1.28 (the identity part has no
+directions of its own: r 0.6–0.8 everywhere, high-λ A / B at the isotropic
+0.017); own–cross 0.31–0.36 above own–own. A third of the in-box Jacobian
+turns with the glyph (f 0.22–0.44), the neighbours' rows 0.6–0.9 as much;
+off the box the row's sensitivity near-decorrelates (f 0.67–0.98).
