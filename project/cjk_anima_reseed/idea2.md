@@ -129,7 +129,7 @@ read on the ruler's 84 live strings.
 projection arm is not run. Read in fp32: bf16's per-position row gradient
 is at cos 0.3–0.6 to fp32's.
 
-## The page in PE's terms (not run)
+## The page in PE's terms
 
 Probe 0's M_out sits on the prediction's latent cells: every channel of
 every out-box cell counts, a tone drift or a texture jitter as much as a
@@ -155,3 +155,13 @@ show.
   (`probe_pres`'s teacher) is the reference either way.
 - The training-side twin of it is L_pres on PE features against the EN
   render, not on cells.
+
+**Ran 10-07/08 — stopped** (`reports/probe_jl_pe_2026_10_08.md`): PE
+reads the scene from x̂₀ at σ 0.8 (top-1 0.8), half of it at 0.9; u is
+local — it turns under a 1e-3 white-noise δ, holds (cos 0.72–0.96) along
+the rows' own moves at that size, and needs the VAE in fp32. M_pe is less
+stable than the cells' M_out (A / B 0.57–0.58 pair-weighted at σ 0.8–0.9,
+kana), its cross-fit λ sits where the cells' did (~2 r at 0.8, none at
+0.9), its high-λ subspace does not repeat (0.02–0.04), and it predicts
+the page reads no better than the move's size. Δ(pres − f0)'s shared
+vector sits in its top 16 (28× isotropic). No projection arm.

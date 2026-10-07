@@ -23,6 +23,12 @@ No training: the rows sit still and the second moment is read.
   probe_jl/<label>/g.pt``. The deal depends on the step only, and ε, σ and
   the probes come off a per-step generator, so ``--bands s080`` at other
   rows (drift) sees the same batches, noise and probes as the start fit.
+- ``blur`` (GPU, forward only): idea2's PE page-lens gate — does PE-Spatial
+  read the page from the one-step x̂₀? Per item, σ 0.5–0.95 on one ε,
+  x̂₀ decoded and encoded against the clean latent decoded and its Gaussian
+  blurs, on the out-box tokens: cos to clean, top-1 retrieval of the item's
+  own clean page among the N, how alike the N look → ``…/<label>/blur.json``.
+  Stop the PE arm if retrieval at σ 0.8–0.9 sits near chance.
 - ``read`` (CPU): per band and family, M_in / M_out per fit; the A / B
   overlap ‖UᵀŨ‖²_F / k at k 16 / 64 (and with fit A cut to 5–50 items); the top-k
   trace shares; the generalised eigenproblem M_in u = λ (M_out + εI) u
@@ -48,6 +54,7 @@ Stop (idea2.md): A / B overlap under 0.8 at k 16, or no cross-fit λ over
     make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probes/probe_jl.py fit --label f0 --rows output/cjk_anima_reseed/sent_kanji_f0/trained.pt --bands s080"
     make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probes/probe_jl.py fit --label pres --rows output/cjk_anima_reseed/sent_kanji_pres/trained.pt --bands s080"
     .venv/bin/python project/cjk_anima_reseed/probes/probe_jl.py read --label start --drift f0,pres
+    make daemon-run ARGS="--stall-timeout 900 project/cjk_anima_reseed/probes/probe_jl.py blur --label blur_pres --rows output/cjk_anima_reseed/sent_kanji_pres/trained.pt --items 48"
     .venv/bin/python project/cjk_anima_reseed/probes/probe_jl.py read --label start --drift f0,pres --weight pair
 """
 
@@ -111,16 +118,16 @@ def _forward(anima, noisy, ts, cache, captions, device):
     ).squeeze(2)
 
 
-def fit(
-    run_name: str, rows_path: str, label: str, bands, items: int, probes: int
-) -> None:
+def _setup(run_name: str, rows_path: str, out: Path, n_steps: int, want):
+    """The trainer's items dealt in its own order over ``n_steps`` steps (one
+    item a batch), the steps ``want(step)`` keeps, their captions encoded, the
+    DiT in fp32 / SDPA / eager with the rows at ``rows_path`` →
+    ``(todo, env)``."""
     import os
-    import time
     from types import SimpleNamespace
 
     import torch
     from cjk_scale import train as T
-    from cjk_scale.loss import glyph_count
     from common.models import checkpoints, encode_captions, ext_ids_of, gen_args
     from library.anima.vocab_pack import strategy_pack
     from library.inference.generation import get_generation_settings
@@ -136,8 +143,6 @@ def fit(
     run.use_pack()
     rows_path = str(rows_path if Path(rows_path).is_absolute() else REPO / rows_path)
     assert Path(rows_path).is_file(), rows_path
-    assert set(bands) <= set(BANDS), bands
-    out = PROBE / label
     out.mkdir(parents=True, exist_ok=True)
     torch.manual_seed(T.SEED)
     torch.backends.cuda.matmul.allow_tf32 = False  # TF32 is 20 % off fp32 here
@@ -156,24 +161,16 @@ def fit(
     ns = SimpleNamespace(seed=T.SEED, batch=1, train_size=512)
     lat = LatentStore(ns, data, recs, keep, device)
 
-    # the deal: every band's every fit gets ``items`` batches; a --bands
-    # subset walks the same steps and skips the others
-    n_b = items
-    n_steps = len(BANDS) * len(FITS) * n_b
     batcher = Batcher(ns, recs, lat)
     order = [(s, list(batcher.next(s))) for s in range(1, n_steps + 1)]
     flat = [i for _s, b in order for i in b]
     assert len(flat) == len(set(flat)), "an item drawn twice: the fits overlap"
-    todo = [(s, b) for s, b in order if _slot(s)[0] in bands]
+    todo = [(s, b) for s, b in order if want(s)]
     used = sorted({i for _s, b in todo for i in b})
     ja = sorted({recs[i]["caption"] for i in used})
     cache = encode_captions(ja, device, out / "te")
     touched = ext_ids_of(cache)
-    print(
-        f"{len(todo)} items ({n_b} per band × fit, bands {','.join(bands)}), "
-        f"{len(touched)} ext rows touched",
-        flush=True,
-    )
+    print(f"{len(todo)} items, {len(touched)} ext rows touched", flush=True)
     rc = run.scale_config()
     p = T.plan(rc, data, recs, vocabs, touched, Path(rows_path))
 
@@ -194,14 +191,354 @@ def fit(
         frozen=p.frozen,
         context=Path(rows_path),
     )
-    delta = rows.delta
-    n_rows, dim = delta.raw.shape
-    live = ~rows.frozen_mask
     # bf16 (FA2 or SDPA, compiled or eager) puts the per-position gradient at
     # cos 0.26–0.61 to fp32's on the rows, its forward 1 % off: the lens is
     # read in fp32 (the bf16 weights are exact in it), SDPA, no autocast
     anima.attn_mode = "torch"
     anima.float()
+    env = SimpleNamespace(
+        T=T,
+        recs=recs,
+        lat=lat,
+        cache=cache,
+        device=device,
+        anima=anima,
+        rows=rows,
+        rows_path=rows_path,
+    )
+    return todo, env
+
+
+def _pe_keep(box, hw, spec):
+    """PE's patch tokens outside the item's box: the latent box mask (dilated
+    as `out_mask`) max-pooled to PE's own grid for an ``hw`` page."""
+    import torch.nn.functional as F
+    from library.vision.buckets import pick_bucket
+
+    gh, gw = pick_bucket(*hw, spec)
+    keep = F.adaptive_max_pool2d(box, (gh, gw))[0, 0].flatten() == 0
+    if keep.sum() < 4:
+        keep[:] = True
+    return keep
+
+
+def _vae(device, dtype):
+    """`common.models.load_vae` at ``dtype`` straight from the checkpoint (no
+    bf16 round-trip on the way to fp32), no grad on its weights."""
+    from common.models import checkpoints
+    from library.models import qwen_vae
+
+    vae = qwen_vae.load_vae(
+        checkpoints().vae,
+        device="cpu",
+        disable_mmap=True,
+        disable_cache=True,
+        vae_2d=True,
+    )
+    return vae.to(device, dtype=dtype).eval().requires_grad_(False)
+
+
+def _page_u(vae, pe, x0, keep, gen, probes: int):
+    """u_q = ∂z/∂x̂₀ᵀ v_q for ``probes`` Gaussian v_q on PE's out-box patch
+    tokens z of x̂₀ decoded (CLS and the box's tokens get no probe) → ``(P,
+    *x0.shape)`` fp32; the decode→PE graph is freed on return."""
+    import torch
+    from library.vision.encoder import encode_pe_from_imageminus1to1
+
+    x = x0.detach().to(vae.dtype).requires_grad_(True)
+    with torch.enable_grad():
+        tok = encode_pe_from_imageminus1to1(pe, vae.decode_to_pixels(x))[0][1:]
+        assert tok.shape[0] == keep.numel(), (tok.shape, keep.shape)
+        U = []
+        for q in range(probes):
+            v = torch.randn(tok.shape, generator=gen, device=tok.device)
+            v = (v * keep[:, None]).to(tok.dtype)
+            U.append(
+                torch.autograd.grad(tok, x, grad_outputs=v, retain_graph=q < probes - 1)[0].float()
+            )
+    return torch.stack(U)
+
+
+PERTURB = (1e-5, 1e-4, 1e-3, 1e-2)  # |δ| / |x̂₀|
+ROWMOVES = ("pres−f0", "f0")  # `_moves` labels: the page's move, the text's
+POOLS = (1, 2, 4, 8)  # latent cells: u low-passed as P u = up(avgpool_k(u))
+
+
+def _lowpass(u, k: int):
+    """``u`` averaged over k×k latent cells and spread back (nearest)."""
+    import torch.nn.functional as F
+
+    if k == 1:
+        return u
+    h, w = u.shape[-2:]
+    assert h % k == 0 and w % k == 0, (u.shape, k)
+    return F.interpolate(F.avg_pool2d(u, k), size=(h, w), mode="nearest")
+
+
+def pecheck(run_name: str, rows_path: str, label: str, bands, items: int) -> None:
+    """Is the page leg's u = ∂z/∂x̂₀ᵀ v a stable quantity? On ``items`` of each
+    band's fit-A items (fit's deal, σ and ε): x̂₀ from a no-grad fp32
+    forward, then u (one probe, on the out-box cells as fit uses it) against
+    the same u recomputed, against x̂₀ + δ for |δ| / |x̂₀| in ``PERTURB``, and
+    with the VAE / PE / both in bf16; each also low-passed over ``POOLS``
+    cells (P u's cos, and P u's share of |u|²). δ white is off the manifold;
+    ``rowmove`` moves x̂₀ the way the rows do: the rows + ε · a trained move
+    (``ROWMOVES``), ε set from the whole move's |Δx̂₀| / |x̂₀| to land on
+    ``PERTURB`` → ``…/<label>/pecheck.json``."""
+    import torch
+    import torch.nn.functional as F
+    from library.vision.encoder import encode_pe_from_imageminus1to1, load_pe_encoder
+
+    out = PROBE / label
+    todo, env = _setup(
+        run_name,
+        rows_path,
+        out,
+        len(BANDS) * len(FITS) * items,
+        lambda s: _slot(s)[0] in bands and _slot(s)[1] == "A",
+    )
+    T, recs, lat, cache, device = env.T, env.recs, env.lat, env.cache, env.device
+    anima = env.anima
+    anima.eval()
+    delta = env.rows.delta
+    raw0 = delta.raw.data.clone()
+    moves = _moves(_offsets(env.rows_path))
+    D = {}
+    for name in ROWMOVES:
+        D[name] = torch.zeros_like(raw0)
+        for e, x in moves[name].items():
+            if e in delta.index:
+                D[name][delta.index[e]] = torch.from_numpy(x).to(raw0) / (
+                    env.rows.row_scale * delta.scale
+                )
+    vae = {d: _vae(device, t) for d, t in (("fp32", torch.float32), ("bf16", torch.bfloat16))}
+    pe = {
+        d: load_pe_encoder(device, name="pe_spatial", dtype=t)
+        for d, t in (("fp32", torch.float32), ("bf16", torch.bfloat16))
+    }
+
+    def cos(a, b):
+        return {
+            f"k{k}": float(
+                F.cosine_similarity(
+                    _lowpass(a, k).flatten(), _lowpass(b, k).flatten(), dim=0
+                )
+            )
+            for k in POOLS
+        }
+
+    res = []
+    for step, idx in todo:
+        band, _ = _slot(step)
+        gen = torch.Generator(device=device).manual_seed(1_000_003 * (T.SEED + 1) + step)
+        lo, hi = BANDS[band]
+        sigma = lo + (hi - lo) * float(torch.rand((), generator=gen, device=device))
+        latents = lat[idx].to(device).float()
+        noise = torch.randn(latents.shape, generator=gen, device=device)
+        brecs = [recs[i] for i in idx]
+        ts = torch.full((1,), sigma, device=device, dtype=torch.float32)
+        noisy = (1.0 - sigma) * latents + sigma * noise
+        with torch.no_grad():
+            pred = _forward(anima, noisy, ts, cache, [brecs[0]["caption"]], device)
+        x0 = noisy - sigma * pred
+        mo = out_mask(x0.shape, brecs, device, T.GRID_BOX)
+        keep = _pe_keep(1.0 - mo, (8 * x0.shape[-2], 8 * x0.shape[-1]), pe["fp32"].bucket_spec)
+        seed = 2_000_003 * (T.SEED + 1) + step
+
+        def u(x, dv="fp32", dp="fp32"):
+            g = torch.Generator(device=device).manual_seed(seed)
+            return _page_u(vae[dv], pe[dp], x, keep, g, 1)[0] * mo
+
+        def z(x):
+            with torch.no_grad():
+                px = vae["fp32"].decode_to_pixels(x.float())
+                return encode_pe_from_imageminus1to1(pe["fp32"], px)[0][1:][keep].float()
+
+        u0, z0 = u(x0), z(x0)
+        r = {"step": step, "band": band, "sigma": sigma, "item": int(idx[0])}
+        r["repeat"] = cos(u0, u(x0))["k1"]
+        r["share"] = {
+            f"k{k}": float(_lowpass(u0, k).norm() ** 2 / u0.norm() ** 2) for k in POOLS
+        }
+        r["perturb"] = {}
+        gd = torch.Generator(device=device).manual_seed(seed + 1)
+        d = torch.randn(x0.shape, generator=gd, device=device)
+        d = d / d.norm() * x0.norm()
+        for e in PERTURB:
+            xp = x0 + e * d
+            r["perturb"][f"{e:g}"] = {
+                "u_cos": cos(u0, u(xp)),
+                "z_rel": float((z(xp) - z0).norm() / z0.norm()),
+            }
+        def x0_at(eps, name):
+            delta.raw.data.copy_(raw0 + eps * D[name])
+            with torch.no_grad():
+                p = _forward(anima, noisy, ts, cache, [brecs[0]["caption"]], device)
+            delta.raw.data.copy_(raw0)
+            return noisy - sigma * p
+
+        r["rowmove"] = {}
+        for name in ROWMOVES:
+            rel1 = float((x0_at(1.0, name) - x0).norm() / x0.norm())
+            m = r["rowmove"][name] = {"rel1": rel1, "at": {}}
+            if rel1 == 0.0:  # none of the move's rows in this caption
+                continue
+            for e in PERTURB:
+                xp = x0_at(e / rel1, name)
+                m["at"][f"{e:g}"] = {
+                    "rel": float((xp - x0).norm() / x0.norm()),
+                    "u_cos": cos(u0, u(xp)),
+                    "z_rel": float((z(xp) - z0).norm() / z0.norm()),
+                }
+        r["bf16"] = {
+            "vae": cos(u0, u(x0, "bf16", "fp32")),
+            "pe": cos(u0, u(x0, "fp32", "bf16")),
+            "both": cos(u0, u(x0, "bf16", "bf16")),
+        }
+        res.append(r)
+        print(
+            f"step {step} {band} σ {sigma:.3f} item {idx[0]}: repeat {r['repeat']:.6f}, "
+            "z_rel "
+            + " ".join(f"{e} {v['z_rel']:.1e}" for e, v in r["perturb"].items()),
+            flush=True,
+        )
+        for name, m in r["rowmove"].items():
+            print(
+                f"   rows + ε·{name}: whole move |Δx̂₀|/|x̂₀| {m['rel1']:.2e} | "
+                + " ".join(
+                    f"{e}→{v['rel']:.1e}: u {v['u_cos']['k1']:.3f}/p8 {v['u_cos']['k8']:.3f} "
+                    f"z {v['z_rel']:.1e}"
+                    for e, v in m["at"].items()
+                ),
+                flush=True,
+            )
+        for k in POOLS:
+            kk = f"k{k}"
+            print(
+                f"   pool {k}: share {r['share'][kk]:.3f} | u cos at δ "
+                + " ".join(f"{e} {v['u_cos'][kk]:.3f}" for e, v in r["perturb"].items())
+                + f" | bf16 vae {r['bf16']['vae'][kk]:.3f} pe {r['bf16']['pe'][kk]:.3f}",
+                flush=True,
+            )
+    (out / "pecheck.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
+    print(f"→ {out / 'pecheck.json'}", flush=True)
+
+
+def _draw(env, step: int, idx):
+    """The step's band / fit, its generator (σ and ε already drawn from it,
+    the latent probes next), σ, x_σ, timesteps, records, captions."""
+    import torch
+
+    T, device = env.T, env.device
+    band, fit_ = _slot(step)
+    gen = torch.Generator(device=device).manual_seed(1_000_003 * (T.SEED + 1) + step)
+    lo, hi = BANDS[band]
+    sigma = lo + (hi - lo) * float(torch.rand((), generator=gen, device=device))
+    latents = env.lat[idx].to(device).float()
+    noise = torch.randn(latents.shape, generator=gen, device=device)
+    brecs = [env.recs[i] for i in idx]
+    ts = torch.full((len(idx),), sigma, device=device, dtype=torch.float32)
+    noisy = (1.0 - sigma) * latents + sigma * noise
+    return band, fit_, gen, sigma, noisy, ts, brecs, [r["caption"] for r in brecs]
+
+
+def _page_pass(env, todo, probes: int, pe_dtype: str) -> dict:
+    """The page leg for every item, ahead of the DiT's graphs: x̂₀ from a
+    no-grad forward per item, then the DiT to the CPU, the VAE and PE in, and
+    u_q (``_page_u`` on the out-box cells) per item → ``{step: (x̂₀, U)}`` on
+    the CPU; the DiT goes back after. The fp32 DiT's weights and the decode→PE
+    graph do not fit 16 GB together (448×640 ran out at 13.6 GiB)."""
+    import time
+
+    import torch
+    from library.vision.encoder import load_pe_encoder
+
+    anima, device, T = env.anima, env.device, env.T
+    x0s = {}
+    t0 = time.time()
+    with torch.no_grad():
+        for step, idx in todo:
+            _b, _f, _g, sigma, noisy, ts, brecs, caps = _draw(env, step, idx)
+            pred0 = _forward(anima, noisy, ts, env.cache, caps, device)
+            x0s[step] = (noisy - sigma * pred0).cpu()
+    print(f"page pass: {len(x0s)} x̂₀ ({(time.time() - t0) / 60:.1f} min)", flush=True)
+    anima.to("cpu")
+    torch.cuda.empty_cache()
+    dt = {"fp32": torch.float32, "bf16": torch.bfloat16}
+    vae = _vae(device, dt[pe_dtype])
+    pe = load_pe_encoder(device, name="pe_spatial", dtype=dt[pe_dtype])
+    got = {}
+    t0 = time.time()
+    torch.cuda.reset_peak_memory_stats()
+    for n, (step, idx) in enumerate(todo, start=1):
+        x0 = x0s[step].to(device)
+        mo = out_mask(x0.shape, [env.recs[i] for i in idx], device, T.GRID_BOX)
+        keep = _pe_keep(1.0 - mo, (8 * x0.shape[-2], 8 * x0.shape[-1]), pe.bucket_spec)
+        gen_pe = torch.Generator(device=device).manual_seed(
+            2_000_003 * (T.SEED + 1) + step
+        )
+        U = _page_u(vae, pe, x0, keep, gen_pe, probes) * mo
+        got[step] = (x0s[step], U.cpu())
+        if n == 1:
+            with torch.no_grad():
+                px = vae.decode_to_pixels(x0.to(vae.dtype))
+            print(
+                f"page leg: {int(keep.sum())}/{keep.numel()} tokens out of the box, "
+                f"pixels clamped {float((px.abs() >= 1.0).float().mean()):.3f}",
+                flush=True,
+            )
+            del px
+        if n % 50 == 0 or n == len(todo):
+            print(
+                f"page leg {n}/{len(todo)}: {(time.time() - t0) / n:.2f} s/item, "
+                f"peak {torch.cuda.max_memory_allocated() / 2**30:.1f} GiB",
+                flush=True,
+            )
+    del vae, pe
+    torch.cuda.empty_cache()
+    anima.to(device)
+    return got
+
+
+def fit(
+    run_name: str,
+    rows_path: str,
+    label: str,
+    bands,
+    items: int,
+    probes: int,
+    side: str = "cells",
+    pe_dtype: str = "fp32",
+) -> None:
+    import time
+
+    import torch
+    from cjk_scale.loss import glyph_count
+
+    assert set(bands) <= set(BANDS), bands
+    assert side in ("cells", "pe"), side
+    out = PROBE / label
+    # the deal: every band's every fit gets ``items`` batches; a --bands
+    # subset walks the same steps and skips the others
+    n_b = items
+    todo, env = _setup(
+        run_name,
+        rows_path,
+        out,
+        len(BANDS) * len(FITS) * n_b,
+        lambda s: _slot(s)[0] in bands,
+    )
+    print(f"{n_b} per band × fit, bands {','.join(bands)}", flush=True)
+    T, cache, device = env.T, env.cache, env.device
+    anima, rows, rows_path = env.anima, env.rows, env.rows_path
+    delta = rows.delta
+    n_rows, dim = delta.raw.shape
+    live = ~rows.frozen_mask
+    masks = MASKS + (("pe",) if side == "pe" else ())
+    # the page in PE's terms (idea2): x̂₀ = x_σ − σ·v decoded, PE-Spatial on
+    # it, a Gaussian probe on the out-box tokens; the decode→PE leg does not
+    # see the rows, so it runs first, on no-grad x̂₀'s (`_page_pass`)
+    page = _page_pass(env, todo, probes, pe_dtype) if side == "pe" else {}
 
     # the raw ids from a prepended pre-hook (the pack's own pre-hook remaps
     # the ext ids before a forward hook sees its args); embed's output from a
@@ -224,20 +561,16 @@ def fit(
     got = []
     t0 = time.time()
     for n, (step, idx) in enumerate(todo, start=1):
-        band, fit_ = _slot(step)
-        gen = torch.Generator(device=device).manual_seed(
-            1_000_003 * (T.SEED + 1) + step
-        )
-        lo, hi = BANDS[band]
-        sigma = lo + (hi - lo) * float(torch.rand((), generator=gen, device=device))
-        latents = lat[idx].to(device).float()
-        noise = torch.randn(latents.shape, generator=gen, device=device)
-        brecs = [recs[i] for i in idx]
-        ts = torch.full((len(idx),), sigma, device=device, dtype=torch.float32)
-        noisy = (1.0 - sigma) * latents + sigma * noise
+        band, fit_, gen, sigma, noisy, ts, brecs, captions = _draw(env, step, idx)
         cap.clear()
-        pred = _forward(anima, noisy, ts, cache, [r["caption"] for r in brecs], device)
+        pred = _forward(anima, noisy, ts, cache, captions, device)
         assert cap.get("n") == 1, f"embed ran {cap.get('n')} times in one forward"
+        if side == "pe":  # u_q was taken at this forward's x̂₀
+            x0, U = page.pop(step)
+            x0 = x0.to(device)
+            off = float((noisy - sigma * pred.detach() - x0).norm() / x0.norm())
+            assert off < 1e-5, f"x̂₀ is {off:.2e} off the page pass's"
+            U = U.to(device)
         assert pred.dtype == torch.float32, pred.dtype
         ids, emb = cap["ids"], cap["emb"]
         mo = out_mask(pred.shape, brecs, pred.device, T.GRID_BOX)
@@ -280,11 +613,15 @@ def fit(
             )
             assert err < 1e-4 and again < 1e-5, (err, again)
 
-        G = torch.empty(len(uk), len(MASKS), probes, dim, dtype=torch.bfloat16)
+        G = torch.empty(len(uk), len(masks), probes, dim, dtype=torch.bfloat16)
         for j, mask in enumerate((mi, mo)):
             for q in range(probes):
                 v = torch.randn(pred.shape, generator=gen, device=device) * mask
                 G[:, j, q] = pair_g(v).to(torch.bfloat16).cpu()
+        if side == "pe":  # x̂₀ = x_σ − σ·v: ∂x̂₀/∂v = −σ
+            for q in range(probes):
+                G[:, 2, q] = pair_g(-sigma * U[q]).to(torch.bfloat16).cpu()
+            del U
         del pred, emb, pair_g  # the retained graph goes before the next forward
         cap.clear()
         got.append(
@@ -306,8 +643,9 @@ def fit(
             print(
                 f"{n}/{len(todo)} step {step} {band}/{fit_} σ {sigma:.3f}: {len(uk)} pairs, "
                 f"|g| in {float(G[:, 0].float().norm(dim=-1).mean()):.3e} "
-                f"out {float(G[:, 1].float().norm(dim=-1).mean()):.3e}, "
-                f"{(time.time() - t0) / n:.2f} s/item",
+                f"out {float(G[:, 1].float().norm(dim=-1).mean()):.3e}"
+                + (f" pe {float(G[:, 2].float().norm(dim=-1).mean()):.3e}" if side == "pe" else "")
+                + f", {(time.time() - t0) / n:.2f} s/item",
                 flush=True,
             )
     for h in handles:
@@ -325,6 +663,9 @@ def fit(
             "n_b": n_b,
             "probes": probes,
             "dil": DIL,
+            "masks": masks,
+            "side": side,
+            "pe_dtype": pe_dtype if side == "pe" else None,
             "batches": got,
         },
         out / "g.pt",
@@ -332,10 +673,152 @@ def fit(
     print(f"→ {out / 'g.pt'} ({(time.time() - t0) / 60:.1f} min)", flush=True)
 
 
+# ---------------------------------------------------------------- blur
+
+BLUR_SIGMAS = (0.5, 0.6, 0.7, 0.8, 0.9, 0.95)
+RADII = (2, 4, 8, 16)  # px, the Gaussian blurs of the clean page
+SHOW = 6  # items whose x̂₀ are saved as PNGs
+
+
+def blur(run_name: str, rows_path: str, label: str, items: int) -> None:
+    """Does PE-Spatial read the page from the one-step x̂₀ (`idea2.md` § The
+    page in PE's terms, "Blur")? Forward only: per item and σ, x̂₀ = x_σ −
+    σ·v decoded and encoded, against the clean latent decoded and its blurs
+    at ``RADII`` px, on PE's out-box tokens (the latent box dilated as
+    `out_mask`, max-pooled to PE's grid) → ``…/<label>/blur.json``."""
+    import time
+
+    import torch
+    import torch.nn.functional as F
+    from common.models import load_vae
+    from library.inference.output import pixels_to_pil
+    from library.vision.encoder import encode_pe_from_imageminus1to1, load_pe_encoder
+    from torchvision.transforms.functional import gaussian_blur
+
+    out = PROBE / label
+    todo, env = _setup(run_name, rows_path, out, items, lambda s: True)
+    T, recs, lat, cache, device = env.T, env.recs, env.lat, env.cache, env.device
+    anima = env.anima
+    anima.eval()
+    vae = load_vae(device)
+    pe = load_pe_encoder(device, name="pe_spatial")
+    (out / "png").mkdir(exist_ok=True)
+
+    def feats(px, keep):
+        f = encode_pe_from_imageminus1to1(pe, px)[0].float()
+        cls, tok = f[0], f[1:]
+        assert tok.shape[0] == keep.numel(), (tok.shape, keep.shape)
+        return {"cls": F.normalize(cls, dim=0), "tok": F.normalize(tok[keep], dim=1)}
+
+    def cos(a, b):
+        return {
+            "cls": float(a["cls"] @ b["cls"]),
+            "tok": float((a["tok"] * b["tok"]).sum(1).mean()),
+        }
+
+    views = [f"s{s:.2f}" for s in BLUR_SIGMAS] + [f"r{r}" for r in RADII]
+    vec = {v: {"cls": [], "tok": []} for v in ["clean", *views]}
+    per = []
+    t0 = time.time()
+    with torch.no_grad():
+        for n, (step, idx) in enumerate(todo, start=1):
+            gen = torch.Generator(device=device).manual_seed(
+                1_000_003 * (T.SEED + 1) + step
+            )
+            latents = lat[idx].to(device).float()
+            noise = torch.randn(latents.shape, generator=gen, device=device)
+            brecs = [recs[i] for i in idx]
+            box = 1.0 - out_mask(latents.shape, brecs, device, T.GRID_BOX)
+            clean = vae.decode_to_pixels(latents)
+            keep = _pe_keep(box, clean.shape[-2:], pe.bucket_spec)
+            f = {"clean": feats(clean, keep)}
+            for r in RADII:
+                f[f"r{r}"] = feats(gaussian_blur(clean.float(), 6 * r + 1, r), keep)
+            for s in BLUR_SIGMAS:
+                ts = torch.full((1,), s, device=device, dtype=torch.float32)
+                noisy = (1.0 - s) * latents + s * noise
+                pred = _forward(anima, noisy, ts, cache, [brecs[0]["caption"]], device)
+                px = vae.decode_to_pixels(noisy - s * pred)
+                f[f"s{s:.2f}"] = feats(px, keep)
+                if n <= SHOW:
+                    pixels_to_pil(px[0].float().cpu()).save(
+                        out / "png" / f"{idx[0]}_s{s:.2f}.png"
+                    )
+            if n <= SHOW:
+                pixels_to_pil(clean[0].float().cpu()).save(out / "png" / f"{idx[0]}_clean.png")
+            row = {"item": int(idx[0]), "keep": int(keep.sum()), "of": int(keep.numel())}
+            for v in views:
+                row[v] = cos(f[v], f["clean"])
+                if v.startswith("s"):
+                    row[v]["blur"] = {f"r{r}": cos(f[v], f[f"r{r}"])["tok"] for r in RADII}
+            per.append(row)
+            for v in ["clean", *views]:
+                vec[v]["cls"].append(f[v]["cls"].cpu())
+                vec[v]["tok"].append(F.normalize(f[v]["tok"].mean(0), dim=0).cpu())
+            if n % 10 == 0 or n == 1:
+                print(f"{n}/{len(todo)}: {(time.time() - t0) / n:.1f} s/item", flush=True)
+
+    # retrieval: view i's nearest clean page among the N (chance 1 / N), and
+    # how alike the N look to PE at that view (mean off-diagonal cos)
+    N = len(per)
+    summary = {}
+    for v in views:
+        s = {}
+        for k in ("cls", "tok"):
+            A = torch.stack(vec[v][k])
+            C = torch.stack(vec["clean"][k])
+            S = A @ C.T
+            s[f"top1_{k}"] = float((S.argmax(1) == torch.arange(N)).float().mean())
+            G = A @ A.T
+            s[f"alike_{k}"] = float((G.sum() - G.diagonal().sum()) / (N * (N - 1)))
+            s[f"cos_{k}"] = sum(r[v][k] for r in per) / N
+        if v.startswith("s"):
+            s["to_blur"] = {f"r{r}": sum(x[v]["blur"][f"r{r}"] for x in per) / N for r in RADII}
+        summary[v] = s
+    C = torch.stack(vec["clean"]["tok"])
+    G = C @ C.T
+    summary["clean"] = {"alike_tok": float((G.sum() - G.diagonal().sum()) / (N * (N - 1)))}
+    res = {"run": run_name, "rows": env.rows_path, "items": N, "summary": summary, "per": per}
+    (out / "blur.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
+    print(f"{N} items, chance top-1 {1 / N:.3f}; clean pages alike (tok) {summary['clean']['alike_tok']:.3f}")
+    print(f"{'view':>6} {'cos cls':>8} {'cos tok':>8} {'top1 cls':>9} {'top1 tok':>9} {'alike tok':>9}  tok cos to blur r")
+    for v in views:
+        s = summary[v]
+        tb = " ".join(f"{k} {x:.3f}" for k, x in s.get("to_blur", {}).items())
+        print(
+            f"{v:>6} {s['cos_cls']:8.3f} {s['cos_tok']:8.3f} {s['top1_cls']:9.3f} "
+            f"{s['top1_tok']:9.3f} {s['alike_tok']:9.3f}  {tb}"
+        )
+    print(f"→ {out / 'blur.json'} ({(time.time() - t0) / 60:.1f} min)", flush=True)
+
+
 # ---------------------------------------------------------------- read
 
 
 CUTS = (5, 10, 25, 50)  # fit A cut to its first n items
+
+
+def _load(label: str, page: str = "out") -> dict:
+    """``<label>/g.pt`` with the page side ``page`` in the "out" slot: "out"
+    the out-box cells (probe 0), "pe" PE's out-box tokens (``fit --side
+    pe``). Each pair's RMS over the two cell masks is kept as ``rms`` first,
+    so the "pair" weighting of M_in does not change with the page."""
+    import torch
+
+    sd = torch.load(PROBE / label / "g.pt", map_location="cpu", weights_only=False)
+    masks = tuple(sd.get("masks", MASKS))
+    assert page in masks, f"{label}: no {page!r} probes (masks {masks})"
+    j = masks.index(page)
+    for b in sd["batches"]:
+        G = b["G"]
+        b["rms"] = G[:, :2].float().pow(2).sum(-1).mean((1, 2)).sqrt()
+        b["G"] = G[:, [0, j]]
+    sd["page"] = page
+    return sd
+
+
+def _suffix(sd) -> str:
+    return "" if sd.get("page", "out") == "out" else f"_{sd['page']}"
 
 
 def _moments(sd, fam_of: dict, weight: str = "none") -> tuple[dict, dict]:
@@ -354,7 +837,7 @@ def _moments(sd, fam_of: dict, weight: str = "none") -> tuple[dict, dict]:
         seen[(b["band"], b["fit"])] += 1
         G = b["G"].float().numpy().astype(np.float64)
         if weight == "pair":
-            G = G / np.sqrt((G**2).sum(-1).mean((1, 2)))[:, None, None, None]
+            G = G / b["rms"].numpy().astype(np.float64)[:, None, None, None]
         fam = np.array([fam_of.get(int(r), "") for r in b["pair_row"].tolist()])
         for f in ("kana", "kanji"):
             sel = fam == f
@@ -477,12 +960,13 @@ def _quad(X, M):
     return float(((X @ M) * X).sum())
 
 
-def read(label: str, drift: list[str], ridge: float, weight: str = "none") -> None:
+def read(
+    label: str, drift: list[str], ridge: float, weight: str = "none", page: str = "out"
+) -> None:
     import numpy as np
-    import torch
     from probe_geom import _families
 
-    sd = torch.load(PROBE / label / "g.pt", map_location="cpu", weights_only=False)
+    sd = _load(label, page)
     ids = sd["ext_ids"]
     fam_of = {k: f for f, ks in _families(ids).items() for k in ks}
     acc, cuts = _moments(sd, fam_of, weight)
@@ -590,7 +1074,7 @@ def read(label: str, drift: list[str], ridge: float, weight: str = "none") -> No
     # drift: band s080 refit at other rows, same batches / noise / probes
     out["drift"] = {}
     for dl in drift:
-        dd = torch.load(PROBE / dl / "g.pt", map_location="cpu", weights_only=False)
+        dd = _load(dl, page)
         # its own row set (only its band's items encoded): families by ext id
         d_fam = {k: f for f, ks in _families(dd["ext_ids"]).items() for k in ks}
         dacc, _ = _moments(dd, d_fam, weight)
@@ -645,7 +1129,9 @@ def read(label: str, drift: list[str], ridge: float, weight: str = "none") -> No
                 out["drift"][dl][f"{band}|{f}"] = rec
 
     (
-        PROBE / label / ("read.json" if weight == "none" else f"read_{weight}.json")
+        PROBE
+        / label
+        / (("read" if weight == "none" else f"read_{weight}") + _suffix(sd) + ".json")
     ).write_text(json.dumps(out, indent=1, ensure_ascii=False))
     _print(out)
 
@@ -729,15 +1215,14 @@ def _pooled(sd, fam_of, weight, band, lo=None, hi=None) -> dict:
     return out
 
 
-def split(label: str) -> None:
+def split(label: str, page: str = "out") -> None:
     """σ inside the 0.5–0.7 band: the per-pair trace by σ quarter, the upper
     half's share of the pooled trace, the halves' lenses against each other,
     and the pooled lens against the trace-normalised pool."""
     import numpy as np
-    import torch
     from probe_geom import _families
 
-    sd = torch.load(PROBE / label / "g.pt", map_location="cpu", weights_only=False)
+    sd = _load(label, page)
     fam_of = {k: f for f, ks in _families(sd["ext_ids"]).items() for k in ks}
     out = {}
     for weight in ("none", "pair"):
@@ -774,7 +1259,7 @@ def split(label: str) -> None:
                 float(np.trace(h[f]["in"]) / np.trace(h[f]["out"])) for h in halves
             ]
             r["pairs_halves"] = [lo_["n"], up_["n"]]
-    (PROBE / label / "split.json").write_text(json.dumps(out, indent=1))
+    (PROBE / label / f"split{_suffix(sd)}.json").write_text(json.dumps(out, indent=1))
     for w, rec in out.items():
         for f, r in rec.items():
             print(f"\n== {w} · {f}: pairs per half {r['pairs_halves']}")
@@ -800,7 +1285,7 @@ RULER = "project/cjk_anima_reseed/results/20261007-2048-ruler-sensitive-sent_kan
 START_ARM = "seed_fixed_1005_stick080@punct"
 
 
-def check(label: str, weight: str, ruler_dir: str) -> None:
+def check(label: str, weight: str, ruler_dir: str, page: str = "out") -> None:
     """Does the lens predict a read? Per row: f0's move as the box sees it
     (xᵀ M_in x) against the glyph's ruler recall, f0 − start; per string:
     Δ(pres − f0) over the string's rows as the page sees it (Σ xᵀ M_out x)
@@ -808,12 +1293,11 @@ def check(label: str, weight: str, ruler_dir: str) -> None:
     import collections
 
     import numpy as np
-    import torch
     from probe_geom import _char_rows, _families
     from reseed import REPO
     from scipy.stats import spearmanr
 
-    sd = torch.load(PROBE / label / "g.pt", map_location="cpu", weights_only=False)
+    sd = _load(label, page)
     ids = sd["ext_ids"]
     fam_e = {ids[k]: f for f, ks in _families(ids).items() for k in ks}
     fam_of = {k: f for f, ks in _families(ids).items() for k in ks}
@@ -905,7 +1389,7 @@ def check(label: str, weight: str, ruler_dir: str) -> None:
             out[f"{k} ~ Σ xMout x / Σ|x|²"] = [float(rho), float(pv)]
         res["strings"][band] = out
 
-    (PROBE / label / f"check_{weight}.json").write_text(json.dumps(res, indent=1))
+    (PROBE / label / f"check_{weight}{_suffix(sd)}.json").write_text(json.dumps(res, indent=1))
     print(f"== rows: f0 − start glyph recall (Spearman ρ, p) — {weight}")
     for k, v in res["rows"].items():
         print(
@@ -926,7 +1410,7 @@ def check(label: str, weight: str, ruler_dir: str) -> None:
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("verb", choices=["fit", "read", "split", "check"])
+    p.add_argument("verb", choices=["fit", "blur", "pecheck", "read", "split", "check"])
     p.add_argument("--ruler", default=RULER, help="check: a ruler result dir")
     p.add_argument("--run", default="sent_kanji_f0")
     p.add_argument(
@@ -939,15 +1423,35 @@ def main():
     p.add_argument("--drift", default="", help="read: labels refit at other rows")
     p.add_argument("--ridge", type=float, default=1e-2)
     p.add_argument("--weight", choices=["none", "pair"], default="none")
+    p.add_argument(
+        "--side", choices=["cells", "pe"], default="cells", help="fit: + PE probes"
+    )
+    p.add_argument("--pe_dtype", choices=["fp32", "bf16"], default="fp32")
+    p.add_argument(
+        "--page", choices=["out", "pe"], default="out", help="read: the page side"
+    )
     a = p.parse_args()
     if a.verb == "fit":
-        fit(a.run, a.rows, a.label, a.bands.split(","), a.items, a.probes)
+        fit(
+            a.run,
+            a.rows,
+            a.label,
+            a.bands.split(","),
+            a.items,
+            a.probes,
+            a.side,
+            a.pe_dtype,
+        )
+    elif a.verb == "pecheck":
+        pecheck(a.run, a.rows, a.label, a.bands.split(","), a.items)
+    elif a.verb == "blur":
+        blur(a.run, a.rows, a.label, a.items)
     elif a.verb == "split":
-        split(a.label)
+        split(a.label, a.page)
     elif a.verb == "check":
-        check(a.label, a.weight, a.ruler)
+        check(a.label, a.weight, a.ruler, a.page)
     else:
-        read(a.label, [x for x in a.drift.split(",") if x], a.ridge, a.weight)
+        read(a.label, [x for x in a.drift.split(",") if x], a.ridge, a.weight, a.page)
 
 
 if __name__ == "__main__":
