@@ -123,6 +123,31 @@ class LoKrModule(BaseLoRAModule):
         else:
             in_m, in_n = factorization(in_dim, factor)
             out_l, out_k = factorization(out_dim, factor)
+            # Fused qkv/kv projections must split losslessly at save time: the
+            # per-component kron rows are exact only when out_l (w1 rows) is
+            # divisible by the component count. Swap to the most balanced
+            # divisor pair satisfying that — same parametrization family,
+            # ~1% parameter delta on the affected modules.
+            from networks.attn_fuse import match_fused_spec
+
+            fused_spec = match_fused_spec(lora_name)
+            if fused_spec is not None and out_dim % len(fused_spec.component_letters) == 0:
+                n_comp = len(fused_spec.component_letters)
+                if out_l % n_comp != 0:
+                    best = None
+                    for cand_l in range(1, out_dim + 1):
+                        if out_dim % cand_l or cand_l % n_comp:
+                            continue
+                        cand_k = out_dim // cand_l
+                        score = abs(cand_l - cand_k)
+                        if best is None or score < best[0]:
+                            best = (score, cand_l, cand_k)
+                    if best is not None:
+                        out_l, out_k = best[1], best[2]
+                        logger.info(
+                            f"LoKr {lora_name}: out factorization aligned to "
+                            f"({out_l}, {out_k}) for lossless qkv defuse"
+                        )
             self.use_w2 = self.lora_dim >= max(out_k, in_n) / 2
 
         # w1 is always the full (small) matrix.
