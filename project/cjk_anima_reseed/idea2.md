@@ -121,3 +121,37 @@ project onto).
 **If it passes**, the training arm: h32's recipe with each row step projected
 onto the top-k high-λ subspace of its band, against p10c09 on the same draws,
 read on the ruler's 84 live strings.
+
+**Ran 10-07 — stopped** (`reports/probe_jl_2026_10_07.md`): A / B overlap
+0.21–0.50 at k 16 (pair-weighted, kana 0.69–0.80 and still climbing; kanji
+0.30–0.55); a cross-fit text-only λ only at σ 0.5–0.7, ~1–2 at L_pres's
+σ 0.8–0.9 — no direction there moves the box without the page, so the
+projection arm is not run. Read in fp32: bf16's per-position row gradient
+is at cos 0.3–0.6 to fp32's.
+
+## The page in PE's terms (not run)
+
+Probe 0's M_out sits on the prediction's latent cells: every channel of
+every out-box cell counts, a tone drift or a texture jitter as much as a
+character gone. λ ~1 at σ 0.8–0.9 says no row direction moves the box
+without moving the page's *cells*. The ruler scores the page on what the
+scene is (`en_match`), not on its cells — and JLD's point is the late
+output's meaning (the CLS), not raw pixels.
+
+The probe: x̂₀ = x_σ − σ·v from the prediction, the VAE decode, the text
+box masked (or cropped out), PE's features z of the rest; Gaussian probes
+on z give M_scene = E[J_zᵀ J_z], J_z = ∂z / ∂row. The box side stays
+latent (M_in). M_in u = λ M_scene u, cross-fit as probe 0: a direction
+with λ ≫ r at σ 0.8–0.9 moves the text and leaves what the page *is* —
+the subspace the projection arm needs, which the cell metric did not
+show.
+
+- **Blur.** At σ 0.8–0.9 the one-step x̂₀ is soft; PE on a soft page may
+  read the blur, and J_z then measures that. Check first: PE's features of
+  x̂₀ at σ 0.8 against the clean image's, per scene.
+- **Cost.** A VAE decode and PE in the backward, fp32, per probe — several
+  times probe 0's 3.85 s / item; not measured.
+- **The mask.** A grey box and a crop read different things; the EN page
+  (`probe_pres`'s teacher) is the reference either way.
+- The training-side twin of it is L_pres on PE features against the EN
+  render, not on cells.
