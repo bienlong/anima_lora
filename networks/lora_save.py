@@ -84,7 +84,10 @@ def build_standard_state_dict(
     defuse_and_bake_standard(state_dict)
     native_ok = False
     if base_weights:
-        work = dict(state_dict)
+        # Native math runs on CPU: the training state_dict lives on GPU while
+        # base weights are CPU, and the artifact ends up on disk anyway — the
+        # factor tensors are only a few MB.
+        work = {k: v.detach().to("cpu") for k, v in state_dict.items()}
         try:
             _split_fused_lokr(work)
             _rescale_dora_native(work, base_weights)
@@ -181,7 +184,7 @@ def _split_fused_lokr(state_dict: Dict[str, torch.Tensor]) -> None:
                 target_scaled = (float(alpha.item()) / w2_b.shape[0]) * target
                 U, S, Vh = torch.linalg.svd(target_scaled, full_matrices=False)
                 energy = (S**2).cumsum(0) / (S**2).sum()
-                r = min(int(torch.searchsorted(energy, torch.tensor(0.999)).item()) + 1, 64)
+                r = min(int(torch.searchsorted(energy, torch.tensor(0.999, device=energy.device)).item()) + 1, 64)
                 sqrt_s = S[:r].sqrt()
                 a_down = (Vh[:r, :] * sqrt_s.unsqueeze(1)).contiguous()
                 b_up = (U[:, :r] * sqrt_s.unsqueeze(0)).contiguous()
