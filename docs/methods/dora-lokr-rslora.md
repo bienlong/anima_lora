@@ -13,10 +13,39 @@ Combo matrix (`use_dora` × `use_lokr`):
 |---|---|---|---|---|---|
 | – | – | LoRA | low-rank `up @ down` | – | native |
 | ✓ | – | DoRA | low-rank `up @ down` | ✓ | native |
-| – | ✓ | LoKr | `kron(w1, w2)` | – | in-repo only |
-| ✓ | ✓ | **DoKr** (LyCORIS `dokr`) | `kron(w1, w2)` | ✓ | in-repo only |
+| – | ✓ | LoKr | `kron(w1, w2)` | – | in-repo; `scripts/export_comfyui_lora.py` → ComfyUI |
+| ✓ | ✓ | **DoKr** (LyCORIS `dokr`) | `kron(w1, w2)` | ✓ | in-repo; `scripts/export_comfyui_lora.py` → ComfyUI |
 
 `rs_lora` composes with all four (see §rs-LoRA).
+
+## Exporting a trained file to ComfyUI
+
+The training save uses kohya `lora_unet_*` underscore keys with the fused
+`self_attn_qkv_proj` / `cross_attn_kv_proj` matrices, while ComfyUI's anima
+DiT expects `diffusion_model.*` dotted keys with separated q/k/v_proj — a raw
+save attaches only a fraction of its patches there and renders pure noise.
+`scripts/export_comfyui_lora.py` rewrites the file:
+
+```bash
+python scripts/export_comfyui_lora.py --lora output/ckpt/<name>.safetensors
+# --dit defaults to configs/base.toml pretrained_model_name_or_path
+# --out defaults to <name>_comfyui.safetensors next to the input
+```
+
+It (1) rewrites keys to `diffusion_model.*`; (2) splits the fused matrices —
+kv side is a lossless kron row split of `lokr_w1`, qkv side is lossless when
+`out_k` divides the per-component rows and otherwise falls back to a rank ≤
+`--max_svd_rank` (default 64) SVD per component; and (3) rescales `dora_scale` to the consumer norm convention
+(`m·‖W0‖/‖V‖` — ComfyUI's `weight_decompose` normalizes by the *original*
+weight norm `‖W0‖` while training normalizes by `‖V‖`; the reciprocal only
+cancels when `‖V‖≈‖W0‖` and otherwise leaves a `2ε` row-scale error) and
+stores it 2-D `[out, 1]` per the LyCORIS disk convention — a 1-D vector
+broadcasts into an `[out, out]` outer product inside `weight_decompose` and
+silently corrupts square weights. The run ends with a per-module error
+report; a count of 0 modules over 2% means the file is good to use. Scope:
+LoKr / DoKr files (modules carrying `lokr_w1`); plain LoRA / DoRA saves are
+not converted by this tool. Branch coverage is pinned by
+`tests/test_export_comfyui_lora.py`.
 
 ## DoRA (`use_dora = true`)
 
