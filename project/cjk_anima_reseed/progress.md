@@ -1,4 +1,4 @@
-# progress — where the reseed line stands (2026-10-06)
+# progress — where the reseed line stands (2026-10-07)
 
 How rows are trained, the data, what an arm is judged on, and the best arm
 against what ships (preview51). Every number is from a dated report
@@ -11,6 +11,13 @@ F1 0.271 vs 0.241, p 0.0095), draws the target kanji far more often (kanji
 recall 0.336 vs 0.193, p 0.015), with the page unchanged. It pays on short
 kana strings (exact 8 → 3 of 46). Long strings within 2 edits stay 0 / 32
 for every arm.
+
+**10-07.** `sent_kanji_pres` = f0 + λ 10 · L_pres at σ 0.8–0.9 every 2nd
+step keeps f0's text (cer, le2, g_f1 n.s.) and lifts the page on every page
+read (`en_match` +0.097, `en_tok_out` +0.041, `iou_en` +0.075, p ≤ 5e-7),
+the gain held where the text area did; it shrinks the text a third and
+leans kana recall down (−0.066, p 0.09)
+(`reports/sent_kanji_pres_2026_10_07.md`).
 
 ## 1. How the rows are trained
 
@@ -108,8 +115,9 @@ preview51 = `seed_fixed_1005_stick080@punct`; the old floor =
 | retrain_kana | 0.317 | 0.264 | 0.620 | 0.086 | 29.5 | 0.410 | 12 | 0.595 | 0.328 |
 | seed_retrain_0930 | **0.319** | 0.257 | 0.680 | 0.328 | 32.8 | 0.422 | **13** | **0.560** | 0.360 |
 | preview51 | 0.241 | 0.170 | 0.635 | 0.193 | 45.6 | 0.227 | 9 | 0.681 | 0.436 |
-| sent_whole | 0.260 | 0.193 | 0.647 | 0.167 | 39.8 | 0.266 | 6 | 0.664 | **0.437** |
+| sent_whole | 0.260 | 0.193 | 0.647 | 0.167 | 39.8 | 0.266 | 6 | 0.664 | 0.437 |
 | **sent_kanji_f0** | 0.271 | 0.202 | 0.670 | **0.336** | 37.3 | 0.318 | 3 | 0.689 | 0.436 |
+| sent_kanji_pres ¹ | 0.270 | 0.224 | 0.611 | 0.294 | 35.2 | 0.270 | 4 | 0.676 | **0.533** |
 
 Paired (mean Δ, better / worse strings, p):
 
@@ -118,6 +126,10 @@ Paired (mean Δ, better / worse strings, p):
 | f0 vs preview51 | +0.030, 60 / 34, **0.0095** | −8.3, 0.011 | −0.001, 0.66 | +0.009, 1.0 |
 | preview51 vs seed_retrain_0930 | −0.079, 21 / 74, **4e-8** | +12.8, 2e-6 | +0.076, **5e-5** | +0.121, 1e-4 |
 | f0 vs seed_retrain_0930 | −0.048, 43 / 53, 0.36 | +4.5, 0.04 | +0.075, **0.001** | +0.129, 8e-4 |
+| pres ¹ vs preview51 | +0.029, 61 / 32, **0.0035** | −10.4, 2e-5 | +0.097, **5e-8** | −0.005, 0.51 |
+
+¹ `results/20261007-2048-ruler-sensitive-sent_kanji_pres/` (same renders
+for the other arms, from cache).
 
 - **What preview51 bought and paid.** Over the old floor it won the page
   (en_match +0.076: the scene kept, fewer banners and pastes, the green leaf

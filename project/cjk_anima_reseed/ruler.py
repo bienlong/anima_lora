@@ -486,6 +486,7 @@ PACK_ARMS = {
         "sent_stick": OUT / "sent_stick",
         "sent_kanji": OUT / "sent_kanji",
         "sent_kanji_f0": OUT / "sent_kanji_f0",
+        "sent_kanji_pres": OUT / "sent_kanji_pres",
     }
 }
 
