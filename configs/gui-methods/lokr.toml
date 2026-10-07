@@ -19,9 +19,9 @@ sample_prompts = []
 sample_every_n_epochs = 0
 sample_at_first = false
 sample_decode_inline = "false"
-pretrained_model_name_or_path = "./sd-models/anima/anima-base-v1.0.safetensors"
-qwen3 = "./sd-models/anima/qwen_3_06b_base.safetensors"
-vae = "./sd-models/anima/qwen_image_vae.safetensors"
+pretrained_model_name_or_path = "models/diffusion_models/anima-base-v1.0.safetensors"
+qwen3 = "models/text_encoders/qwen_3_06b_base.safetensors"
+vae = "models/vae/qwen_image_vae.safetensors"
 timestep_sampling = "qinglong_flux"
 scale_weight_norms = 0.0
 [[datasets]]
