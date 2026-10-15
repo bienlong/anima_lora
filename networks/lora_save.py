@@ -140,17 +140,26 @@ def _split_fused_lokr(state_dict: Dict[str, torch.Tensor]) -> None:
         letters = spec.component_letters
         n = len(letters)
         w1 = state_dict.pop(f"{prefix}.lokr_w1").to(torch.float)
-        w2_a = state_dict.pop(f"{prefix}.lokr_w2_a")
-        w2_b = state_dict.pop(f"{prefix}.lokr_w2_b")
+        use_w2 = f"{prefix}.lokr_w2" in state_dict
+        if use_w2:
+            w2 = state_dict.pop(f"{prefix}.lokr_w2")
+            w2_a = None
+            w2_b = None
+            c = w2.shape[0]
+            kron_full = torch.kron(w1, w2.to(torch.float))
+        else:
+            w2_a = state_dict.pop(f"{prefix}.lokr_w2_a")
+            w2_b = state_dict.pop(f"{prefix}.lokr_w2_b")
+            c = w2_a.shape[0]
+            kron_full = torch.kron(w1, w2_a.to(torch.float) @ w2_b.to(torch.float))
         alpha = state_dict.pop(f"{prefix}.alpha")
         m = state_dict.pop(f"{prefix}.dora_scale", None)
 
-        a_rows, c = w1.shape[0], w2_a.shape[0]
+        a_rows = w1.shape[0]
         fused_out = a_rows * c
         comp_dim = fused_out // n
         if comp_dim * n != fused_out:
             raise ValueError(f"{prefix}: fused out {fused_out} not divisible by {n}")
-        kron_full = torch.kron(w1, w2_a.to(torch.float) @ w2_b.to(torch.float))
         base = prefix.removesuffix(spec.fused_frag)
 
         for i, letter in enumerate(letters):
@@ -159,39 +168,65 @@ def _split_fused_lokr(state_dict: Dict[str, torch.Tensor]) -> None:
             target = kron_full[sl]
             w1_i: Optional[torch.Tensor] = None
             w2_a_i: Optional[torch.Tensor] = None
+            w2_i: Optional[torch.Tensor] = None
             if comp_dim % c == 0:  # case 1: whole w1 row blocks per component
                 r = comp_dim // c
                 w1_i = w1[i * r : (i + 1) * r].contiguous()
-                w2_a_i = w2_a
+                if use_w2:
+                    w2_i = w2
+                else:
+                    w2_a_i = w2_a
             else:
                 b0 = (i * comp_dim) // c
                 b1 = ((i + 1) * comp_dim - 1) // c
                 if b0 == b1:  # case 2: component inside a single w1 row
                     w1_i = w1[b0 : b0 + 1].contiguous()
                     lo = i * comp_dim - b0 * c
-                    w2_a_i = w2_a[lo : lo + comp_dim].contiguous()
+                    if use_w2:
+                        w2_i = w2[lo : lo + comp_dim].contiguous()
+                    else:
+                        w2_a_i = w2_a[lo : lo + comp_dim].contiguous()
             if w1_i is not None:
-                recon = torch.kron(w1_i, w2_a_i.to(torch.float) @ w2_b.to(torch.float))
+                if use_w2:
+                    recon = torch.kron(w1_i, w2_i.to(torch.float))
+                else:
+                    recon = torch.kron(
+                        w1_i, w2_a_i.to(torch.float) @ w2_b.to(torch.float)
+                    )
                 if not torch.allclose(recon, target, rtol=1e-5, atol=1e-5):
                     raise ValueError(f"{new_prefix}: exact split verification failed")
                 state_dict[f"{new_prefix}.lokr_w1"] = w1_i
-                state_dict[f"{new_prefix}.lokr_w2_a"] = w2_a_i.clone()
-                state_dict[f"{new_prefix}.lokr_w2_b"] = w2_b.clone()
+                if use_w2:
+                    state_dict[f"{new_prefix}.lokr_w2"] = w2_i.clone()
+                else:
+                    state_dict[f"{new_prefix}.lokr_w2_a"] = w2_a_i.clone()
+                    state_dict[f"{new_prefix}.lokr_w2_b"] = w2_b.clone()
                 state_dict[f"{new_prefix}.alpha"] = alpha.clone()
             else:  # case 3: SVD approximation — of the SCALED rows (the consumer
                 # applies alpha/r = 1, so the training scale must be baked in,
                 # matching scripts/export_comfyui_lora.py's delta_c)
-                target_scaled = (float(alpha.item()) / w2_b.shape[0]) * target
+                scale = 1.0 if use_w2 else (float(alpha.item()) / w2_b.shape[0])
+                target_scaled = scale * target
                 U, S, Vh = torch.linalg.svd(target_scaled, full_matrices=False)
                 energy = (S**2).cumsum(0) / (S**2).sum()
-                r = min(int(torch.searchsorted(energy, torch.tensor(0.999, device=energy.device)).item()) + 1, 64)
+                r = min(
+                    int(
+                        torch.searchsorted(
+                            energy, torch.tensor(0.999, device=energy.device)
+                        ).item()
+                    )
+                    + 1,
+                    64,
+                )
                 sqrt_s = S[:r].sqrt()
                 a_down = (Vh[:r, :] * sqrt_s.unsqueeze(1)).contiguous()
                 b_up = (U[:, :r] * sqrt_s.unsqueeze(0)).contiguous()
                 state_dict[f"{new_prefix}.lora_A.weight"] = a_down
                 state_dict[f"{new_prefix}.lora_B.weight"] = b_up
                 state_dict[f"{new_prefix}.alpha"] = torch.tensor(float(r))
-                err = ((b_up @ a_down - target_scaled).norm() / target_scaled.norm()).item()
+                err = (
+                    (b_up @ a_down - target_scaled).norm() / target_scaled.norm()
+                ).item()
                 logger.warning(
                     f"{new_prefix}: qkv defuse fell back to SVD rank {r} "
                     f"({err:.4f} rel err) — consider a lokr_factor whose w1 rows "
@@ -201,7 +236,9 @@ def _split_fused_lokr(state_dict: Dict[str, torch.Tensor]) -> None:
                 state_dict[f"{new_prefix}.dora_scale"] = m[sl].clone()
 
 
-def _w0_for_prefix(prefix: str, base_weights: Dict[str, torch.Tensor]) -> Optional[torch.Tensor]:
+def _w0_for_prefix(
+    prefix: str, base_weights: Dict[str, torch.Tensor]
+) -> Optional[torch.Tensor]:
     """Org weight for a (possibly post-split component) prefix.
 
     base_weights is keyed by the fused runtime lora_name; a split component
@@ -246,11 +283,17 @@ def _rescale_dora_native(
         m = state_dict[key].to(torch.float)
         if f"{prefix}.lokr_w1" in state_dict:
             w1 = state_dict[f"{prefix}.lokr_w1"].to(torch.float)
-            w2 = (
-                state_dict[f"{prefix}.lokr_w2_a"].to(torch.float)
-                @ state_dict[f"{prefix}.lokr_w2_b"].to(torch.float)
-            )
-            s = float(state_dict[f"{prefix}.alpha"].item()) / state_dict[f"{prefix}.lokr_w2_b"].shape[0]
+            if f"{prefix}.lokr_w2" in state_dict:
+                w2 = state_dict[f"{prefix}.lokr_w2"].to(torch.float)
+                s = 1.0
+            else:
+                w2 = state_dict[f"{prefix}.lokr_w2_a"].to(torch.float) @ state_dict[
+                    f"{prefix}.lokr_w2_b"
+                ].to(torch.float)
+                s = (
+                    float(state_dict[f"{prefix}.alpha"].item())
+                    / state_dict[f"{prefix}.lokr_w2_b"].shape[0]
+                )
             delta = torch.kron(w1, w2) * s
         elif f"{prefix}.lora_A.weight" in state_dict:
             a_down = state_dict[f"{prefix}.lora_A.weight"].to(torch.float)
@@ -282,7 +325,9 @@ def _reprefix_to_diffusion_model(state_dict: Dict[str, torch.Tensor]) -> None:
 
 def _comfy_module_name(lora_name: str) -> str:
     """Module-name-level adaln runtime→comfy rename (see lora_utils relayout)."""
-    m = re.match(r"^(lora_unet_blocks_\d+_)adaln_up_(self_attn|cross_attn|mlp)$", lora_name)
+    m = re.match(
+        r"^(lora_unet_blocks_\d+_)adaln_up_(self_attn|cross_attn|mlp)$", lora_name
+    )
     return f"{m.group(1)}adaln_modulation_{m.group(2)}_2" if m else lora_name
 
 
@@ -314,26 +359,45 @@ def reassemble_comfyui_native_sd(
     consumed: set[str] = set()
     for lora in loras:
         name = lora.lora_name
-        native_prefix = "diffusion_model." + comfy_diffusion_stem(_comfy_module_name(name))
+        native_prefix = "diffusion_model." + comfy_diffusion_stem(
+            _comfy_module_name(name)
+        )
         spec = match_fused_spec(name)
         w0_full = lora.org_module_ref[0].weight.detach().to("cpu").to(torch.float)
         if spec is None:
             src = native_prefix
             if f"{src}.lokr_w1" in weights_sd:
-                for suffix in (".lokr_w1", ".lokr_w2_a", ".lokr_w2_b", ".alpha"):
-                    out[f"{name}{suffix}"] = weights_sd[f"{src}{suffix}"]
-                    consumed.add(f"{src}{suffix}")
-                if f"{src}.dora_scale" in weights_sd:
-                    w1 = weights_sd[f"{src}.lokr_w1"].to(torch.float)
-                    w2 = (
-                        weights_sd[f"{src}.lokr_w2_a"].to(torch.float)
-                        @ weights_sd[f"{src}.lokr_w2_b"].to(torch.float)
-                    )
-                    s = float(weights_sd[f"{src}.alpha"].item()) / weights_sd[f"{src}.lokr_w2_b"].shape[0]
-                    out[f"{name}.dora_scale"] = _inverse_dora_rescale(
-                        weights_sd[f"{src}.dora_scale"], w0_full, torch.kron(w1, w2) * s
-                    )
-                    consumed.add(f"{src}.dora_scale")
+                has_w2_full = f"{src}.lokr_w2" in weights_sd
+                if has_w2_full:
+                    for suffix in (".lokr_w1", ".lokr_w2", ".alpha"):
+                        out[f"{name}{suffix}"] = weights_sd[f"{src}{suffix}"]
+                        consumed.add(f"{src}{suffix}")
+                    if f"{src}.dora_scale" in weights_sd:
+                        w1 = weights_sd[f"{src}.lokr_w1"].to(torch.float)
+                        w2 = weights_sd[f"{src}.lokr_w2"].to(torch.float)
+                        out[f"{name}.dora_scale"] = _inverse_dora_rescale(
+                            weights_sd[f"{src}.dora_scale"], w0_full, torch.kron(w1, w2)
+                        )
+                        consumed.add(f"{src}.dora_scale")
+                else:
+                    for suffix in (".lokr_w1", ".lokr_w2_a", ".lokr_w2_b", ".alpha"):
+                        out[f"{name}{suffix}"] = weights_sd[f"{src}{suffix}"]
+                        consumed.add(f"{src}{suffix}")
+                    if f"{src}.dora_scale" in weights_sd:
+                        w1 = weights_sd[f"{src}.lokr_w1"].to(torch.float)
+                        w2 = weights_sd[f"{src}.lokr_w2_a"].to(
+                            torch.float
+                        ) @ weights_sd[f"{src}.lokr_w2_b"].to(torch.float)
+                        s = (
+                            float(weights_sd[f"{src}.alpha"].item())
+                            / weights_sd[f"{src}.lokr_w2_b"].shape[0]
+                        )
+                        out[f"{name}.dora_scale"] = _inverse_dora_rescale(
+                            weights_sd[f"{src}.dora_scale"],
+                            w0_full,
+                            torch.kron(w1, w2) * s,
+                        )
+                        consumed.add(f"{src}.dora_scale")
             elif f"{src}.lora_down.weight" in weights_sd:
                 for suffix in (".lora_down.weight", ".lora_up.weight", ".alpha"):
                     out[f"{name}{suffix}"] = weights_sd[f"{src}{suffix}"]
@@ -353,71 +417,142 @@ def reassemble_comfyui_native_sd(
         base = name.removesuffix(spec.fused_frag)
         comp_prefixes = [
             "diffusion_model."
-            + comfy_diffusion_stem(_comfy_module_name(f"{base}{spec.component_frag(letter)}"))
+            + comfy_diffusion_stem(
+                _comfy_module_name(f"{base}{spec.component_frag(letter)}")
+            )
             for letter in letters
         ]
         w1_native = [weights_sd.get(f"{p}.lokr_w1") for p in comp_prefixes]
+        w2_native = [weights_sd.get(f"{p}.lokr_w2") for p in comp_prefixes]
+        has_w2_full = all(w is not None for w in w2_native)
         w2_a_native = [weights_sd.get(f"{p}.lokr_w2_a") for p in comp_prefixes]
-        lokr_complete = all(w is not None for w in w1_native) and all(
-            w is not None for w in w2_a_native
+        has_w2_lr = all(w is not None for w in w2_a_native)
+        lokr_complete = all(w is not None for w in w1_native) and (
+            has_w2_full or has_w2_lr
         )
         if lokr_complete:
             a_rows = lora.lokr_w1.shape[0]
-            c = lora.lokr_w2_a.shape[0]
-            comp_dim = (a_rows * c) // n
-            all_case1 = all(w.shape[0] == c for w in w2_a_native)
-            all_case2 = all(w.shape[0] == 1 for w in w1_native) and all(
-                w.shape[0] < c for w in w2_a_native
-            )
-            if all_case1:
-                w1_fused = torch.cat([w.to(torch.float) for w in w1_native], dim=0)
-                w2_a_fused = w2_a_native[0]
-            elif all_case2:
-                w1_fused = w1_native[0].to(torch.float)
-                w2_a_fused = torch.cat([w.to(torch.float) for w in w2_a_native], dim=0)
-            else:
-                raise ValueError(
-                    f"{name}: native file uses per-component SVD or mixed split "
-                    "cases — cannot re-fuse losslessly; keep the legacy-format "
-                    "file for resume/merge"
+            if has_w2_full:
+                c = (
+                    lora.lokr_w2.shape[0]
+                    if hasattr(lora, "lokr_w2")
+                    else w2_native[0].shape[0]
                 )
-            if w1_fused.shape[0] != a_rows or w2_a_fused.shape[0] != c:
-                raise ValueError(
-                    f"{name}: re-fused shapes {tuple(w1_fused.shape)}/{tuple(w2_a_fused.shape)} "
-                    f"do not match the module {a_rows}/{c}"
+                comp_dim = (a_rows * c) // n
+                all_case1 = all(w.shape[0] == c for w in w2_native)
+                all_case2 = all(w.shape[0] == 1 for w in w1_native) and all(
+                    w.shape[0] < c for w in w2_native
                 )
-            out[f"{name}.lokr_w1"] = w1_fused
-            out[f"{name}.lokr_w2_a"] = w2_a_fused
-            out[f"{name}.lokr_w2_b"] = weights_sd[f"{comp_prefixes[0]}.lokr_w2_b"]
-            out[f"{name}.alpha"] = weights_sd[f"{comp_prefixes[0]}.alpha"]
-            for p in comp_prefixes:
-                for suffix in (".lokr_w1", ".lokr_w2_a", ".lokr_w2_b", ".alpha"):
-                    consumed.add(f"{p}{suffix}")
-            if f"{comp_prefixes[0]}.dora_scale" in weights_sd:
-                w2 = (
-                    w2_a_fused.to(torch.float) @ weights_sd[f"{comp_prefixes[0]}.lokr_w2_b"].to(torch.float)
-                )
-                s = float(weights_sd[f"{comp_prefixes[0]}.alpha"].item()) / weights_sd[f"{comp_prefixes[0]}.lokr_w2_b"].shape[0]
-                delta_full = torch.kron(w1_fused, w2) * s
-                m_chunks = []
-                for i, p in enumerate(comp_prefixes):
-                    sl = slice(i * comp_dim, (i + 1) * comp_dim)
-                    m_chunks.append(
-                        _inverse_dora_rescale(
-                            weights_sd[f"{p}.dora_scale"], w0_full[sl], delta_full[sl]
-                        )
+                if all_case1:
+                    w1_fused = torch.cat([w.to(torch.float) for w in w1_native], dim=0)
+                    w2_fused = w2_native[0]
+                elif all_case2:
+                    w1_fused = w1_native[0].to(torch.float)
+                    w2_fused = torch.cat([w.to(torch.float) for w in w2_native], dim=0)
+                else:
+                    raise ValueError(
+                        f"{name}: native file uses per-component SVD or mixed split "
+                        "cases — cannot re-fuse losslessly; keep the legacy-format "
+                        "file for resume/merge"
                     )
-                    consumed.add(f"{p}.dora_scale")
-                out[f"{name}.dora_scale"] = torch.cat(m_chunks, dim=0)
+                if w1_fused.shape[0] != a_rows or w2_fused.shape[0] != c:
+                    raise ValueError(
+                        f"{name}: re-fused shapes {tuple(w1_fused.shape)}/{tuple(w2_fused.shape)} "
+                        f"do not match the module {a_rows}/{c}"
+                    )
+                out[f"{name}.lokr_w1"] = w1_fused
+                out[f"{name}.lokr_w2"] = w2_fused
+                out[f"{name}.alpha"] = weights_sd[f"{comp_prefixes[0]}.alpha"]
+                for p in comp_prefixes:
+                    for suffix in (".lokr_w1", ".lokr_w2", ".alpha"):
+                        consumed.add(f"{p}{suffix}")
+                if f"{comp_prefixes[0]}.dora_scale" in weights_sd:
+                    delta_full = torch.kron(w1_fused, w2_fused.to(torch.float))
+                    m_chunks = []
+                    for i, p in enumerate(comp_prefixes):
+                        sl = slice(i * comp_dim, (i + 1) * comp_dim)
+                        m_chunks.append(
+                            _inverse_dora_rescale(
+                                weights_sd[f"{p}.dora_scale"],
+                                w0_full[sl],
+                                delta_full[sl],
+                            )
+                        )
+                        consumed.add(f"{p}.dora_scale")
+                    out[f"{name}.dora_scale"] = torch.cat(m_chunks, dim=0)
+            else:
+                c = (
+                    lora.lokr_w2_a.shape[0]
+                    if hasattr(lora, "lokr_w2_a")
+                    else w2_a_native[0].shape[0]
+                )
+                comp_dim = (a_rows * c) // n
+                all_case1 = all(w.shape[0] == c for w in w2_a_native)
+                all_case2 = all(w.shape[0] == 1 for w in w1_native) and all(
+                    w.shape[0] < c for w in w2_a_native
+                )
+                if all_case1:
+                    w1_fused = torch.cat([w.to(torch.float) for w in w1_native], dim=0)
+                    w2_a_fused = w2_a_native[0]
+                elif all_case2:
+                    w1_fused = w1_native[0].to(torch.float)
+                    w2_a_fused = torch.cat(
+                        [w.to(torch.float) for w in w2_a_native], dim=0
+                    )
+                else:
+                    raise ValueError(
+                        f"{name}: native file uses per-component SVD or mixed split "
+                        "cases — cannot re-fuse losslessly; keep the legacy-format "
+                        "file for resume/merge"
+                    )
+                if w1_fused.shape[0] != a_rows or w2_a_fused.shape[0] != c:
+                    raise ValueError(
+                        f"{name}: re-fused shapes {tuple(w1_fused.shape)}/{tuple(w2_a_fused.shape)} "
+                        f"do not match the module {a_rows}/{c}"
+                    )
+                out[f"{name}.lokr_w1"] = w1_fused
+                out[f"{name}.lokr_w2_a"] = w2_a_fused
+                out[f"{name}.lokr_w2_b"] = weights_sd[f"{comp_prefixes[0]}.lokr_w2_b"]
+                out[f"{name}.alpha"] = weights_sd[f"{comp_prefixes[0]}.alpha"]
+                for p in comp_prefixes:
+                    for suffix in (".lokr_w1", ".lokr_w2_a", ".lokr_w2_b", ".alpha"):
+                        consumed.add(f"{p}{suffix}")
+                if f"{comp_prefixes[0]}.dora_scale" in weights_sd:
+                    w2 = w2_a_fused.to(torch.float) @ weights_sd[
+                        f"{comp_prefixes[0]}.lokr_w2_b"
+                    ].to(torch.float)
+                    s = (
+                        float(weights_sd[f"{comp_prefixes[0]}.alpha"].item())
+                        / weights_sd[f"{comp_prefixes[0]}.lokr_w2_b"].shape[0]
+                    )
+                    delta_full = torch.kron(w1_fused, w2) * s
+                    m_chunks = []
+                    for i, p in enumerate(comp_prefixes):
+                        sl = slice(i * comp_dim, (i + 1) * comp_dim)
+                        m_chunks.append(
+                            _inverse_dora_rescale(
+                                weights_sd[f"{p}.dora_scale"],
+                                w0_full[sl],
+                                delta_full[sl],
+                            )
+                        )
+                        consumed.add(f"{p}.dora_scale")
+                    out[f"{name}.dora_scale"] = torch.cat(m_chunks, dim=0)
         if lokr_complete:
             continue
 
         # plain fused module: q/k/v (or k/v) lora_down/up components
         down_native = [weights_sd.get(f"{p}.lora_down.weight") for p in comp_prefixes]
         up_native = [weights_sd.get(f"{p}.lora_up.weight") for p in comp_prefixes]
-        if not (all(w is not None for w in down_native) and all(w is not None for w in up_native)):
+        if not (
+            all(w is not None for w in down_native)
+            and all(w is not None for w in up_native)
+        ):
             touched = any(
-                any(f"{p}{suffix}" in weights_sd for suffix in (".lokr_w1", ".lora_A.weight", ".lora_down.weight"))
+                any(
+                    f"{p}{suffix}" in weights_sd
+                    for suffix in (".lokr_w1", ".lora_A.weight", ".lora_down.weight")
+                )
                 for p in comp_prefixes
             )
             if touched:
@@ -452,13 +587,14 @@ def reassemble_comfyui_native_sd(
                 consumed.add(f"{p}.dora_scale")
             out[f"{name}.dora_scale"] = torch.cat(m_chunks, dim=0)
 
-    leftover = [k for k in weights_sd if k.startswith("diffusion_model.") and k not in consumed]
+    leftover = [
+        k for k in weights_sd if k.startswith("diffusion_model.") and k not in consumed
+    ]
     if leftover:
         logger.warning(
             f"native reassembly left {len(leftover)} unconsumed keys, e.g. {leftover[:3]}"
         )
     return out
-
 
 
 def save_network_weights(
@@ -542,7 +678,11 @@ def export_comfyui_sidecar(
     """
     import os
 
-    if os.environ.get("ANIMA_COMFYUI_EXPORT", "").strip().lower() in ("0", "false", "off"):
+    if os.environ.get("ANIMA_COMFYUI_EXPORT", "").strip().lower() in (
+        "0",
+        "false",
+        "off",
+    ):
         return None
 
     sidecar = os.path.splitext(lora_file)[0] + "_comfyui.safetensors"

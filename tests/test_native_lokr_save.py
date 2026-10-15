@@ -41,17 +41,31 @@ def _base_weights():
 def _fused_sd(case: str):
     g = torch.Generator().manual_seed(5)
     if case == "case1":  # comp_dim % c == 0 → w1 row-block split, w2 shared
-        w1, w2_a, w2_b = torch.randn(6, 2, generator=g), torch.randn(4, 2, generator=g), torch.randn(2, 4, generator=g)
+        w1, w2_a, w2_b = (
+            torch.randn(6, 2, generator=g),
+            torch.randn(4, 2, generator=g),
+            torch.randn(2, 4, generator=g),
+        )
     elif case == "case2":  # factor=0 degenerate: w1 1×1, components inside one w1 row
-        w1, w2_a, w2_b = torch.randn(1, 1, generator=g), torch.randn(24, 3, generator=g), torch.randn(3, 8, generator=g)
+        w1, w2_a, w2_b = (
+            torch.randn(1, 1, generator=g),
+            torch.randn(24, 3, generator=g),
+            torch.randn(3, 8, generator=g),
+        )
     else:  # case3: a=2 → middle component spans two w1 rows → SVD fallback
-        w1, w2_a, w2_b = torch.randn(2, 2, generator=g), torch.randn(12, 2, generator=g), torch.randn(2, 4, generator=g)
+        w1, w2_a, w2_b = (
+            torch.randn(2, 2, generator=g),
+            torch.randn(12, 2, generator=g),
+            torch.randn(2, 4, generator=g),
+        )
     return {
         f"{FUSED}.lokr_w1": w1.to(torch.bfloat16),
         f"{FUSED}.lokr_w2_a": w2_a.to(torch.bfloat16),
         f"{FUSED}.lokr_w2_b": w2_b.to(torch.bfloat16),
         f"{FUSED}.alpha": torch.tensor(4.0),
-        f"{FUSED}.dora_scale": (torch.randn(24, generator=g).abs() + 0.5).to(torch.bfloat16),
+        f"{FUSED}.dora_scale": (torch.randn(24, generator=g).abs() + 0.5).to(
+            torch.bfloat16
+        ),
     }
 
 
@@ -60,7 +74,9 @@ def _plain_sd(g):
         f"{PLAIN}.lora_down.weight": torch.randn(2, 8, generator=g).to(torch.bfloat16),
         f"{PLAIN}.lora_up.weight": torch.randn(8, 2, generator=g).to(torch.bfloat16),
         f"{PLAIN}.alpha": torch.tensor(4.0),
-        f"{PLAIN}.dora_scale": (torch.randn(8, generator=g).abs() + 0.5).to(torch.bfloat16),
+        f"{PLAIN}.dora_scale": (torch.randn(8, generator=g).abs() + 0.5).to(
+            torch.bfloat16
+        ),
     }
 
 
@@ -68,7 +84,9 @@ def _factors(native, letter):
     p = f"diffusion_model.blocks.0.self_attn.{letter}_proj"
     if f"{p}.lokr_w1" in native:
         w1 = native[f"{p}.lokr_w1"].to(torch.float)
-        w2 = native[f"{p}.lokr_w2_a"].to(torch.float) @ native[f"{p}.lokr_w2_b"].to(torch.float)
+        w2 = native[f"{p}.lokr_w2_a"].to(torch.float) @ native[f"{p}.lokr_w2_b"].to(
+            torch.float
+        )
         s = float(native[f"{p}.alpha"].item()) / native[f"{p}.lokr_w2_b"].shape[0]
         return p, torch.kron(w1, w2) * s
     a_down = native[f"{p}.lora_A.weight"].to(torch.float)
@@ -77,14 +95,19 @@ def _factors(native, letter):
     return p, (b_up @ a_down) * s
 
 
-def _assert_comfy_parity(native, base_weights, fused_w1, fused_w2_a, fused_w2_b, m_fused, tol):
+def _assert_comfy_parity(
+    native, base_weights, fused_w1, fused_w2_a, fused_w2_b, m_fused, tol
+):
     """ComfyUI math from the emitted file == training semantics from the inputs."""
     w0_full = base_weights[FUSED].to(torch.float)
     w1 = fused_w1.to(torch.float)
     w2 = fused_w2_a.to(torch.float) @ fused_w2_b.to(torch.float)
     s = 4.0 / fused_w2_b.shape[0]
     v_full = w0_full + s * torch.kron(w1, w2)
-    w_train_full = (m_fused.to(torch.float).unsqueeze(1) / v_full.norm(p=2, dim=1, keepdim=True).clamp_min(1e-12)) * v_full
+    w_train_full = (
+        m_fused.to(torch.float).unsqueeze(1)
+        / v_full.norm(p=2, dim=1, keepdim=True).clamp_min(1e-12)
+    ) * v_full
     comp_dim = w0_full.shape[0] // 3
     for i, letter in enumerate(LETTERS):
         sl = slice(i * comp_dim, (i + 1) * comp_dim)
@@ -97,7 +120,9 @@ def _assert_comfy_parity(native, base_weights, fused_w1, fused_w2_a, fused_w2_b,
         assert err < tol, f"{p}: ComfyUI-vs-training error {err:.5f} (tol {tol})"
 
 
-@pytest.mark.parametrize("case,tol", [("case1", 1e-5), ("case2", 1e-5), ("case3", 0.05)])
+@pytest.mark.parametrize(
+    "case,tol", [("case1", 1e-5), ("case2", 1e-5), ("case3", 0.05)]
+)
 def test_native_save_and_comfy_parity(case, tol):
     g = torch.Generator().manual_seed(3)
     base_weights = _base_weights()
@@ -131,9 +156,13 @@ def test_native_save_and_comfy_parity(case, tol):
             p, delta = _factors(native, letter)
             # case1/2 keep alpha (consumer scale == training scale)
             sl = slice(i * comp_dim, (i + 1) * comp_dim)
-            assert torch.allclose(delta, kron_full[sl] * (4.0 / fused_w2_b.shape[0]), rtol=1e-4, atol=1e-4), p
+            assert torch.allclose(
+                delta, kron_full[sl] * (4.0 / fused_w2_b.shape[0]), rtol=1e-4, atol=1e-4
+            ), p
 
-    _assert_comfy_parity(native, base_weights, fused_w1, fused_w2_a, fused_w2_b, m_fused, tol)
+    _assert_comfy_parity(
+        native, base_weights, fused_w1, fused_w2_a, fused_w2_b, m_fused, tol
+    )
 
 
 @pytest.mark.parametrize("case", ["case1", "case2"])
@@ -154,28 +183,43 @@ def test_reassembly_roundtrip(case):
         )
 
     loras = [
-        fake_lora(FUSED, base_weights[FUSED], (6, 2) if case == "case1" else (1, 1), (4, 2) if case == "case1" else (24, 3)),
+        fake_lora(
+            FUSED,
+            base_weights[FUSED],
+            (6, 2) if case == "case1" else (1, 1),
+            (4, 2) if case == "case1" else (24, 3),
+        ),
         fake_lora(PLAIN, base_weights[PLAIN]),
     ]
     back = reassemble_comfyui_native_sd(native, loras)
 
     assert f"{FUSED}.lokr_w1" in back and f"{PLAIN}.lora_down.weight" in back
     assert torch.allclose(
-        back[f"{FUSED}.lokr_w1"].to(torch.float), original[f"{FUSED}.lokr_w1"].to(torch.float), rtol=1e-4, atol=1e-4
+        back[f"{FUSED}.lokr_w1"].to(torch.float),
+        original[f"{FUSED}.lokr_w1"].to(torch.float),
+        rtol=1e-4,
+        atol=1e-4,
     )
     assert torch.allclose(
-        back[f"{FUSED}.lokr_w2_a"].to(torch.float), original[f"{FUSED}.lokr_w2_a"].to(torch.float), rtol=1e-4, atol=1e-4
+        back[f"{FUSED}.lokr_w2_a"].to(torch.float),
+        original[f"{FUSED}.lokr_w2_a"].to(torch.float),
+        rtol=1e-4,
+        atol=1e-4,
     )
     assert back[f"{FUSED}.lokr_w2_b"].shape == original[f"{FUSED}.lokr_w2_b"].shape
     m_err = (
-        (back[f"{FUSED}.dora_scale"].to(torch.float) - original[f"{FUSED}.dora_scale"].to(torch.float))
-        .norm()
+        (
+            back[f"{FUSED}.dora_scale"].to(torch.float)
+            - original[f"{FUSED}.dora_scale"].to(torch.float)
+        ).norm()
         / original[f"{FUSED}.dora_scale"].to(torch.float).norm()
     ).item()
     assert m_err < 1e-4, f"magnitude roundtrip error {m_err}"
     pm_err = (
-        (back[f"{PLAIN}.dora_scale"].to(torch.float) - original[f"{PLAIN}.dora_scale"].to(torch.float))
-        .norm()
+        (
+            back[f"{PLAIN}.dora_scale"].to(torch.float)
+            - original[f"{PLAIN}.dora_scale"].to(torch.float)
+        ).norm()
         / original[f"{PLAIN}.dora_scale"].to(torch.float).norm()
     ).item()
     assert pm_err < 1e-4, f"plain magnitude roundtrip error {pm_err}"
@@ -185,7 +229,9 @@ def test_reassembly_refuses_svd_components():
     base_weights = _base_weights()
     original = _fused_sd("case3")
     native, _ = build_standard_state_dict(dict(original), None, None, base_weights)
-    assert any("lora_A.weight" in k for k in native), "middle component should fall back to SVD"
+    assert any("lora_A.weight" in k for k in native), (
+        "middle component should fall back to SVD"
+    )
 
     lora = SimpleNamespace(
         lora_name=FUSED,
@@ -199,5 +245,70 @@ def test_reassembly_refuses_svd_components():
 
 def test_sidecar_gate_skips_native(tmp_path):
     p = tmp_path / "native.safetensors"
-    save_file({"diffusion_model.blocks.0.self_attn.q_proj.lokr_w1": torch.zeros(1, 1).to(torch.bfloat16)}, str(p))
+    save_file(
+        {
+            "diffusion_model.blocks.0.self_attn.q_proj.lokr_w1": torch.zeros(1, 1).to(
+                torch.bfloat16
+            )
+        },
+        str(p),
+    )
     assert export_comfyui_sidecar(str(p), str(tmp_path / "dit.safetensors")) is None
+
+
+def test_native_save_and_reassemble_full_w2():
+    g = torch.Generator().manual_seed(9)
+    base_weights = _base_weights()
+    w1 = torch.randn(6, 2, generator=g).to(torch.bfloat16)
+    w2 = torch.randn(4, 4, generator=g).to(torch.bfloat16)
+    m = (torch.randn(24, generator=g).abs() + 0.5).to(torch.bfloat16)
+    original = {
+        f"{FUSED}.lokr_w1": w1,
+        f"{FUSED}.lokr_w2": w2,
+        f"{FUSED}.alpha": torch.tensor(4.0),
+        f"{FUSED}.dora_scale": m,
+    }
+    original.update(_plain_sd(g))
+    native, meta = build_standard_state_dict(dict(original), None, None, base_weights)
+    assert meta is not None and "ss_export_note" in meta
+    for letter in LETTERS:
+        p = f"diffusion_model.blocks.0.self_attn.{letter}_proj"
+        assert f"{p}.lokr_w1" in native
+        assert f"{p}.lokr_w2" in native
+        assert f"{p}.dora_scale" in native
+
+    def fake_lora(name, w0, w1_shape=None, w2_shape=None):
+        extra = {}
+        if w1_shape is not None:
+            extra["lokr_w1"] = torch.zeros(*w1_shape)
+            extra["lokr_w2"] = torch.zeros(*w2_shape)
+        return SimpleNamespace(
+            lora_name=name, org_module_ref=(SimpleNamespace(weight=w0),), **extra
+        )
+
+    loras = [
+        fake_lora(FUSED, base_weights[FUSED], (6, 2), (4, 8)),
+        fake_lora(PLAIN, base_weights[PLAIN]),
+    ]
+    back = reassemble_comfyui_native_sd(native, loras)
+    assert f"{FUSED}.lokr_w1" in back and f"{FUSED}.lokr_w2" in back
+    assert torch.allclose(
+        back[f"{FUSED}.lokr_w1"].to(torch.float),
+        original[f"{FUSED}.lokr_w1"].to(torch.float),
+        rtol=1e-4,
+        atol=1e-4,
+    )
+    assert torch.allclose(
+        back[f"{FUSED}.lokr_w2"].to(torch.float),
+        original[f"{FUSED}.lokr_w2"].to(torch.float),
+        rtol=1e-4,
+        atol=1e-4,
+    )
+    m_err = (
+        (
+            back[f"{FUSED}.dora_scale"].to(torch.float)
+            - original[f"{FUSED}.dora_scale"].to(torch.float)
+        ).norm()
+        / original[f"{FUSED}.dora_scale"].to(torch.float).norm()
+    ).item()
+    assert m_err < 1e-4, f"magnitude roundtrip error {m_err}"

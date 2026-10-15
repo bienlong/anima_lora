@@ -105,7 +105,10 @@ def base_weight(dit: safe_open, dstem: str, fused: str) -> torch.Tensor:
             _FUSED_SEG[fused],
             ("self_attn.{c}_proj" if fused == "qkv" else "cross_attn.{c}_proj"),
         )
-        return torch.cat([dit.get_tensor(f"net.{tpl.format(c=c)}.weight").float() for c in parts], dim=0)
+        return torch.cat(
+            [dit.get_tensor(f"net.{tpl.format(c=c)}.weight").float() for c in parts],
+            dim=0,
+        )
     except SafetensorError as exc:
         raise ValueError(
             f"底模里找不到键 {exc.args[0]!r}——请确认 --dit 指向 anima 底模本体"
@@ -113,11 +116,15 @@ def base_weight(dit: safe_open, dstem: str, fused: str) -> torch.Tensor:
         ) from exc
 
 
-def convert(lora_path: str, dit_path: str, out_path: str, max_svd_rank: int = 64) -> dict:
+def convert(
+    lora_path: str, dit_path: str, out_path: str, max_svd_rank: int = 64
+) -> dict:
     lora = safe_open(lora_path, framework="pt", device="cpu")
     dit = safe_open(dit_path, framework="pt", device="cpu")
 
-    mods = sorted(set(k.rsplit(".", 1)[0] for k in lora.keys() if k.endswith(".lokr_w1")))
+    mods = sorted(
+        set(k.rsplit(".", 1)[0] for k in lora.keys() if k.endswith(".lokr_w1"))
+    )
     if not mods:
         raise ValueError(
             "文件里没有 lokr_w1 键——本工具只支持 LoKr/DoKr 成丹；"
@@ -129,25 +136,40 @@ def convert(lora_path: str, dit_path: str, out_path: str, max_svd_rank: int = 64
     lora_keys = set(lora.keys())
 
     for mod in mods:
-        for key in (f"{mod}.lokr_w2_a", f"{mod}.lokr_w2_b", f"{mod}.alpha"):
+        has_full_w2 = f"{mod}.lokr_w2" in lora_keys
+        if has_full_w2:
+            req_keys = (f"{mod}.lokr_w2", f"{mod}.alpha")
+        else:
+            req_keys = (f"{mod}.lokr_w2_a", f"{mod}.lokr_w2_b", f"{mod}.alpha")
+        for key in req_keys:
             if key not in lora_keys:
-                raise ValueError(f"模块 {mod} 缺少 {key.rsplit('.', 1)[1]}——不是本丹炉保存的 LoKr/DoKr 文件")
+                raise ValueError(
+                    f"模块 {mod} 缺少 {key.rsplit('.', 1)[1]}——不是本丹炉保存的 LoKr/DoKr 文件"
+                )
         short = mod.replace("lora_unet_", "")
         fused = fused_kind(short)
         dstem = dotted(short)
         W0_full = base_weight(dit, dstem, fused)
 
         w1 = lora.get_tensor(f"{mod}.lokr_w1").float()
-        w2_a = lora.get_tensor(f"{mod}.lokr_w2_a")
-        w2_b = lora.get_tensor(f"{mod}.lokr_w2_b")
-        w2 = w2_a.float() @ w2_b.float()
         alpha_t = lora.get_tensor(f"{mod}.alpha")
-        scale = alpha_t.item() / w2_b.shape[0]
+        if has_full_w2:
+            w2 = lora.get_tensor(f"{mod}.lokr_w2").float()
+            scale = 1.0
+            w2_a = None
+            w2_b = None
+        else:
+            w2_a = lora.get_tensor(f"{mod}.lokr_w2_a")
+            w2_b = lora.get_tensor(f"{mod}.lokr_w2_b")
+            w2 = w2_a.float() @ w2_b.float()
+            scale = alpha_t.item() / w2_b.shape[0]
         has_dora = f"{mod}.dora_scale" in lora_keys
         m = lora.get_tensor(f"{mod}.dora_scale").float() if has_dora else None
         delta = torch.kron(w1, w2)
         if delta.shape != W0_full.shape:
-            raise ValueError(f"{mod}: kron 增量 {tuple(delta.shape)} 与底模权重 {tuple(W0_full.shape)} 不匹配")
+            raise ValueError(
+                f"{mod}: kron 增量 {tuple(delta.shape)} 与底模权重 {tuple(W0_full.shape)} 不匹配"
+            )
         V = W0_full + scale * delta
         normV = V.norm(p=2, dim=1, keepdim=True).clamp_min(1e-12)
         W_train = V if m is None else (m.unsqueeze(1) / normV) * V
@@ -169,14 +191,20 @@ def convert(lora_path: str, dit_path: str, out_path: str, max_svd_rank: int = 64
                     rows = comp_dim // out_k
                     w1_c = w1[i * rows : (i + 1) * rows, :]
                 out_sd[f"{pre}.lokr_w1"] = w1_c.contiguous().to(torch.bfloat16)
-                out_sd[f"{pre}.lokr_w2_a"] = w2_a.clone()
-                out_sd[f"{pre}.lokr_w2_b"] = w2_b.clone()
+                if has_full_w2:
+                    out_sd[f"{pre}.lokr_w2"] = w2.clone().to(torch.bfloat16)
+                else:
+                    out_sd[f"{pre}.lokr_w2_a"] = w2_a.clone()
+                    out_sd[f"{pre}.lokr_w2_b"] = w2_b.clone()
                 out_sd[f"{pre}.alpha"] = alpha_t.clone()
             else:
                 delta_c = (scale * delta)[sl, :]
                 U, S, Vh = torch.linalg.svd(delta_c, full_matrices=False)
                 energy = (S**2).cumsum(0) / (S**2).sum()
-                r = min(int(torch.searchsorted(energy, torch.tensor(0.999)).item()) + 1, max_svd_rank)
+                r = min(
+                    int(torch.searchsorted(energy, torch.tensor(0.999)).item()) + 1,
+                    max_svd_rank,
+                )
                 sqrtS = S[:r].sqrt()
                 down = (Vh[:r, :] * sqrtS.unsqueeze(1)).contiguous()
                 up = (U[:, :r] * sqrtS.unsqueeze(0)).contiguous()
@@ -195,24 +223,39 @@ def convert(lora_path: str, dit_path: str, out_path: str, max_svd_rank: int = 64
                 m_fix = (m_c.unsqueeze(1) * normW0 / normV_c).squeeze(1)
                 # LyCORIS disk convention: 2-D [out, 1]; a 1-D vector broadcasts
                 # into [out, out] inside ComfyUI's weight_decompose.
-                out_sd[f"{pre}.dora_scale"] = m_fix.unsqueeze(1).contiguous().to(torch.bfloat16)
+                out_sd[f"{pre}.dora_scale"] = (
+                    m_fix.unsqueeze(1).contiguous().to(torch.bfloat16)
+                )
 
             # 误差报告从落盘（bf16 量化后）的张量反算 ComfyUI 会算出的结果，
             # 衡量的是文件最终保真度而非中间量。
             if f"{pre}.lokr_w1" in out_sd:
                 w1_s = out_sd[f"{pre}.lokr_w1"].float()
-                w2_s = out_sd[f"{pre}.lokr_w2_a"].float() @ out_sd[f"{pre}.lokr_w2_b"].float()
-                alpha_s = float(out_sd[f"{pre}.alpha"].item())
-                delta_s = torch.kron(w1_s, w2_s) * (alpha_s / out_sd[f"{pre}.lokr_w2_b"].shape[0])
+                if has_full_w2:
+                    w2_s = out_sd[f"{pre}.lokr_w2"].float()
+                    delta_s = torch.kron(w1_s, w2_s)
+                else:
+                    w2_s = (
+                        out_sd[f"{pre}.lokr_w2_a"].float()
+                        @ out_sd[f"{pre}.lokr_w2_b"].float()
+                    )
+                    alpha_s = float(out_sd[f"{pre}.alpha"].item())
+                    delta_s = torch.kron(w1_s, w2_s) * (
+                        alpha_s / out_sd[f"{pre}.lokr_w2_b"].shape[0]
+                    )
             else:
                 a_s = out_sd[f"{pre}.lora_A.weight"].float()
                 b_s = out_sd[f"{pre}.lora_B.weight"].float()
-                delta_s = (b_s @ a_s) * (float(out_sd[f"{pre}.alpha"].item()) / a_s.shape[0])
+                delta_s = (b_s @ a_s) * (
+                    float(out_sd[f"{pre}.alpha"].item()) / a_s.shape[0]
+                )
             if m is None:
                 W_comfy = W0_c + delta_s
             else:
                 d_s = out_sd[f"{pre}.dora_scale"].float()
-                weight_norm = W0_c.norm(p=2, dim=1, keepdim=True) + torch.finfo(torch.float32).eps
+                weight_norm = (
+                    W0_c.norm(p=2, dim=1, keepdim=True) + torch.finfo(torch.float32).eps
+                )
                 W_comfy = (W0_c + delta_s) * (d_s / weight_norm)
             err = ((W_comfy - Wt).norm() / W0_c.norm()).item()
             errors.append((err, f"{short}{('.' + comp) if comp else ''}"))
@@ -241,21 +284,42 @@ def convert(lora_path: str, dit_path: str, out_path: str, max_svd_rank: int = 64
 def main(argv: list[str] | None = None) -> None:
     if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    parser = argparse.ArgumentParser(description="把本丹炉的 LoKr/DoKr 成丹转成 ComfyUI 原生格式")
-    parser.add_argument("--lora", required=True, help="训练产出的 LoKr/DoKr safetensors 路径")
-    parser.add_argument("--dit", default=None, help="anima 底模路径（缺省读 configs/base.toml）")
-    parser.add_argument("--out", default=None, help="输出路径（缺省 <lora>_comfyui.safetensors）")
-    parser.add_argument("--max_svd_rank", type=int, default=64, help="qkv 不可整除时 SVD 近似的最大秩（默认 64）")
+    parser = argparse.ArgumentParser(
+        description="把本丹炉的 LoKr/DoKr 成丹转成 ComfyUI 原生格式"
+    )
+    parser.add_argument(
+        "--lora", required=True, help="训练产出的 LoKr/DoKr safetensors 路径"
+    )
+    parser.add_argument(
+        "--dit", default=None, help="anima 底模路径（缺省读 configs/base.toml）"
+    )
+    parser.add_argument(
+        "--out", default=None, help="输出路径（缺省 <lora>_comfyui.safetensors）"
+    )
+    parser.add_argument(
+        "--max_svd_rank",
+        type=int,
+        default=64,
+        help="qkv 不可整除时 SVD 近似的最大秩（默认 64）",
+    )
     args = parser.parse_args(argv)
 
     dit_path = args.dit or default_dit_path()
-    out_path = args.out or str(Path(args.lora).with_name(Path(args.lora).stem + "_comfyui.safetensors"))
+    out_path = args.out or str(
+        Path(args.lora).with_name(Path(args.lora).stem + "_comfyui.safetensors")
+    )
     stats = convert(args.lora, dit_path, out_path, args.max_svd_rank)
 
     size_mb = Path(stats["out_path"]).stat().st_size / 1e6
-    print(f"已写出: {stats['out_path']}  {size_mb:.1f} MB  {stats['tensors']} 键 / {stats['modules']} 模块")
-    print(f"误差报告（ComfyUI 数学 vs 训练语义）: 中位 {stats['median_err']:.5f}  最差 {stats['worst_err']:.4f} ({stats['worst_name']})")
-    print(f"超 2% 模块数: {stats['over_2pct']}/{stats['modules']}  ——  为 0 即可放心在 ComfyUI 使用")
+    print(
+        f"已写出: {stats['out_path']}  {size_mb:.1f} MB  {stats['tensors']} 键 / {stats['modules']} 模块"
+    )
+    print(
+        f"误差报告（ComfyUI 数学 vs 训练语义）: 中位 {stats['median_err']:.5f}  最差 {stats['worst_err']:.4f} ({stats['worst_name']})"
+    )
+    print(
+        f"超 2% 模块数: {stats['over_2pct']}/{stats['modules']}  ——  为 0 即可放心在 ComfyUI 使用"
+    )
 
 
 if __name__ == "__main__":
